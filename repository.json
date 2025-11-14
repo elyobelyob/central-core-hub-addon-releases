@@ -1,0 +1,1 @@
+{ "name": "Central Core Hub Releases", "url": "https://github.com/elyobelyob/central-core-hub-addon-releases", "maintainer": "Central Core <support@central-core.com>", "version": "0.0.0", "addons": [ "central-core-hub" ] }
