@@ -1,0 +1,6 @@
+build_from:
+  amd64: alpine:3.18
+  aarch64: alpine:3.18
+  armv7: arm32v7/alpine:3.18
+args: {}
+labels: {}
