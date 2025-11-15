@@ -14,6 +14,8 @@ Notes:
 Current configuration in this repository:
 - `version`: `1.0.0`
 - `image`: `ghcr.io/elyobelyob/central-core-hub:1.0.0`
+- `version`: `1.0.1`
+- `image`: `ghcr.io/elyobelyob/central-core-hub:1.0.1`
 
 Publishing & testing steps (recommended):
 1. Build and push your Docker image with the `1.0.0` tag:
@@ -38,6 +40,15 @@ CI / Auto-build (GitHub Actions):
 
 - This repository includes a workflow: `.github/workflows/release.yml`.
 - Push a git tag (for example `1.0.0`) to trigger the workflow which will build multi-arch images and push them to `ghcr.io/elyobelyob/central-core-hub:<tag>` and `:latest`.
+
+HAOS reliability notes
+
+- `init: true` is enabled so the container runs with proper init handling.
+- `stage: stable` and `timeout: 30` are set in the add-on config to help Supervisor manage lifecycle.
+- `ports` and `watchdog` are provided (web UI assumed on port `8080`) — Supervisor will use the `watchdog` URL to validate add-on health.
+- The Docker image includes `io.hass.*` labels (build-time) to improve Supervisor compatibility.
+
+If you want HAOS to build the add-on locally instead of pulling from GHCR, Supervisor will use `Dockerfile` and `build.yaml` from the add-on folder. Building on the Pi can be slow; pushing prebuilt images to GHCR is faster for users.
 
 Example (create annotated tag and push):
 
