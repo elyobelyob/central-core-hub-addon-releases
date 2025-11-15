@@ -1,0 +1,17 @@
+name: "Central Core Hub"
+version: "1.0.0"
+slug: "central-core-hub"
+description: "Central Core Hub Add-on"
+arch:
+  - amd64
+  - armv7
+  - aarch64
+startup: services
+boot: auto
+auto_uart: false
+image: ghcr.io/elyobelyob/central-core-hub:1.0.0
+url: https://github.com/elyobelyob/central-core-hub-addon-releases/tree/main/central-core-hub
+webui: "[PROTO:http]://[HOST]:[PORT:8080]"
+options: {}
+schema: {}
+host_network: true
