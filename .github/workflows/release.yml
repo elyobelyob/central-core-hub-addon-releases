@@ -42,4 +42,4 @@ jobs:
             ghcr.io/elyobelyob/central-core-hub:${{ github.ref_name }}
             ghcr.io/elyobelyob/central-core-hub:latest
           file: central-core-hub/Dockerfile
-          context: .
+          context: central-core-hub
