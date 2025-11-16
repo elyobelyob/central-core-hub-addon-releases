@@ -13,7 +13,6 @@ startup: services
 boot: auto
 stage: stable
 timeout: 30
-image: ghcr.io/elyobelyob/central-core-hub:1.0.8
 ports:
   "8000/tcp": 8000
 options:
