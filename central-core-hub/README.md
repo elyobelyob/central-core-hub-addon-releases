@@ -3,27 +3,55 @@
 This repository folder contains the Home Assistant Supervisor add-on for Central Core Hub.
 
 Installation (from Supervisor add-on store):
-- Add this repository URL to your Home Assistant Add-on store: `https://github.com/elyobelyob/central-core-hub-addon-releases`
-- Install the `Central Core Hub` add-on.
 
 Notes:
-- This add-on pulls the image `ghcr.io/elyobelyob/central-core-hub:latest`.
-- The add-on `version` field is set to `latest` to match the image tag.
-- If you publish releases/tags for the image, update the `version` field to match the image tag.
-
-Current configuration in this repository:
-- `version`: `1.0.0`
-- `image`: `ghcr.io/elyobelyob/central-core-hub:1.0.0`
-- `version`: `1.0.1`
-- `image`: `ghcr.io/elyobelyob/central-core-hub:1.0.1`
-
-Publishing & testing steps (recommended):
-1. Build and push your Docker image with the `1.0.0` tag:
-
-```bash
-# build locally (example)
 docker build -t ghcr.io/elyobelyob/central-core-hub:1.0.0 .
-docker push ghcr.io/elyobelyob/central-core-hub:1.0.0
+# Central Core Hub Home Assistant Add-on
+
+This folder contains the Home Assistant Supervisor add-on for Central Core Hub, designed for reliable use on Home Assistant OS (HAOS) and other Supervisor-based installations.
+
+## Features
+- Prebuilt multi-arch Docker image (GHCR)
+- Supervisor build support (`Dockerfile` + `build.yaml`)
+- Host networking, minimal permissions
+- CI/CD for automated builds and releases
+
+## Installation (HAOS/Supervisor)
+1. **Add this repository to your Add-on Store:**
+	 - Go to Home Assistant UI → Supervisor → Add-on Store
+	 - Click the three dots (top right) → Repositories
+	 - Add:
+		 ```
+		 https://github.com/elyobelyob/central-core-hub-addon-releases
+		 ```
+	 - Click Add, then Refresh
+2. **Install the add-on:**
+	 - Find "Central Core Hub" in the Add-on Store
+	 - Click Install, then Start
+	 - Check Logs for successful startup
+
+## Build & CI
+- Prebuilt images are published to: `ghcr.io/elyobelyob/central-core-hub:<tag>`
+- To trigger a new build, push a new git tag (e.g. `1.0.1`). GitHub Actions will build and push multi-arch images.
+- Supervisor can also build locally using the included `Dockerfile` and `build.yaml` if no image is available.
+
+## Configuration
+- Minimal config: host networking, no extra privileges by default
+- To customize, edit `config.yaml`/`config.json` and rebuild/tag as needed
+
+## Troubleshooting
+- If the add-on does not appear, check:
+	- The repository URL is correct and public
+	- The image exists on GHCR (or let Supervisor build it)
+	- Supervisor and add-on logs for errors
+- For private images, set up a GHCR PAT as described in the main project README
+
+## Contributing
+- PRs welcome! Please update the changelog and bump the version/tag for releases.
+
+---
+
+For more details, see the root `README.md` and the Home Assistant [add-on developer docs](https://developers.home-assistant.io/docs/add-ons/).
 ```
 
 2. Add this repository URL to Home Assistant Supervisor Add-on store:
