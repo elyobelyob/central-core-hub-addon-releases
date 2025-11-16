@@ -1,1 +1,5 @@
-{ "name": "Central Core Hub Releases", "url": "https://github.com/elyobelyob/central-core-hub-addon-releases", "maintainer": "Central Core <support@central-core.com>", "version": "1.0.0", "description": "Add-on repository for Central Core Hub.", "type": "github", "addons": [ "central-core-hub" ] }
+{
+	"name": "Central Core Hub Releases",
+	"url": "https://github.com/elyobelyob/central-core-hub-addon-releases",
+	"addons": ["central-core-hub"]
+}

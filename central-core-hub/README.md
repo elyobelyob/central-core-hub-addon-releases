@@ -6,52 +6,29 @@ Installation (from Supervisor add-on store):
 
 Notes:
 docker build -t ghcr.io/elyobelyob/central-core-hub:1.0.0 .
-# Central Core Hub Home Assistant Add-on
+# Central Core Hub Add-on
 
-This folder contains the Home Assistant Supervisor add-on for Central Core Hub, designed for reliable use on Home Assistant OS (HAOS) and other Supervisor-based installations.
+This is a Home Assistant Supervisor add-on for Central Core Hub.
+
+## Installation
+1. Go to Supervisor → Add-on Store → Repositories.
+2. Add:
+	```
+	https://github.com/elyobelyob/central-core-hub-addon-releases
+	```
+3. Find "Central Core Hub" in the Add-on Store and install it.
 
 ## Features
-- Prebuilt multi-arch Docker image (GHCR)
-- Supervisor build support (`Dockerfile` + `build.yaml`)
-- Host networking, minimal permissions
-- CI/CD for automated builds and releases
+- Multi-arch: amd64, armv7, aarch64
+- Host networking
+- Minimal permissions
 
-## Installation (HAOS/Supervisor)
-1. **Add this repository to your Add-on Store:**
-	 - Go to Home Assistant UI → Supervisor → Add-on Store
-	 - Click the three dots (top right) → Repositories
-	 - Add:
-		 ```
-		 https://github.com/elyobelyob/central-core-hub-addon-releases
-		 ```
-	 - Click Add, then Refresh
-2. **Install the add-on:**
-	 - Find "Central Core Hub" in the Add-on Store
-	 - Click Install, then Start
-	 - Check Logs for successful startup
+## Build/CI
+- Prebuilt images: `ghcr.io/elyobelyob/central-core-hub:<tag>`
+- Supervisor can also build locally using the included Dockerfile.
 
-## Build & CI
-- Prebuilt images are published to: `ghcr.io/elyobelyob/central-core-hub:<tag>`
-- To trigger a new build, push a new git tag (e.g. `1.0.1`). GitHub Actions will build and push multi-arch images.
-- Supervisor can also build locally using the included `Dockerfile` and `build.yaml` if no image is available.
-
-## Configuration
-- Minimal config: host networking, no extra privileges by default
-- To customize, edit `config.yaml`/`config.json` and rebuild/tag as needed
-
-## Troubleshooting
-- If the add-on does not appear, check:
-	- The repository URL is correct and public
-	- The image exists on GHCR (or let Supervisor build it)
-	- Supervisor and add-on logs for errors
-- For private images, set up a GHCR PAT as described in the main project README
-
-## Contributing
-- PRs welcome! Please update the changelog and bump the version/tag for releases.
-
----
-
-For more details, see the root `README.md` and the Home Assistant [add-on developer docs](https://developers.home-assistant.io/docs/add-ons/).
+## Support
+See the Home Assistant [add-on developer docs](https://developers.home-assistant.io/docs/add-ons/) for more info.
 ```
 
 2. Add this repository URL to Home Assistant Supervisor Add-on store:
