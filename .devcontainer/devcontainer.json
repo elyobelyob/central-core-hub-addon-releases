@@ -1,0 +1,15 @@
+{
+  "name": "Home Assistant Add-on DevContainer",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "settings": {
+    "terminal.integrated.shell.linux": "/bin/bash"
+  },
+  "extensions": [
+    "ms-azuretools.vscode-docker",
+    "esbenp.prettier-vscode"
+  ],
+  "postCreateCommand": "bash .devcontainer/setup.sh || true",
+  "remoteUser": "vscode"
+}
