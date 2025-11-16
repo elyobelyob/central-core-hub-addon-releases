@@ -1,5 +1,5 @@
 name: "Central Core Hub"
-version: "1.0.1"
+version: "1.0.3"
 slug: "central-core-hub"
 description: "Central Core Hub Add-on"
 arch:
@@ -12,7 +12,7 @@ init: true
 stage: stable
 timeout: 30
 auto_uart: false
-image: ghcr.io/elyobelyob/central-core-hub:1.0.1
+image: ghcr.io/elyobelyob/central-core-hub:1.0.3
 url: https://github.com/elyobelyob/central-core-hub-addon-releases/tree/main/central-core-hub
 webui: "[PROTO:http]://[HOST]:[PORT:8080]"
 watchdog: "http://[HOST]:[PORT:8080]"
