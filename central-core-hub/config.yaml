@@ -1,6 +1,6 @@
 name: "Central Core Hub"
 description: "Central Core Hub Add-on"
-version: "1.0.12"
+version: "1.0.13"
 slug: "central-core-hub"
 init: false
 arch:
@@ -15,7 +15,24 @@ stage: stable
 timeout: 30
 ports:
   "8000/tcp": 8000
-options:
-  greeting: "Hello from Central Core Hub!"
+  mqtt_host: "mqtt.example.com"
+  mqtt_port: 1883
+  mqtt_username: ""
+  mqtt_password: ""
+  mqtt_tls: false
+  mqtt_ca_cert: ""
+  mqtt_client_cert: ""
+  mqtt_client_key: ""
+  client_id: "{{ hostname | lower | replace(' ', '-') }}"
+  greeting: "Central Core Hub telemetry active."
 schema:
+  mqtt_host: str
+  mqtt_port: int
+  mqtt_username: str?
+  mqtt_password: str?
+  mqtt_tls: bool
+  mqtt_ca_cert: str?
+  mqtt_client_cert: str?
+  mqtt_client_key: str?
+  client_id: str
   greeting: str
