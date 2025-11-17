@@ -80,7 +80,28 @@ publish_telemetry() {
 			extra="$extra --key $MQTT_CLIENT_KEY"
 		fi
 	fi
-	mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -t "$TELEMETRY_TOPIC" -m "$TELEMETRY_PAYLOAD" -i "${CLIENT_ID}_pub" $extra
+	# Build argument string safely (values wrapped in single quotes)
+	extra=""
+	if [ -n "$MQTT_USERNAME" ]; then
+		extra="$extra -u '$MQTT_USERNAME'"
+	fi
+	if [ -n "$MQTT_PASSWORD" ]; then
+		extra="$extra -P '$MQTT_PASSWORD'"
+	fi
+	if [ "$MQTT_TLS" = "true" ]; then
+		extra="$extra --tls"
+		if [ -n "$MQTT_CA_CERT" ]; then
+			extra="$extra --cafile '$MQTT_CA_CERT'"
+		fi
+		if [ -n "$MQTT_CLIENT_CERT" ]; then
+			extra="$extra --cert '$MQTT_CLIENT_CERT'"
+		fi
+		if [ -n "$MQTT_CLIENT_KEY" ]; then
+			extra="$extra --key '$MQTT_CLIENT_KEY'"
+		fi
+	fi
+	# Use keepalive to ensure broker knows the client intent
+	eval "mosquitto_pub -h '$MQTT_HOST' -p '$MQTT_PORT' -k 60 -t '$TELEMETRY_TOPIC' -m '$TELEMETRY_PAYLOAD' -i '${CLIENT_ID}_pub' $extra"
 }
 
 # Helper: fetch sensor states from Home Assistant API
@@ -100,14 +121,31 @@ publish_all_sensors() {
 	local sensors_json="$1"
 	local topic="hubs/$CLIENT_ID/telemetry/sensors"
 	local payload="{\"data\": $sensors_json}"
-	mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -t "$topic" -m "$payload" -i "${CLIENT_ID}_pub" ${MQTT_USERNAME:+-u "$MQTT_USERNAME"} ${MQTT_PASSWORD:+-P "$MQTT_PASSWORD"}
+	# Build extra args safely and publish
+	extra=""
+	if [ -n "$MQTT_USERNAME" ]; then
+		extra="$extra -u '$MQTT_USERNAME'"
+	fi
+	if [ -n "$MQTT_PASSWORD" ]; then
+		extra="$extra -P '$MQTT_PASSWORD'"
+	fi
+	eval "mosquitto_pub -h '$MQTT_HOST' -p '$MQTT_PORT' -t '$topic' -m '$payload' -i '${CLIENT_ID}_pub' $extra"
 }
 
 # Helper: subscribe to commands topic
 subscribe_commands() {
 	local topic="hubs/$CLIENT_ID/commands"
 	while true; do
-		mosquitto_sub -h "$MQTT_HOST" -p "$MQTT_PORT" -t "$topic" -i "$CLIENT_ID" ${MQTT_USERNAME:+-u "$MQTT_USERNAME"} ${MQTT_PASSWORD:+-P "$MQTT_PASSWORD"} | while read -r message; do
+		# Build subscriber extra args
+		sub_extra=""
+		if [ -n "$MQTT_USERNAME" ]; then
+			sub_extra="$sub_extra -u '$MQTT_USERNAME'"
+		fi
+		if [ -n "$MQTT_PASSWORD" ]; then
+			sub_extra="$sub_extra -P '$MQTT_PASSWORD'"
+		fi
+		echo "Starting mosquitto_sub for topic '$topic'"
+		eval "mosquitto_sub -h '$MQTT_HOST' -p '$MQTT_PORT' -k 60 -t '$topic' -i '$CLIENT_ID' $sub_extra" | while read -r message; do
 			echo "Received command: $message"
 			# Add command handling logic here if needed
 		done
