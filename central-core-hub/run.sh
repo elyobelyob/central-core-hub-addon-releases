@@ -135,23 +135,31 @@ publish_all_sensors() {
 # Helper: subscribe to commands topic
 subscribe_commands() {
 	local topic="hubs/$CLIENT_ID/commands"
-	while true; do
-		# Build subscriber extra args
-		sub_extra=""
-		if [ -n "$MQTT_USERNAME" ]; then
-			sub_extra="$sub_extra -u '$MQTT_USERNAME'"
-		fi
-		if [ -n "$MQTT_PASSWORD" ]; then
-			sub_extra="$sub_extra -P '$MQTT_PASSWORD'"
-		fi
-		echo "Starting mosquitto_sub for topic '$topic'"
-		eval "mosquitto_sub -h '$MQTT_HOST' -p '$MQTT_PORT' -k 60 -t '$topic' -i '$CLIENT_ID' $sub_extra" | while read -r message; do
-			echo "Received command: $message"
-			# Add command handling logic here if needed
+	sub_log="/data/mosquitto_sub.log"
+	rm -f "$sub_log" || true
+	touch "$sub_log" || true
+
+	# Background loop that restarts mosquitto_sub and logs exit codes
+	(
+		while true; do
+			sub_extra=""
+			if [ -n "$MQTT_USERNAME" ]; then
+				sub_extra="$sub_extra -u '$MQTT_USERNAME'"
+			fi
+			if [ -n "$MQTT_PASSWORD" ]; then
+				sub_extra="$sub_extra -P '$MQTT_PASSWORD'"
+			fi
+			echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) Starting mosquitto_sub for topic '$topic'" >> "$sub_log"
+			# Run subscriber; write stdout+stderr to log
+			eval "mosquitto_sub -h '$MQTT_HOST' -p '$MQTT_PORT' -k 60 -t '$topic' -i '$CLIENT_ID' $sub_extra" >> "$sub_log" 2>&1
+			rc=$?
+			echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) mosquitto_sub exited with code $rc, restarting in 5s" >> "$sub_log"
+			sleep 5
 		done
-		echo "Subscriber disconnected, retrying in 5 seconds"
-		sleep 5
-	done &
+	) &
+
+	# Tail the log to stdout so HA add-on logs show subscriber messages and diagnostics
+	tail -F "$sub_log" &
 }
 
 # Main loop: poll sensors and send telemetry as array on any state change
