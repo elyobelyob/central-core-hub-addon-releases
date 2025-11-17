@@ -80,7 +80,7 @@ publish_telemetry() {
 			extra="$extra --key $MQTT_CLIENT_KEY"
 		fi
 	fi
-	mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -t "$TELEMETRY_TOPIC" -m "$TELEMETRY_PAYLOAD" -i "$CLIENT_ID" $extra
+	mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -t "$TELEMETRY_TOPIC" -m "$TELEMETRY_PAYLOAD" -i "${CLIENT_ID}_pub" $extra
 }
 
 # Helper: fetch sensor states from Home Assistant API
@@ -100,7 +100,7 @@ publish_all_sensors() {
 	local sensors_json="$1"
 	local topic="hubs/$CLIENT_ID/telemetry/sensors"
 	local payload="{\"data\": $sensors_json}"
-	mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -t "$topic" -m "$payload" -i "$CLIENT_ID" ${MQTT_USERNAME:+-u "$MQTT_USERNAME"} ${MQTT_PASSWORD:+-P "$MQTT_PASSWORD"}
+	mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -t "$topic" -m "$payload" -i "${CLIENT_ID}_pub" ${MQTT_USERNAME:+-u "$MQTT_USERNAME"} ${MQTT_PASSWORD:+-P "$MQTT_PASSWORD"}
 }
 
 # Helper: subscribe to commands topic
