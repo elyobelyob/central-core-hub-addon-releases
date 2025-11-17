@@ -1,5 +1,6 @@
 {
 	"name": "Central Core Hub Releases",
 	"url": "https://github.com/elyobelyob/central-core-hub-addon-releases",
+	"maintainer": "elyobelyob",
 	"addons": ["central-core-hub"]
 }
