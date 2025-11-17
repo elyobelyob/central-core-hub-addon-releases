@@ -12,6 +12,13 @@ permissions:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm/v7
+          - linux/arm64
+          - linux/386
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,13 +40,26 @@ jobs:
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           fi
 
+      - name: Set BUILD_FROM
+        run: |
+          if [ "${{ matrix.platform }}" = "linux/amd64" ]; then
+            echo "BUILD_FROM=ghcr.io/home-assistant/amd64-base:latest" >> $GITHUB_ENV
+          elif [ "${{ matrix.platform }}" = "linux/arm/v7" ]; then
+            echo "BUILD_FROM=ghcr.io/home-assistant/armv7-base:latest" >> $GITHUB_ENV
+          elif [ "${{ matrix.platform }}" = "linux/arm64" ]; then
+            echo "BUILD_FROM=ghcr.io/home-assistant/aarch64-base:latest" >> $GITHUB_ENV
+          elif [ "${{ matrix.platform }}" = "linux/386" ]; then
+            echo "BUILD_FROM=ghcr.io/home-assistant/i386-base:latest" >> $GITHUB_ENV
+          fi
+
       - name: Build and push
         uses: docker/build-push-action@v4
         with:
           push: true
-          platforms: linux/amd64,linux/arm/v7,linux/arm64,linux/386
+          platforms: ${{ matrix.platform }}
           tags: |
             ghcr.io/elyobelyob/central-core-hub:${{ github.ref_name }}
             ghcr.io/elyobelyob/central-core-hub:latest
           file: central-core-hub/Dockerfile
           context: central-core-hub
+          build-args: BUILD_FROM=${{ env.BUILD_FROM }}
