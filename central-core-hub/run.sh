@@ -1,5 +1,5 @@
 echo "Starting Central Core Hub add-on (placeholder)"
-#!/bin/bash
+#!/bin/sh
 set -euo pipefail
 
 echo "Starting Central Core Hub add-on with MQTT telemetry support"
@@ -133,7 +133,7 @@ while true; do
 				friendly_name=$(echo "$sensor" | jq -r '.attributes.friendly_name // .entity_id')
 				sensor_type=$(echo "$sensor" | jq -r '.attributes.device_class // "unknown"')
 				# Only send if any state changed
-				key="${entity_id//./_}"
+				key=$(echo "$entity_id" | sed 's/\./_/g')
 				old=$(eval "echo \$SENSOR_$key")
 				if [ "$old" != "$state" ]; then
 					changed=true
