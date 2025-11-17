@@ -93,7 +93,6 @@ subscribe_commands() {
 
 
 # Main loop: poll sensors and send telemetry as array on any state change
-declare -A SENSOR_STATES
 if [ -n "$MQTT_HOST" ]; then
   subscribe_commands
 fi
@@ -114,10 +113,12 @@ while true; do
         friendly_name=$(echo "$sensor" | jq -r '.attributes.friendly_name // .entity_id')
         sensor_type=$(echo "$sensor" | jq -r '.attributes.device_class // "unknown"')
         # Only send if any state changed
-        if [ "${SENSOR_STATES[$entity_id]:-}" != "$state" ]; then
+        key=$(echo "$entity_id" | sed 's/\./_/g')
+        old=$(eval "echo \$SENSOR_$key")
+        if [ "$old" != "$state" ]; then
           changed=true
         fi
-        SENSOR_STATES[$entity_id]="$state"
+        eval "SENSOR_$key=\"$state\""
         # Build array entry
         $first || sensors_array+=","; first=false
         sensors_array+="{\"name\":\"$friendly_name\",\"type\":\"$sensor_type\",\"value\":$state}"
