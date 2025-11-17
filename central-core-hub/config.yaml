@@ -1,6 +1,6 @@
 name: "Central Core Hub"
 description: "Central Core Hub Add-on"
-version: "1.0.36"
+version: "1.0.37"
 slug: "central-core-hub"
 init: false
 arch:
@@ -14,7 +14,7 @@ boot: auto
 stage: stable
 timeout: 30
 network:
-  - host
+  host: true
 options:
   mqtt_host: ""
   mqtt_port: 1883
