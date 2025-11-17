@@ -44,7 +44,22 @@ DISK_TOTAL="$(df -k / | awk 'NR==2 {print $2}')"
 DISK_FREE="$(df -k / | awk 'NR==2 {print $4}')"
 
 # Build telemetry payload
-TELEMETRY_PAYLOAD="{\"client_id\":\"$CLIENT_ID\",\"status\":\"online\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"hostname\":\"$HOSTNAME\",\"ip\":\"$IP_ADDRESS\",\"uptime\":\"$UPTIME\",\"load_avg\":\"$LOAD_AVG\",\"mem_total_kb\":\"$MEM_TOTAL\",\"mem_free_kb\":\"$MEM_FREE\",\"disk_total_kb\":\"$DISK_TOTAL\",\"disk_free_kb\":\"$DISK_FREE\"}"
+TELEMETRY_PAYLOAD=$(cat <<EOF
+{
+  "client_id": "$CLIENT_ID",
+  "status": "online",
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "hostname": "$HOSTNAME",
+  "ip": "$IP_ADDRESS",
+  "uptime": "$UPTIME",
+  "load_avg": "$LOAD_AVG",
+  "mem_total_kb": $MEM_TOTAL,
+  "mem_free_kb": $MEM_FREE,
+  "disk_total_kb": $DISK_TOTAL,
+  "disk_free_kb": $DISK_FREE
+}
+EOF
+)
 
 publish_telemetry() {
   local extra=""
