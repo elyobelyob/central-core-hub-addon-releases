@@ -80,8 +80,23 @@ publish_all_sensors() {
 }
 
 
+# Helper: subscribe to commands topic
+subscribe_commands() {
+  local topic="hubs/$CLIENT_ID/commands"
+  mosquitto_sub -h "$MQTT_HOST" -p "$MQTT_PORT" -t "$topic" -i "$CLIENT_ID" \
+    ${MQTT_USERNAME:+-u "$MQTT_USERNAME"} \
+    ${MQTT_PASSWORD:+-P "$MQTT_PASSWORD"} | while read -r message; do
+    echo "Received command: $message"
+    # Add command handling logic here if needed
+  done &
+}
+
+
 # Main loop: poll sensors and send telemetry as array on any state change
 declare -A SENSOR_STATES
+if [ -n "$MQTT_HOST" ]; then
+  subscribe_commands
+fi
 while true; do
   if [ -n "$MQTT_HOST" ]; then
     # Send system telemetry
