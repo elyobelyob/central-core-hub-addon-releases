@@ -20,7 +20,8 @@ HA_API_URL=$(jq -r '.ha_api_url // ""' "$OPTIONS_FILE")
 HA_API_TOKEN=$(jq -r '.ha_api_token // ""' "$OPTIONS_FILE")
 
 if [ -n "${CLIENT_ID:-}" ]; then
-  CLIENT_ID="$CLIENT_ID"
+  # CLIENT_ID is already set from options
+  :
 else
   # Use the system hostname, lowercased and spaces replaced with dashes
   CLIENT_ID="$(hostname | tr '[:upper:]' '[:lower:]' | tr ' ' '-')"
@@ -122,7 +123,7 @@ while true; do
         friendly_name=$(echo "$sensor" | jq -r '.attributes.friendly_name // .entity_id')
         sensor_type=$(echo "$sensor" | jq -r '.attributes.device_class // "unknown"')
         # Only send if any state changed
-        key=$(echo "$entity_id" | sed 's/\./_/g')
+        key="${entity_id//./_}"
         old=$(eval "echo \$SENSOR_$key")
         if [ "$old" != "$state" ]; then
           changed=true
