@@ -127,6 +127,7 @@ while true; do
 			changed=false
 			sensors_array="["
 			first=true
+			echo "$sensors_json" | jq -c '.' > /tmp/sensors.json
 			while IFS= read -r sensor; do
 				entity_id=$(echo "$sensor" | jq -r '.entity_id')
 				state=$(echo "$sensor" | jq -r '.state')
@@ -143,7 +144,7 @@ while true; do
 				$first || sensors_array+=","
 				first=false
 				sensors_array+="{\"name\":\"$friendly_name\",\"type\":\"$sensor_type\",\"value\":$state}"
-			done < <(echo "$sensors_json" | jq -c '.')
+			done < /tmp/sensors.json
 			sensors_array+="]"
 			if $changed; then
 				publish_all_sensors "$sensors_array"
