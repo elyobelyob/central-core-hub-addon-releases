@@ -27,7 +27,7 @@ TELEMETRY_TOPIC="telemetry/$CLIENT_ID"
 
 # Gather system metrics
 HOSTNAME="$(hostname)"
-IP_ADDRESS="$(hostname -I | awk '{print $1}')"
+IP_ADDRESS="$(ip route get 1 2>/dev/null | head -1 | awk '{print $7}' || echo 'unknown')"
 UPTIME="$(awk '{print int($1)}' /proc/uptime 2>/dev/null || uptime | awk '{print $3}')"
 LOAD_AVG="$(awk '{print $1 "," $2 "," $3}' /proc/loadavg 2>/dev/null || uptime | awk -F'load average:' '{print $2}' | sed 's/ //g')"
 MEM_TOTAL="$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null)"
