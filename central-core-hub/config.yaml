@@ -1,6 +1,6 @@
 name: "Central Core Hub"
 description: "Central Core Hub Add-on"
-version: "1.0.14"
+version: "1.0.15"
 slug: "central-core-hub"
 init: false
 arch:
@@ -13,10 +13,8 @@ startup: services
 boot: auto
 stage: stable
 timeout: 30
-ports:
-  "8000/tcp": 8000
 options:
-  mqtt_host: "mqtt.example.com"
+  mqtt_host: ""
   mqtt_port: 1883
   mqtt_username: ""
   mqtt_password: ""
@@ -24,12 +22,11 @@ options:
   mqtt_ca_cert: ""
   mqtt_client_cert: ""
   mqtt_client_key: ""
-  client_id: "{{ hostname | lower | replace(' ', '-') }}"
-  greeting: "Central Core Hub telemetry active."
-  ha_api_url: "http://homeassistant.local:8123"
+  client_id: ""
+  ha_api_url: ""
   ha_api_token: ""
 schema:
-  mqtt_host: str
+  mqtt_host: str?
   mqtt_port: int
   mqtt_username: str?
   mqtt_password: str?
@@ -37,7 +34,6 @@ schema:
   mqtt_ca_cert: str?
   mqtt_client_cert: str?
   mqtt_client_key: str?
-  client_id: str
-  greeting: str
-  ha_api_url: str
+  client_id: str?
+  ha_api_url: str?
   ha_api_token: str?
