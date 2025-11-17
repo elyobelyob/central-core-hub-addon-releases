@@ -24,7 +24,7 @@ options:
   mqtt_ca_cert: ""
   mqtt_client_cert: ""
   mqtt_client_key: ""
-  client_id: ""
+  client_id: "home-assistant"
   ha_api_url: ""
   ha_api_token: ""
 schema:
