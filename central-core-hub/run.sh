@@ -21,6 +21,8 @@ else
   CLIENT_ID="$(hostname | tr '[:upper:]' '[:lower:]' | tr ' ' '-')"
 fi
 
+echo "Debug: MQTT_HOST='$MQTT_HOST', MQTT_PORT='$MQTT_PORT'"
+
 
 # Topic for vault telemetry
 TELEMETRY_TOPIC="telemetry/$CLIENT_ID"
