@@ -1,5 +1,5 @@
 echo "Starting Central Core Hub add-on (placeholder)"
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 echo "Starting Central Core Hub add-on with MQTT telemetry support"
@@ -46,20 +46,26 @@ DISK_FREE="$(df -k / | awk 'NR==2 {print $4}')"
 TELEMETRY_PAYLOAD="{\"client_id\":\"$CLIENT_ID\",\"status\":\"online\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"hostname\":\"$HOSTNAME\",\"ip\":\"$IP_ADDRESS\",\"uptime\":\"$UPTIME\",\"load_avg\":\"$LOAD_AVG\",\"mem_total_kb\":\"$MEM_TOTAL\",\"mem_free_kb\":\"$MEM_FREE\",\"disk_total_kb\":\"$DISK_TOTAL\",\"disk_free_kb\":\"$DISK_FREE\"}"
 
 publish_telemetry() {
-  local mqtt_opts=(-h "$MQTT_HOST" -p "$MQTT_PORT" -t "$TELEMETRY_TOPIC" -m "$TELEMETRY_PAYLOAD" -i "$CLIENT_ID")
+  local extra=""
   if [ -n "$MQTT_USERNAME" ]; then
-    mqtt_opts+=(-u "$MQTT_USERNAME")
+    extra="$extra -u $MQTT_USERNAME"
   fi
   if [ -n "$MQTT_PASSWORD" ]; then
-    mqtt_opts+=(-P "$MQTT_PASSWORD")
+    extra="$extra -P $MQTT_PASSWORD"
   fi
   if [ "$MQTT_TLS" = "true" ]; then
-    mqtt_opts+=(--tls)
-    [ -n "$MQTT_CA_CERT" ] && mqtt_opts+=(--cafile "$MQTT_CA_CERT")
-    [ -n "$MQTT_CLIENT_CERT" ] && mqtt_opts+=(--cert "$MQTT_CLIENT_CERT")
-    [ -n "$MQTT_CLIENT_KEY" ] && mqtt_opts+=(--key "$MQTT_CLIENT_KEY")
+    extra="$extra --tls"
+    if [ -n "$MQTT_CA_CERT" ]; then
+      extra="$extra --cafile $MQTT_CA_CERT"
+    fi
+    if [ -n "$MQTT_CLIENT_CERT" ]; then
+      extra="$extra --cert $MQTT_CLIENT_CERT"
+    fi
+    if [ -n "$MQTT_CLIENT_KEY" ]; then
+      extra="$extra --key $MQTT_CLIENT_KEY"
+    fi
   fi
-  mosquitto_pub "${mqtt_opts[@]}"
+  mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -t "$TELEMETRY_TOPIC" -m "$TELEMETRY_PAYLOAD" -i "$CLIENT_ID" $extra
 }
 
 
@@ -81,28 +87,14 @@ publish_all_sensors() {
   local sensors_json="$1"
   local topic="hubs/$CLIENT_ID/telemetry/sensors"
   local payload="{\"data\": $sensors_json}"
-  local mqtt_opts=(-h "$MQTT_HOST" -p "$MQTT_PORT" -t "$topic" -m "$payload" -i "$CLIENT_ID")
-  if [ -n "$MQTT_USERNAME" ]; then
-    mqtt_opts+=(-u "$MQTT_USERNAME")
-  fi
-  if [ -n "$MQTT_PASSWORD" ]; then
-    mqtt_opts+=(-P "$MQTT_PASSWORD")
-  fi
-  mosquitto_pub "${mqtt_opts[@]}"
+  mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -t "$topic" -m "$payload" -i "$CLIENT_ID" ${MQTT_USERNAME:+-u "$MQTT_USERNAME"} ${MQTT_PASSWORD:+-P "$MQTT_PASSWORD"}
 }
 
 
 # Helper: subscribe to commands topic
 subscribe_commands() {
   local topic="hubs/$CLIENT_ID/commands"
-  local mqtt_opts=(-h "$MQTT_HOST" -p "$MQTT_PORT" -t "$topic" -i "$CLIENT_ID")
-  if [ -n "$MQTT_USERNAME" ]; then
-    mqtt_opts+=(-u "$MQTT_USERNAME")
-  fi
-  if [ -n "$MQTT_PASSWORD" ]; then
-    mqtt_opts+=(-P "$MQTT_PASSWORD")
-  fi
-  mosquitto_sub "${mqtt_opts[@]}" | while read -r message; do
+  mosquitto_sub -h "$MQTT_HOST" -p "$MQTT_PORT" -t "$topic" -i "$CLIENT_ID" ${MQTT_USERNAME:+-u "$MQTT_USERNAME"} ${MQTT_PASSWORD:+-P "$MQTT_PASSWORD"} | while read -r message; do
     echo "Received command: $message"
     # Add command handling logic here if needed
   done &
