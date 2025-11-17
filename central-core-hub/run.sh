@@ -5,15 +5,20 @@ set -euo pipefail
 echo "Starting Central Core Hub add-on with MQTT telemetry support"
 
 
-# Read options from Home Assistant environment variables
-MQTT_HOST="${MQTT_HOST:-}"
-MQTT_PORT="${MQTT_PORT:-1883}"
-MQTT_USERNAME="${MQTT_USERNAME:-}"
-MQTT_PASSWORD="${MQTT_PASSWORD:-}"
-MQTT_TLS="${MQTT_TLS:-false}"
-MQTT_CA_CERT="${MQTT_CA_CERT:-}"
-MQTT_CLIENT_CERT="${MQTT_CLIENT_CERT:-}"
-MQTT_CLIENT_KEY="${MQTT_CLIENT_KEY:-}"
+# Read options from HA options file
+OPTIONS_FILE="/data/options.json"
+MQTT_HOST=$(jq -r '.mqtt_host // ""' "$OPTIONS_FILE")
+MQTT_PORT=$(jq -r '.mqtt_port // 1883' "$OPTIONS_FILE")
+MQTT_USERNAME=$(jq -r '.mqtt_username // ""' "$OPTIONS_FILE")
+MQTT_PASSWORD=$(jq -r '.mqtt_password // ""' "$OPTIONS_FILE")
+MQTT_TLS=$(jq -r '.mqtt_tls // false' "$OPTIONS_FILE")
+MQTT_CA_CERT=$(jq -r '.mqtt_ca_cert // ""' "$OPTIONS_FILE")
+MQTT_CLIENT_CERT=$(jq -r '.mqtt_client_cert // ""' "$OPTIONS_FILE")
+MQTT_CLIENT_KEY=$(jq -r '.mqtt_client_key // ""' "$OPTIONS_FILE")
+CLIENT_ID=$(jq -r '.client_id // ""' "$OPTIONS_FILE")
+HA_API_URL=$(jq -r '.ha_api_url // ""' "$OPTIONS_FILE")
+HA_API_TOKEN=$(jq -r '.ha_api_token // ""' "$OPTIONS_FILE")
+
 if [ -n "${CLIENT_ID:-}" ]; then
   CLIENT_ID="$CLIENT_ID"
 else
