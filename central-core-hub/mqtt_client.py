@@ -15,6 +15,11 @@ import socket
 import sys
 import time
 import traceback
+import platform
+try:
+    import requests
+except Exception:
+    requests = None
 from datetime import datetime
 
 try:
@@ -85,6 +90,11 @@ def build_telemetry(client_id):
     la = loadavg()
     mem_total, mem_free = mem_info_kb()
     disk_total, disk_free = disk_info_kb('/')
+    # CPU info
+    cpu_count = os.cpu_count() or 1
+    cpu_percent = get_cpu_percent()
+    py_version = sys.version.split('\n')[0]
+    platform_info = platform.platform()
     payload = {
         'client_id': client_id,
         'status': 'online',
@@ -97,8 +107,71 @@ def build_telemetry(client_id):
         'mem_free_kb': mem_free,
         'disk_total_kb': disk_total,
         'disk_free_kb': disk_free,
+        'cpu_count': cpu_count,
+        'cpu_percent': cpu_percent,
+        'platform': platform_info,
+        'python_version': py_version,
     }
     return json.dumps(payload)
+
+
+def _read_proc_stat():
+    try:
+        with open('/proc/stat', 'r') as f:
+            line = f.readline()
+            if not line.startswith('cpu '):
+                return None, None
+            parts = line.split()[1:]
+            vals = [int(x) for x in parts]
+            idle = vals[3]
+            total = sum(vals)
+            return idle, total
+    except Exception:
+        return None, None
+
+
+def get_cpu_percent():
+    # Simple /proc/stat based CPU percentage over short interval
+    idle1, total1 = _read_proc_stat()
+    if idle1 is None:
+        return None
+    time.sleep(0.1)
+    idle2, total2 = _read_proc_stat()
+    if idle2 is None or total2 is None or total2 == total1:
+        return None
+    idle_delta = idle2 - idle1
+    total_delta = total2 - total1
+    try:
+        usage = (1.0 - (idle_delta / total_delta)) * 100.0
+        return round(usage, 1)
+    except Exception:
+        return None
+
+
+def fetch_sensors(ha_api_url, ha_api_token):
+    if not ha_api_url or not ha_api_token or requests is None:
+        return None
+    try:
+        url = ha_api_url.rstrip('/') + '/api/states'
+        headers = {
+            'Authorization': f'Bearer {ha_api_token}',
+            'Content-Type': 'application/json'
+        }
+        r = requests.get(url, headers=headers, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        sensors = []
+        for ent in data:
+            ent_id = ent.get('entity_id')
+            if ent_id and ent_id.startswith('sensor.'):
+                sensors.append({
+                    'entity_id': ent_id,
+                    'state': ent.get('state'),
+                    'name': ent.get('attributes', {}).get('friendly_name') or ent_id
+                })
+        return sensors
+    except Exception:
+        return None
 
 
 class CentralCoreClient:
@@ -115,6 +188,10 @@ class CentralCoreClient:
         self.client_id = options.get('client_id') or socket.gethostname().lower().replace(' ', '-')
         self.ha_api_url = options.get('ha_api_url') or ''
         self.ha_api_token = options.get('ha_api_token') or ''
+        # Optional vault-compatible topic to publish telemetry to in addition
+        # to the default `telemetry/{client_id}` topic. If set, telemetry
+        # payloads will be published to both topics.
+        self.vault_topic = options.get('vault_topic') or ''
         self.telemetry_topic = f"telemetry/{self.client_id}"
         self.commands_topic = f"hubs/{self.client_id}/commands"
         self._client = mqtt.Client(client_id=self.client_id, clean_session=True)
@@ -186,6 +263,13 @@ class CentralCoreClient:
             print(f"Published telemetry to {self.telemetry_topic}")
         except Exception:
             print('Failed to publish telemetry')
+        # Also publish to an optional vault-specific topic if configured.
+        if self.vault_topic:
+            try:
+                self._client.publish(self.vault_topic, payload)
+                print(f"Also published telemetry to vault topic {self.vault_topic}")
+            except Exception:
+                print(f'Failed to publish telemetry to vault topic {self.vault_topic}', file=sys.stderr)
 
     def run(self):
         # connect first
