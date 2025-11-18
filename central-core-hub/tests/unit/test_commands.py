@@ -148,3 +148,7 @@ def test_handle_sensors_set_command_calls_ha_and_responds(monkeypatch):
     # completion payload contains result.summary
     comp = json.loads(completions[-1]['payload'])
     assert 'result' in comp and 'set' in comp['result']
+    # telemetry should be published to preferred sensors topic with data map
+    assert c.preferred_sensors_topic in topics
+    tele = json.loads(next(p['payload'] for p in dummy.published if p['topic'] == c.preferred_sensors_topic))
+    assert 'data' in tele and 'sensor.temp' in tele['data'] and 'sensor.hum' in tele['data']
