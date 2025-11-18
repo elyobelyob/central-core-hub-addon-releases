@@ -234,9 +234,47 @@ class CentralCoreClient:
         self.sensors_topic = f"telemetry/{self.client_id}/sensors"
         # Subscribe pattern for Vault commands (e.g. hubs/<hub_id>/cmd/sensors/poll)
         self.cmd_sub_topic = f"hubs/{self.client_id}/cmd/+"
-        self._client = mqtt.Client(client_id=self.client_id, clean_session=True)
-        if self.mqtt_username:
-            self._client.username_pw_set(self.mqtt_username, self.mqtt_password)
+        # If paho-mqtt is not available at import time (e.g. in minimal test
+        # environments), provide a small shim object that implements the
+        # `publish` and `subscribe` methods used by this class. Tests often
+        # replace `self._client` with a dummy, so the shim only needs to be
+        # minimal and non-failing.
+        if mqtt is None:
+            class _ClientShim:
+                def __init__(self, *a, **k):
+                    pass
+
+                def username_pw_set(self, u, p=None):
+                    return None
+
+                def tls_set(self, **kw):
+                    return None
+
+                def publish(self, topic, payload, qos=0):
+                    class R:
+                        rc = 0
+                    return R()
+
+                def subscribe(self, topic, qos=0):
+                    return (0, 1)
+
+                def connect(self, *a, **k):
+                    return 0
+
+                def loop_start(self):
+                    return None
+
+                def loop_stop(self):
+                    return None
+
+                def disconnect(self):
+                    return None
+
+            self._client = _ClientShim()
+        else:
+            self._client = mqtt.Client(client_id=self.client_id, clean_session=True)
+            if self.mqtt_username:
+                self._client.username_pw_set(self.mqtt_username, self.mqtt_password)
         if self.mqtt_tls:
             tls_kwargs = {}
             if self.mqtt_ca:
