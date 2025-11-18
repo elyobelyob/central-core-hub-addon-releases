@@ -228,6 +228,7 @@ class CentralCoreClient:
         self.vault_topic = options.get('vault_topic') or ''
         self.telemetry_topic = f"telemetry/{self.client_id}"
         self.commands_topic = f"hubs/{self.client_id}/commands"
+        self.sensors_topic = f"telemetry/{self.client_id}/sensors"
         self._client = mqtt.Client(client_id=self.client_id, clean_session=True)
         if self.mqtt_username:
             self._client.username_pw_set(self.mqtt_username, self.mqtt_password)
@@ -249,6 +250,8 @@ class CentralCoreClient:
         self._client.on_message = self.on_message
 
         self._connected = False
+        # track last sensors publish time (epoch seconds)
+        self._last_sensors_sent = 0
 
     def on_connect(self, client, userdata, flags, rc):
         print(f"{datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')} Connected to MQTT broker with rc={rc}")
@@ -258,6 +261,12 @@ class CentralCoreClient:
         except Exception:
             print('Subscription failed', file=sys.stderr)
         self._connected = True
+        # Publish sensors list immediately on startup/connection
+        try:
+            self.publish_sensors()
+        except Exception:
+            # do not let sensor publish failures prevent client
+            print('Failed to publish sensors on connect', file=sys.stderr)
 
     def on_disconnect(self, client, userdata, rc):
         print(f"{datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')} Disconnected from MQTT broker rc={rc}")
@@ -311,6 +320,29 @@ class CentralCoreClient:
             except Exception:
                 print(f'Failed to publish telemetry to vault topic {self.vault_topic}', file=sys.stderr)
 
+    def publish_sensors(self):
+        """Fetch sensors from Home Assistant (if configured) and publish to MQTT.
+
+        Publishes to `telemetry/<client_id>/sensors` as a JSON object:
+        { schema_version: 1, client_id, timestamp, sensors: [...] }
+        """
+        if not self.ha_api_url or not self.ha_api_token:
+            # HA integration not configured
+            return
+        sensors = fetch_sensors(self.ha_api_url, self.ha_api_token)
+        payload = {
+            'schema_version': 1,
+            'client_id': self.client_id,
+            'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+            'sensors': sensors or []
+        }
+        try:
+            self._client.publish(self.sensors_topic, json.dumps(payload))
+            print(f"Published sensors list to {self.sensors_topic} (count={len(payload['sensors'])})")
+            self._last_sensors_sent = int(time.time())
+        except Exception:
+            print(f'Failed to publish sensors to {self.sensors_topic}', file=sys.stderr)
+
     def run(self):
         # connect first
         self.connect()
@@ -323,6 +355,13 @@ class CentralCoreClient:
                     self.publish_telemetry()
                 except Exception:
                     print('Telemetry publish exception', file=sys.stderr)
+                # send telemetry every 30s; send sensors every hour
+                now = int(time.time())
+                try:
+                    if now - self._last_sensors_sent >= 3600:
+                        self.publish_sensors()
+                except Exception:
+                    print('Sensors publish exception', file=sys.stderr)
                 time.sleep(30)
         finally:
             try:
