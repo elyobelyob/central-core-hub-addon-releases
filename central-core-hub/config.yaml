@@ -27,6 +27,7 @@ options:
   client_id: "home-assistant"
   ha_api_url: ""
   ha_api_token: ""
+  vault_topic: ""
 schema:
   mqtt_host: str
   mqtt_port: int
@@ -39,3 +40,4 @@ schema:
   client_id: str?
   ha_api_url: str?
   ha_api_token: str?
+  vault_topic: str?
