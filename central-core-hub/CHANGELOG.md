@@ -6,6 +6,11 @@ All notable changes to this add-on will be documented in this file.
 - Release: bump to `1.0.46` and minor housekeeping
 - Chore: updated version metadata and repository listing
 
+### Details (v1.0.46)
+- Feat: support `sensors/set` command to set states via Home Assistant REST API and publish authoritative telemetry immediately after.
+- Feat: read back entity `state` and `attributes` from HA after setting and include both `data` and `attributes` in `hubs/<client_id>/telemetry/sensors` payloads.
+- Test: expanded unit tests to stub POST/GET and assert telemetry and attributes are published.
+
 ## 1.0.45 - 2025-11-18
 - Chore: remove legacy MQTT topic publishing (development mode uses preferred Vault topics only)
 - Test: add additional unit tests and increase coverage; add `.gitignore` to ignore virtualenv and test artifacts
