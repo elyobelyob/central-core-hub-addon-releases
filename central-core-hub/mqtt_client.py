@@ -458,6 +458,7 @@ class CentralCoreClient:
                 results = {'set': [], 'failed': []}
                 # We'll also collect authoritative values read back from HA
                 readback_values = {}
+                readback_attrs = {}
                 # Call Home Assistant API to set each sensor state, then read back
                 for item in sensors_to_set:
                     ent = item.get('entity_id')
@@ -482,9 +483,12 @@ class CentralCoreClient:
                                 data = r2.json()
                                 read_state = data.get('state')
                                 readback_values[ent] = read_state
+                                # capture attributes if present for richer telemetry
+                                readback_attrs[ent] = data.get('attributes', {}) or {}
                             except Exception:
                                 # If readback fails, fall back to requested state
                                 readback_values[ent] = st
+                                readback_attrs[ent] = {}
                             results['set'].append(ent)
                         else:
                             # HA not configured; record as failed
@@ -511,6 +515,7 @@ class CentralCoreClient:
                 # the requested state values so consumers see the new values.
                 try:
                     data_map = {}
+                    attrs_map = {}
                     for item in sensors_to_set:
                         ent = item.get('entity_id')
                         if ent and ent in results.get('set', []):
@@ -533,9 +538,15 @@ class CentralCoreClient:
                             except Exception:
                                 val = st
                             data_map[ent] = val
+                            # include attributes from HA readback if present
+                            attrs_map[ent] = readback_attrs.get(ent, {})
 
                     if data_map:
-                        telemetry_payload = {'data': data_map, 'timestamp': now_iso}
+                        telemetry_payload = {
+                            'data': data_map,
+                            'attributes': attrs_map,
+                            'timestamp': now_iso
+                        }
                         try:
                             self._client.publish(self.preferred_sensors_topic, json.dumps(telemetry_payload), qos=0)
                             print(f"Published sensors telemetry to {self.preferred_sensors_topic} after set (count={len(data_map)})")
