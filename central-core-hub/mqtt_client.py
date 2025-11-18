@@ -25,8 +25,12 @@ from datetime import datetime
 try:
     import paho.mqtt.client as mqtt
 except Exception:
-    print("paho-mqtt not installed", file=sys.stderr)
-    raise
+    # Do not raise during import so unit tests can import this module
+    # in environments where `paho-mqtt` isn't installed. The runtime
+    # CentralCoreClient will require a working `paho-mqtt` installation
+    # if it is instantiated.
+    print("paho-mqtt not installed; MQTT functionality disabled for import-time", file=sys.stderr)
+    mqtt = None
 
 OPTIONS_PATH = '/data/options.json'
 
