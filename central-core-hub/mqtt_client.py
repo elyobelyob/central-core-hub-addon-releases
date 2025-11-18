@@ -456,7 +456,9 @@ class CentralCoreClient:
                     sensors_to_set = []
 
                 results = {'set': [], 'failed': []}
-                # Call Home Assistant API to set each sensor state
+                # We'll also collect authoritative values read back from HA
+                readback_values = {}
+                # Call Home Assistant API to set each sensor state, then read back
                 for item in sensors_to_set:
                     ent = item.get('entity_id')
                     st = item.get('state')
@@ -470,8 +472,19 @@ class CentralCoreClient:
                                 'Content-Type': 'application/json'
                             }
                             body = {'state': st}
+                            # POST to set the state
                             r = requests.post(url, headers=headers, json=body, timeout=10)
                             r.raise_for_status()
+                            # Read back the authoritative state
+                            try:
+                                r2 = requests.get(url, headers=headers, timeout=10)
+                                r2.raise_for_status()
+                                data = r2.json()
+                                read_state = data.get('state')
+                                readback_values[ent] = read_state
+                            except Exception:
+                                # If readback fails, fall back to requested state
+                                readback_values[ent] = st
                             results['set'].append(ent)
                         else:
                             # HA not configured; record as failed
@@ -501,7 +514,8 @@ class CentralCoreClient:
                     for item in sensors_to_set:
                         ent = item.get('entity_id')
                         if ent and ent in results.get('set', []):
-                            st = item.get('state')
+                            # prefer authoritative readback value if available
+                            st = readback_values.get(ent, item.get('state'))
                             # coerce values similar to poll handler
                             val = st
                             try:
