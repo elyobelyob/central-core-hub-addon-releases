@@ -105,14 +105,28 @@ def test_handle_sensors_set_command_calls_ha_and_responds(monkeypatch):
     posts = []
 
     class FakeResp:
+        def __init__(self, data=None):
+            self._data = data or {}
+
         def raise_for_status(self):
             return None
+
+        def json(self):
+            return self._data
 
     def fake_post(url, headers=None, json=None, timeout=10):
         posts.append({'url': url, 'headers': headers, 'json': json})
         return FakeResp()
 
-    monkeypatch.setattr(mod, 'requests', type('R', (), {'post': staticmethod(fake_post)}))
+    def fake_get(url, headers=None, timeout=10):
+        # return readback state matching the posted value in tests
+        if url.endswith('/api/states/sensor.temp'):
+            return FakeResp({'state': '22.0', 'attributes': {'unit_of_measurement': '°C'}})
+        if url.endswith('/api/states/sensor.hum'):
+            return FakeResp({'state': '43', 'attributes': {'unit_of_measurement': '%'}})
+        return FakeResp({'state': 'unknown', 'attributes': {}})
+
+    monkeypatch.setattr(mod, 'requests', type('R', (), {'post': staticmethod(fake_post), 'get': staticmethod(fake_get)}))
 
     options = {'client_id': 'unit-hub', 'ha_api_url': 'http://ha', 'ha_api_token': 'tok'}
     c = CentralCoreClient(options)
