@@ -228,7 +228,12 @@ class CentralCoreClient:
         self.vault_topic = options.get('vault_topic') or ''
         self.telemetry_topic = f"telemetry/{self.client_id}"
         self.commands_topic = f"hubs/{self.client_id}/commands"
+        # Preferred sensors telemetry topic for Vault
+        self.preferred_sensors_topic = f"hubs/{self.client_id}/telemetry/sensors"
+        # Legacy sensors topic (kept for backward compatibility)
         self.sensors_topic = f"telemetry/{self.client_id}/sensors"
+        # Subscribe pattern for Vault commands (e.g. hubs/<hub_id>/cmd/sensors/poll)
+        self.cmd_sub_topic = f"hubs/{self.client_id}/cmd/+"
         self._client = mqtt.Client(client_id=self.client_id, clean_session=True)
         if self.mqtt_username:
             self._client.username_pw_set(self.mqtt_username, self.mqtt_password)
@@ -256,8 +261,12 @@ class CentralCoreClient:
     def on_connect(self, client, userdata, flags, rc):
         print(f"{datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')} Connected to MQTT broker with rc={rc}")
         try:
+            # Legacy subscription kept for older integrations
             client.subscribe(self.commands_topic)
             print(f"Subscribed to {self.commands_topic}")
+            # Subscribe to Vault command pattern with QoS=1
+            client.subscribe(self.cmd_sub_topic, qos=1)
+            print(f"Subscribed to {self.cmd_sub_topic} (Vault command pattern)")
         except Exception:
             print('Subscription failed', file=sys.stderr)
         self._connected = True
@@ -277,7 +286,108 @@ class CentralCoreClient:
             payload = msg.payload.decode('utf-8', errors='replace')
         except Exception:
             payload = '<binary>'
-        print(f"Received command on {msg.topic}: {payload}")
+        print(f"Received message on {msg.topic}: {payload}")
+
+        # Handle Vault-style sensors/poll commands
+        try:
+            topic = msg.topic
+            # sensors poll command path: hubs/<hub_id>/cmd/sensors/poll
+            expected_cmd_topic = f"hubs/{self.client_id}/cmd/sensors/poll"
+            if topic == expected_cmd_topic:
+                # Parse JSON payload
+                try:
+                    cmd = json.loads(payload) if payload and payload != '<binary>' else {}
+                except Exception:
+                    cmd = {}
+
+                command_id = cmd.get('command_id')
+                # Acknowledge immediately if we have a command_id
+                if command_id:
+                    ack_topic = f"hubs/{self.client_id}/cmd/{command_id}/response"
+                    ack_payload = {
+                        'status': 'acknowledged',
+                        'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+                    }
+                    try:
+                        self._client.publish(ack_topic, json.dumps(ack_payload), qos=1)
+                        print(f"Published ACK to {ack_topic}")
+                    except Exception:
+                        print(f"Failed to publish ACK to {ack_topic}", file=sys.stderr)
+
+                # Determine sensors to fetch (empty -> full report)
+                sensors_requested = None
+                try:
+                    if isinstance(cmd.get('payload'), dict):
+                        srv = cmd.get('payload').get('sensors')
+                        if isinstance(srv, list):
+                            sensors_requested = srv
+                except Exception:
+                    sensors_requested = None
+
+                # Fetch sensors from Home Assistant (if configured)
+                sensors = fetch_sensors(self.ha_api_url, self.ha_api_token) or []
+                # Filter if specific sensors requested
+                if sensors_requested:
+                    sensors = [s for s in sensors if s.get('entity_id') in sensors_requested]
+
+                # Build telemetry payload (wrapper style recommended)
+                data_map = {}
+                for s in sensors:
+                    ent = s.get('entity_id')
+                    st = s.get('state')
+                    # Try to coerce numeric/bool values
+                    val = st
+                    try:
+                        if isinstance(st, str):
+                            low = st.lower()
+                            if low in ('on', 'true'):
+                                val = True
+                            elif low in ('off', 'false'):
+                                val = False
+                            else:
+                                if '.' in st:
+                                    val = float(st)
+                                else:
+                                    val = int(st)
+                    except Exception:
+                        val = st
+                    data_map[ent] = val
+
+                now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+                telemetry_payload = {
+                    'data': data_map,
+                    'timestamp': now_iso
+                }
+
+                # Publish to preferred Vault topic (QoS 0) and also to legacy topic
+                try:
+                    self._client.publish(self.preferred_sensors_topic, json.dumps(telemetry_payload), qos=0)
+                    print(f"Published sensors telemetry to {self.preferred_sensors_topic} (count={len(data_map)})")
+                except Exception:
+                    print(f"Failed to publish sensors to {self.preferred_sensors_topic}", file=sys.stderr)
+                try:
+                    self._client.publish(self.sensors_topic, json.dumps(telemetry_payload), qos=0)
+                    print(f"Published sensors telemetry to legacy {self.sensors_topic} (count={len(data_map)})")
+                except Exception:
+                    print(f"Failed to publish sensors to legacy {self.sensors_topic}", file=sys.stderr)
+
+                # Optionally send completion response with summary
+                if command_id:
+                    comp_topic = f"hubs/{self.client_id}/cmd/{command_id}/response"
+                    comp_payload = {
+                        'status': 'completed',
+                        'result': {'sensors_reported': list(data_map.keys()), 'count': len(data_map)},
+                        'timestamp': now_iso
+                    }
+                    try:
+                        self._client.publish(comp_topic, json.dumps(comp_payload), qos=1)
+                        print(f"Published completion to {comp_topic}")
+                    except Exception:
+                        print(f"Failed to publish completion to {comp_topic}", file=sys.stderr)
+                return
+        except Exception:
+            # fall through to generic message logging
+            traceback.print_exc()
 
     def connect(self):
         while True:
