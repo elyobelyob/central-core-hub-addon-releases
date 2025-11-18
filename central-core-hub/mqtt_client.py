@@ -20,7 +20,7 @@ try:
     import requests
 except Exception:
     requests = None
-from datetime import datetime
+from datetime import datetime, timezone
 
 try:
     import paho.mqtt.client as mqtt
@@ -103,7 +103,7 @@ def build_telemetry(client_id):
         'schema_version': 1,
         'client_id': client_id,
         'status': 'online',
-        'timestamp': datetime.utcnow().isoformat() + 'Z',
+        'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
         'hostname': hostname,
         'ip': ip,
         'uptime': up,
@@ -251,7 +251,7 @@ class CentralCoreClient:
         self._connected = False
 
     def on_connect(self, client, userdata, flags, rc):
-        print(f"{datetime.utcnow().isoformat()}Z Connected to MQTT broker with rc={rc}")
+        print(f"{datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')} Connected to MQTT broker with rc={rc}")
         try:
             client.subscribe(self.commands_topic)
             print(f"Subscribed to {self.commands_topic}")
@@ -260,7 +260,7 @@ class CentralCoreClient:
         self._connected = True
 
     def on_disconnect(self, client, userdata, rc):
-        print(f"{datetime.utcnow().isoformat()}Z Disconnected from MQTT broker rc={rc}")
+        print(f"{datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')} Disconnected from MQTT broker rc={rc}")
         self._connected = False
 
     def on_message(self, client, userdata, msg):
@@ -273,7 +273,7 @@ class CentralCoreClient:
     def connect(self):
         while True:
             try:
-                print(f"{datetime.utcnow().isoformat()}Z Connecting to {self.mqtt_host}:{self.mqtt_port} as {self.client_id}")
+                print(f"{datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')} Connecting to {self.mqtt_host}:{self.mqtt_port} as {self.client_id}")
                 self._client.connect(self.mqtt_host, self.mqtt_port, keepalive=60)
                 self._client.loop_start()
                 # wait for connection or timeout
