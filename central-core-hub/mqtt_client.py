@@ -96,6 +96,7 @@ def build_telemetry(client_id):
     py_version = sys.version.split('\n')[0]
     platform_info = platform.platform()
     payload = {
+        'schema_version': 1,
         'client_id': client_id,
         'status': 'online',
         'timestamp': datetime.utcnow().isoformat() + 'Z',
@@ -113,6 +114,35 @@ def build_telemetry(client_id):
         'python_version': py_version,
     }
     return json.dumps(payload)
+
+
+def build_vault_payload(raw_payload_json):
+    """Transform the standard telemetry payload into a compact Vault-friendly payload.
+
+    This produces a simplified structure with a `schema_version` so Vault can
+    evolve independently. We keep the original telemetry payload intact and
+    publish a transformed version to `vault_topic` when configured.
+    """
+    try:
+        data = json.loads(raw_payload_json)
+    except Exception:
+        return None
+
+    # Build a compact metrics object with key metrics consumers usually want
+    metrics = {}
+    for k in ('cpu_count', 'cpu_percent', 'uptime', 'mem_total_kb', 'mem_free_kb', 'disk_total_kb', 'disk_free_kb'):
+        if k in data:
+            metrics[k] = data.get(k)
+
+    vault = {
+        'schema_version': 2,
+        'id': data.get('client_id'),
+        'ts': data.get('timestamp'),
+        'host': data.get('hostname'),
+        'ip': data.get('ip'),
+        'metrics': metrics,
+    }
+    return json.dumps(vault)
 
 
 def _read_proc_stat():
@@ -266,8 +296,14 @@ class CentralCoreClient:
         # Also publish to an optional vault-specific topic if configured.
         if self.vault_topic:
             try:
-                self._client.publish(self.vault_topic, payload)
-                print(f"Also published telemetry to vault topic {self.vault_topic}")
+                vault_payload = build_vault_payload(payload)
+                if vault_payload:
+                    self._client.publish(self.vault_topic, vault_payload)
+                    print(f"Also published vault-formatted telemetry to {self.vault_topic}")
+                else:
+                    # Fallback: publish the full payload if transformation failed
+                    self._client.publish(self.vault_topic, payload)
+                    print(f"Also published (fallback) telemetry to vault topic {self.vault_topic}")
             except Exception:
                 print(f'Failed to publish telemetry to vault topic {self.vault_topic}', file=sys.stderr)
 
