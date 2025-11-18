@@ -261,9 +261,6 @@ class CentralCoreClient:
     def on_connect(self, client, userdata, flags, rc):
         print(f"{datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')} Connected to MQTT broker with rc={rc}")
         try:
-            # Legacy subscription kept for older integrations
-            client.subscribe(self.commands_topic)
-            print(f"Subscribed to {self.commands_topic}")
             # Subscribe to Vault command pattern with QoS=1
             client.subscribe(self.cmd_sub_topic, qos=1)
             print(f"Subscribed to {self.cmd_sub_topic} (Vault command pattern)")
@@ -359,17 +356,12 @@ class CentralCoreClient:
                     'timestamp': now_iso
                 }
 
-                # Publish to preferred Vault topic (QoS 0) and also to legacy topic
+                # Publish to preferred Vault topic (QoS 0)
                 try:
                     self._client.publish(self.preferred_sensors_topic, json.dumps(telemetry_payload), qos=0)
                     print(f"Published sensors telemetry to {self.preferred_sensors_topic} (count={len(data_map)})")
                 except Exception:
                     print(f"Failed to publish sensors to {self.preferred_sensors_topic}", file=sys.stderr)
-                try:
-                    self._client.publish(self.sensors_topic, json.dumps(telemetry_payload), qos=0)
-                    print(f"Published sensors telemetry to legacy {self.sensors_topic} (count={len(data_map)})")
-                except Exception:
-                    print(f"Failed to publish sensors to legacy {self.sensors_topic}", file=sys.stderr)
 
                 # Optionally send completion response with summary
                 if command_id:
@@ -446,12 +438,13 @@ class CentralCoreClient:
             'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
             'sensors': sensors or []
         }
+        # Publish to preferred Vault topic (development-only; legacy dropped)
         try:
-            self._client.publish(self.sensors_topic, json.dumps(payload))
-            print(f"Published sensors list to {self.sensors_topic} (count={len(payload['sensors'])})")
-            self._last_sensors_sent = int(time.time())
+            self._client.publish(self.preferred_sensors_topic, json.dumps(payload), qos=0)
+            print(f"Published sensors list to {self.preferred_sensors_topic} (count={len(payload['sensors'])})")
         except Exception:
-            print(f'Failed to publish sensors to {self.sensors_topic}', file=sys.stderr)
+            print(f'Failed to publish sensors to {self.preferred_sensors_topic}', file=sys.stderr)
+        self._last_sensors_sent = int(time.time())
 
     def run(self):
         # connect first
