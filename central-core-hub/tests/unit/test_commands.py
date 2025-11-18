@@ -96,3 +96,55 @@ def test_handle_sensors_poll_command_ack_and_completion(monkeypatch):
     # check that telemetry payload contains reported sensor
     tele_payload = json.loads(next(p['payload'] for p in dummy.published if p['topic'] == c.preferred_sensors_topic))
     assert 'data' in tele_payload and 'sensor.temp' in tele_payload['data']
+
+
+def test_handle_sensors_set_command_calls_ha_and_responds(monkeypatch):
+    mod = _load_client_module()
+    CentralCoreClient = mod.CentralCoreClient
+    # capture posts
+    posts = []
+
+    class FakeResp:
+        def raise_for_status(self):
+            return None
+
+    def fake_post(url, headers=None, json=None, timeout=10):
+        posts.append({'url': url, 'headers': headers, 'json': json})
+        return FakeResp()
+
+    monkeypatch.setattr(mod, 'requests', type('R', (), {'post': staticmethod(fake_post)}))
+
+    options = {'client_id': 'unit-hub', 'ha_api_url': 'http://ha', 'ha_api_token': 'tok'}
+    c = CentralCoreClient(options)
+    dummy = DummyClient()
+    c._client = dummy
+
+    command = {
+        'command_id': 'set123',
+        'action': 'sensors/set',
+        'payload': {
+            'sensors': [
+                {'entity_id': 'sensor.temp', 'state': '22.0'},
+                {'entity_id': 'sensor.hum', 'state': '43'}
+            ]
+        }
+    }
+    topic = f"hubs/{c.client_id}/cmd/sensors/set"
+    msg = DummyMsg(topic, json.dumps(command).encode('utf-8'))
+
+    c.on_message(None, None, msg)
+
+    # requests.post should be called for each sensor
+    assert len(posts) == 2
+    assert posts[0]['url'].endswith('/api/states/sensor.temp')
+    assert posts[1]['url'].endswith('/api/states/sensor.hum')
+
+    # ACK and completion should be published to response topic
+    ack_topic = f"hubs/{c.client_id}/cmd/{command['command_id']}/response"
+    topics = [p['topic'] for p in dummy.published]
+    assert ack_topic in topics
+    completions = [p for p in dummy.published if p['topic'] == ack_topic]
+    assert len(completions) >= 2
+    # completion payload contains result.summary
+    comp = json.loads(completions[-1]['payload'])
+    assert 'result' in comp and 'set' in comp['result']
