@@ -11,6 +11,10 @@ All notable changes to this add-on will be documented in this file.
 - Feat: read back entity `state` and `attributes` from HA after setting and include both `data` and `attributes` in `hubs/<client_id>/telemetry/sensors` payloads.
 - Test: expanded unit tests to stub POST/GET and assert telemetry and attributes are published.
 
+## 1.0.47 - 2025-11-18
+- Docs: expanded README and CHANGELOG with sensor telemetry and command details
+- Chore: bumped package metadata and repository version to `1.0.47`
+
 ## 1.0.45 - 2025-11-18
 - Chore: remove legacy MQTT topic publishing (development mode uses preferred Vault topics only)
 - Test: add additional unit tests and increase coverage; add `.gitignore` to ignore virtualenv and test artifacts
