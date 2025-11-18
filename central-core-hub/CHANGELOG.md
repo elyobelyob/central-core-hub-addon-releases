@@ -11,6 +11,15 @@ All notable changes to this add-on will be documented in this file.
 - Fix: use timezone-aware UTC datetimes to avoid `datetime.utcnow()` deprecation
 - Misc: small workspace commits and housekeeping
 
+## 1.0.44 - 2025-11-18
+- Feat: Add Vault-compatible sensors command handling (`hubs/<id>/cmd/sensors/poll`) with ACK and completion responses
+- Feat: Publish HA sensors on startup and hourly to preferred Vault topic
+- Test: add unit tests and CI test workflow; improve test coverage
+
+## 1.0.45 - 2025-11-18
+- Chore: remove legacy MQTT topic publishing (development mode uses preferred Vault topics only)
+- Test: add additional unit tests and increase coverage; add `.gitignore` to ignore virtualenv and test artifacts
+
 ## 1.0.42 - 2025-11-17
 - Docker: install `py3-paho-mqtt` via `apk` to avoid pip/PEP668 build errors
 
