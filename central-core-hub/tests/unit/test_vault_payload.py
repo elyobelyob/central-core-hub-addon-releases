@@ -1,29 +1,26 @@
 import json
-from central_core_hub.mqtt_client import build_telemetry, build_vault_payload
+from pathlib import Path
+import importlib.util
+
+
+def _load_client_module():
+    repo_root = Path(__file__).resolve().parents[3]
+    src = repo_root / 'central-core-hub' / 'mqtt_client.py'
+    spec = importlib.util.spec_from_file_location('mqtt_client', str(src))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_build_vault_payload_basic():
+    mod = _load_client_module()
+    build_vault_payload = mod.build_vault_payload
     # create a basic telemetry payload with expected fields
-    import json
-    from pathlib import Path
-    import importlib.util
-
-
-    def _load_client_module():
-        # Load central-core-hub/mqtt_client.py as a module for tests
-        repo_root = Path(__file__).resolve().parents[3]
-        src = repo_root / 'central-core-hub' / 'mqtt_client.py'
-        spec = importlib.util.spec_from_file_location('mqtt_client', str(src))
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
-
-
-    def test_build_vault_payload_basic():
-        mod = _load_client_module()
-        build_vault_payload = mod.build_vault_payload
-        build_telemetry = mod.build_telemetry
-        # create a basic telemetry payload with expected fields
+    payload = {
+        "client_id": "test-hub",
+        "timestamp": "2025-11-18T00:00:00Z",
+        "hostname": "host1",
+        "ip": "192.0.2.1",
         "cpu_count": 4,
         "cpu_percent": 12.3,
         "uptime": 3600,
@@ -48,6 +45,8 @@ def test_build_vault_payload_basic():
 
 
 def test_build_vault_payload_missing_fields():
+    mod = _load_client_module()
+    build_vault_payload = mod.build_vault_payload
     # payload missing metrics should still return a vault object with empty metrics
     payload = {
         "client_id": "test-hub-2",
