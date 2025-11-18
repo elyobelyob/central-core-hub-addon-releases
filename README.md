@@ -30,4 +30,19 @@ This add-on sends telemetry data to a configurable MQTT broker. You can set the 
 	}
 	```
 
+### Vault integration and schema versions
+
+- New option `vault_topic` (optional): when set, the add-on publishes a Vault-friendly compact payload to this topic in addition to the default telemetry topic.
+- Telemetry payload `schema_version`: 1 (full telemetry). A transformed Vault payload is published with `schema_version`: 2.
+
+Integration test:
+
+ - Run the local mosquitto broker and the client for quick manual verification:
+
+ ```bash
+ ./central-core-hub/tests/integration/run_local_test.sh
+ ```
+
+See `central-core-hub/mqtt_client.py` for `build_vault_payload()` implementation.
+
 See `central-core-hub/run.sh` for implementation details.
