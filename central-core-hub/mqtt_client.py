@@ -493,6 +493,43 @@ class CentralCoreClient:
                         print(f"Published sensors.set completion to {comp_topic}")
                     except Exception:
                         print(f"Failed to publish completion to {comp_topic}", file=sys.stderr)
+
+                # Publish telemetry for sensors that were set successfully using
+                # the requested state values so consumers see the new values.
+                try:
+                    data_map = {}
+                    for item in sensors_to_set:
+                        ent = item.get('entity_id')
+                        if ent and ent in results.get('set', []):
+                            st = item.get('state')
+                            # coerce values similar to poll handler
+                            val = st
+                            try:
+                                if isinstance(st, str):
+                                    low = st.lower()
+                                    if low in ('on', 'true'):
+                                        val = True
+                                    elif low in ('off', 'false'):
+                                        val = False
+                                    else:
+                                        if '.' in st:
+                                            val = float(st)
+                                        else:
+                                            val = int(st)
+                            except Exception:
+                                val = st
+                            data_map[ent] = val
+
+                    if data_map:
+                        telemetry_payload = {'data': data_map, 'timestamp': now_iso}
+                        try:
+                            self._client.publish(self.preferred_sensors_topic, json.dumps(telemetry_payload), qos=0)
+                            print(f"Published sensors telemetry to {self.preferred_sensors_topic} after set (count={len(data_map)})")
+                        except Exception:
+                            print(f"Failed to publish sensors telemetry to {self.preferred_sensors_topic}", file=sys.stderr)
+                except Exception:
+                    # don't let telemetry publish failures break the handler
+                    traceback.print_exc()
                 return
         except Exception:
             # fall through to generic message logging
