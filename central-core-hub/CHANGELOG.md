@@ -2,6 +2,11 @@
 
 All notable changes to this add-on will be documented in this file.
 
+## 1.0.46 - 2025-11-18
+- Release: bump to `1.0.46` and minor housekeeping
+- Chore: updated version metadata and repository listing
+
+
 ## 1.0.0 - 2025-11-15
 - Initial add-on repository layout and metadata
 - `config.yaml` and `config.json` added
