@@ -415,6 +415,85 @@ class CentralCoreClient:
                     except Exception:
                         print(f"Failed to publish completion to {comp_topic}", file=sys.stderr)
                 return
+            # sensors set command: hubs/<hub_id>/cmd/sensors/set
+            expected_set_topic = f"hubs/{self.client_id}/cmd/sensors/set"
+            if topic == expected_set_topic:
+                # payload expected to include a list of sensors to set
+                try:
+                    cmd = json.loads(payload) if payload and payload != '<binary>' else {}
+                except Exception:
+                    cmd = {}
+
+                command_id = cmd.get('command_id')
+                if command_id:
+                    ack_topic = f"hubs/{self.client_id}/cmd/{command_id}/response"
+                    ack_payload = {
+                        'status': 'acknowledged',
+                        'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+                    }
+                    try:
+                        self._client.publish(ack_topic, json.dumps(ack_payload), qos=1)
+                        print(f"Published ACK to {ack_topic} for sensors/set")
+                    except Exception:
+                        print(f"Failed to publish ACK to {ack_topic}", file=sys.stderr)
+
+                # Determine sensors to set: accept either dict or list
+                sensors_to_set = []
+                try:
+                    payload_obj = cmd.get('payload') if isinstance(cmd, dict) else None
+                    if isinstance(payload_obj, dict):
+                        s = payload_obj.get('sensors')
+                        if isinstance(s, dict):
+                            # mapping entity->state
+                            for ent, st in s.items():
+                                sensors_to_set.append({'entity_id': ent, 'state': st})
+                        elif isinstance(s, list):
+                            # list of {entity_id, state}
+                            for item in s:
+                                if isinstance(item, dict) and item.get('entity_id'):
+                                    sensors_to_set.append(item)
+                except Exception:
+                    sensors_to_set = []
+
+                results = {'set': [], 'failed': []}
+                # Call Home Assistant API to set each sensor state
+                for item in sensors_to_set:
+                    ent = item.get('entity_id')
+                    st = item.get('state')
+                    if not ent:
+                        continue
+                    try:
+                        if self.ha_api_url and self.ha_api_token and requests is not None:
+                            url = self.ha_api_url.rstrip('/') + f'/api/states/{ent}'
+                            headers = {
+                                'Authorization': f'Bearer {self.ha_api_token}',
+                                'Content-Type': 'application/json'
+                            }
+                            body = {'state': st}
+                            r = requests.post(url, headers=headers, json=body, timeout=10)
+                            r.raise_for_status()
+                            results['set'].append(ent)
+                        else:
+                            # HA not configured; record as failed
+                            results['failed'].append({'entity_id': ent, 'reason': 'no_ha_config'})
+                    except Exception as e:
+                        results['failed'].append({'entity_id': ent, 'reason': str(e)})
+
+                now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+                # send completion with summary
+                if command_id:
+                    comp_topic = f"hubs/{self.client_id}/cmd/{command_id}/response"
+                    comp_payload = {
+                        'status': 'completed',
+                        'result': results,
+                        'timestamp': now_iso
+                    }
+                    try:
+                        self._client.publish(comp_topic, json.dumps(comp_payload), qos=1)
+                        print(f"Published sensors.set completion to {comp_topic}")
+                    except Exception:
+                        print(f"Failed to publish completion to {comp_topic}", file=sys.stderr)
+                return
         except Exception:
             # fall through to generic message logging
             traceback.print_exc()
