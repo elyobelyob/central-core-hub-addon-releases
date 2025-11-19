@@ -2,6 +2,14 @@
 
 All notable changes to this add-on will be documented in this file.
 
+## 1.0.65 - 2025-11-19
+- Feature: added add-on version and telemetry_interval to MQTT telemetry payload
+- Chore: updated version metadata and repository listing to `1.0.65`
+
+### Details (v1.0.65)
+- Feature: telemetry messages now include `addon_version` and `telemetry_interval` fields for monitoring and configuration visibility
+- Chore: bumped package metadata and repository version to `1.0.65`
+
 ## 1.0.64 - 2025-11-19
 - Security: sanitized options logging to hide sensitive certificate and password data
 - Chore: updated version metadata and repository listing to `1.0.64`
