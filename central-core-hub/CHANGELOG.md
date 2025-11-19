@@ -2,6 +2,14 @@
 
 All notable changes to this add-on will be documented in this file.
 
+## 1.0.55 - 2025-11-19
+- Feat: made telemetry publish interval configurable (default 30s)
+- Chore: updated version metadata and repository listing to `1.0.55`
+
+### Details (v1.0.55)
+- Feat: added `telemetry_interval` config option to control how often telemetry is published (in seconds)
+- Chore: bumped package metadata and repository version to `1.0.55`
+
 ## 1.0.54 - 2025-11-19
 - Feat: increased telemetry publish frequency from 30s to 10s for more responsive monitoring
 - Chore: updated version metadata and repository listing to `1.0.54`
