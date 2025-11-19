@@ -2,6 +2,14 @@
 
 All notable changes to this add-on will be documented in this file.
 
+## 1.0.54 - 2025-11-19
+- Feat: increased telemetry publish frequency from 30s to 10s for more responsive monitoring
+- Chore: updated version metadata and repository listing to `1.0.54`
+
+### Details (v1.0.54)
+- Feat: telemetry now publishes every 10 seconds instead of 30 for better real-time updates
+- Chore: bumped package metadata and repository version to `1.0.54`
+
 ## 1.0.53 - 2025-11-19
 - Feat: publish initial telemetry on MQTT connect for immediate state availability
 - Chore: updated version metadata and repository listing to `1.0.53`
