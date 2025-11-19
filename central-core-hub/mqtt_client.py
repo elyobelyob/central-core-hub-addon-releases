@@ -274,9 +274,9 @@ class CentralCoreClient:
         self.mqtt_username = options.get("mqtt_username") or ""
         self.mqtt_password = options.get("mqtt_password") or ""
         self.mqtt_tls = bool(options.get("mqtt_tls"))
-        self.mqtt_ca = options.get("mqtt_ca_cert") or ""
-        self.mqtt_cert = options.get("mqtt_client_cert") or ""
-        self.mqtt_key = options.get("mqtt_client_key") or ""
+        self.mqtt_ca = ""
+        self.mqtt_cert = ""
+        self.mqtt_key = ""
         self.mqtt_cert_bundle = options.get("mqtt_cert_bundle") or ""
         # Handle certificate content vs paths
         self._setup_cert_files()

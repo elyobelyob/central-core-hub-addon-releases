@@ -281,14 +281,17 @@ def test_cert_content_handling():
         "mqtt_username": "",
         "mqtt_password": "",
         "mqtt_tls": True,
-        "mqtt_ca_cert": ca_content,
-        "mqtt_client_cert": cert_content,
-        "mqtt_client_key": key_content,
+        "mqtt_cert_bundle": "",
         "client_id": "test-cert-content",
         "telemetry_interval": 30
     }
     
     c = CentralCoreClient(options)
+    # Set cert content directly (simulating what bundle would do)
+    c.mqtt_ca = ca_content
+    c.mqtt_cert = cert_content
+    c.mqtt_key = key_content
+    c._setup_cert_files()  # Re-run to process the content
     
     # Check that temp files were created
     assert c.mqtt_ca.endswith(".ca.crt")
@@ -330,14 +333,17 @@ def test_cert_path_handling():
         "mqtt_username": "",
         "mqtt_password": "",
         "mqtt_tls": True,
-        "mqtt_ca_cert": "/path/to/ca.pem",
-        "mqtt_client_cert": "/path/to/cert.pem",
-        "mqtt_client_key": "/path/to/key.pem",
+        "mqtt_cert_bundle": "",
         "client_id": "test-cert-path",
         "telemetry_interval": 30
     }
     
     c = CentralCoreClient(options)
+    # Set cert paths directly
+    c.mqtt_ca = "/path/to/ca.pem"
+    c.mqtt_cert = "/path/to/cert.pem"
+    c.mqtt_key = "/path/to/key.pem"
+    c._setup_cert_files()  # Re-run to process
     
     # Should remain as paths
     assert c.mqtt_ca == "/path/to/ca.pem"
