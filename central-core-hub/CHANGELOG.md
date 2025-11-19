@@ -2,6 +2,14 @@
 
 All notable changes to this add-on will be documented in this file.
 
+## 1.0.64 - 2025-11-19
+- Security: sanitized options logging to hide sensitive certificate and password data
+- Chore: updated version metadata and repository listing to `1.0.64`
+
+### Details (v1.0.64)
+- Security: options logging now redacts `mqtt_cert_bundle` and `mqtt_password` fields to prevent certificate content exposure in logs
+- Chore: bumped package metadata and repository version to `1.0.64`
+
 ## 1.0.63 - 2025-11-19
 - UI: removed individual certificate config fields, simplified to use only `mqtt_cert_bundle`
 - Chore: updated version metadata and repository listing to `1.0.63`
