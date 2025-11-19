@@ -11,6 +11,7 @@ RUN apk add --no-cache bash curl ca-certificates mosquitto-clients jq python3 py
 
 COPY run.sh /run.sh
 COPY *.py /
+COPY config.json /config.json
 RUN chmod +x /run.sh
 
 CMD ["/run.sh"]
