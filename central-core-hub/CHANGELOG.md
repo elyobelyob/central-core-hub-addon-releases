@@ -2,6 +2,15 @@
 
 All notable changes to this add-on will be documented in this file.
 
+## 1.0.66 - 2025-11-19
+- Chore: applied Black code formatting and Flake8 linting fixes
+- Chore: updated version metadata and repository listing to `1.0.66`
+
+### Details (v1.0.66)
+- Chore: formatted all Python code with Black for consistent styling
+- Chore: fixed Flake8 linting issues by removing unused imports
+- Chore: bumped package metadata and repository version to `1.0.66`
+
 ## 1.0.65 - 2025-11-19
 - Feature: added add-on version and telemetry_interval to MQTT telemetry payload
 - Chore: updated version metadata and repository listing to `1.0.65`

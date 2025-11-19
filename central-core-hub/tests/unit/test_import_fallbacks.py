@@ -2,31 +2,30 @@ import importlib.util
 from pathlib import Path
 import types
 import sys
-import os
 
 
 def test_container_files_present_for_dockerfile_copy():
     """Test that all Python files required for container are present.
-    
+
     The Dockerfile copies *.py files to root, so ensure all imported modules exist.
     """
     repo_root = Path(__file__).resolve().parents[3]
     central_core_hub_dir = repo_root / "central-core-hub"
-    
+
     # Files that must be present for imports to work in container
     required_files = [
         "mqtt_client.py",
-        "handlers.py", 
+        "handlers.py",
         "telemetry.py",
         "helpers.py",
-        "mqtt_runtime.py"
+        "mqtt_runtime.py",
     ]
-    
+
     missing_files = []
     for filename in required_files:
         if not (central_core_hub_dir / filename).exists():
             missing_files.append(filename)
-    
+
     assert not missing_files, f"Missing required files for container: {missing_files}"
 
 
