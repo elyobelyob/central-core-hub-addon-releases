@@ -2,6 +2,14 @@
 
 All notable changes to this add-on will be documented in this file.
 
+## 1.0.52 - 2025-11-19
+- Fix: updated MQTT client to use Callback API version 2 to resolve deprecation warnings and improve compatibility
+- Chore: updated version metadata and repository listing to `1.0.52`
+
+### Details (v1.0.52)
+- Fix: MQTT client initialization now uses `callback_api_version=2` when available, falling back gracefully for older paho-mqtt versions
+- Chore: bumped package metadata and repository version to `1.0.52`
+
 ## 1.0.51 - 2025-11-19
 - Feat: added UTC timestamps to all log messages for better debugging
 - Chore: formatted code with Black and fixed Flake8 linting issues
