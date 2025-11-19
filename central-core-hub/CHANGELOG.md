@@ -2,6 +2,14 @@
 
 All notable changes to this add-on will be documented in this file.
 
+## 1.0.68 - 2025-11-19
+- Fix: Ensure addon_version is properly reported in HA add-on environment
+- Chore: updated version metadata and repository listing to `1.0.68`
+
+### Details (v1.0.68)
+- Fix: Copy config.json to container root and update get_addon_version to read from correct path
+- Chore: bumped package metadata and repository version to `1.0.68`
+
 ## 1.0.67 - 2025-11-19
 - Fix: corrected addon_version path resolution in telemetry payload
 - Chore: updated version metadata and repository listing to `1.0.67`
