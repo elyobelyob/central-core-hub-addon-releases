@@ -63,12 +63,18 @@ def setup_mqtt_client(ctx, mqtt_mod):
     else:
         # Create the real paho client and apply username/password if present
         try:
-            ctx._client = mqtt_mod.Client(client_id=ctx.client_id, clean_session=True)
+            if hasattr(mqtt_mod, 'CallbackAPIVersion'):
+                ctx._client = mqtt_mod.Client(client_id=ctx.client_id, clean_session=True, callback_api_version=mqtt_mod.CallbackAPIVersion.VERSION2)
+            else:
+                ctx._client = mqtt_mod.Client(client_id=ctx.client_id, clean_session=True)
         except TypeError:
             try:
-                ctx._client = mqtt_mod.Client(client_id=ctx.client_id)
+                ctx._client = mqtt_mod.Client(client_id=ctx.client_id, clean_session=True)
             except TypeError:
-                ctx._client = mqtt_mod.Client()
+                try:
+                    ctx._client = mqtt_mod.Client(client_id=ctx.client_id)
+                except TypeError:
+                    ctx._client = mqtt_mod.Client()
         if getattr(ctx, "mqtt_username", None):
             ctx._client.username_pw_set(ctx.mqtt_username, ctx.mqtt_password)
 
