@@ -2,6 +2,16 @@
 
 All notable changes to this add-on will be documented in this file.
 
+## 1.0.60 - 2025-11-19
+- Feature: support certificate content in config options, automatically writes to temp files for MQTT TLS
+- Test: added tests for certificate content and path handling
+- Chore: updated version metadata and repository listing to `1.0.60`
+
+### Details (v1.0.60)
+- Feature: MQTT certificate options now accept either file paths or certificate content (detected by "-----BEGIN" prefix)
+- Test: added `test_cert_content_handling` and `test_cert_path_handling` to verify cert handling logic
+- Chore: bumped package metadata and repository version to `1.0.60`
+
 ## 1.0.59 - 2025-11-19
 - Test: added test to verify required Python files exist for Dockerfile copy operations
 - Chore: updated version metadata and repository listing to `1.0.59`

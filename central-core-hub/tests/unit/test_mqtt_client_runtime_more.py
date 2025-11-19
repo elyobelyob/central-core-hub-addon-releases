@@ -254,3 +254,92 @@ def test_run_iteration_handles_publish_and_sensors_exceptions(monkeypatch):
 
     # Should not raise
     c.run_iteration()
+
+
+def test_cert_content_handling():
+    """Test that certificate content is written to temp files."""
+    import tempfile
+    import os
+    from pathlib import Path
+    import importlib.util
+    
+    repo_root = Path(__file__).resolve().parents[3]
+    src = repo_root / "central-core-hub" / "mqtt_client.py"
+    spec = importlib.util.spec_from_file_location("mqtt_client_cert_test", str(src))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    CentralCoreClient = mod.CentralCoreClient
+    
+    # Mock options with cert content
+    ca_content = "-----BEGIN CERTIFICATE-----\nMOCK CA\n-----END CERTIFICATE-----"
+    cert_content = "-----BEGIN CERTIFICATE-----\nMOCK CERT\n-----END CERTIFICATE-----"
+    key_content = "-----BEGIN PRIVATE KEY-----\nMOCK KEY\n-----END PRIVATE KEY-----"
+    
+    options = {
+        "mqtt_host": "localhost",
+        "mqtt_port": 1883,
+        "mqtt_username": "",
+        "mqtt_password": "",
+        "mqtt_tls": True,
+        "mqtt_ca_cert": ca_content,
+        "mqtt_client_cert": cert_content,
+        "mqtt_client_key": key_content,
+        "client_id": "test-cert-content",
+        "telemetry_interval": 30
+    }
+    
+    c = CentralCoreClient(options)
+    
+    # Check that temp files were created
+    assert c.mqtt_ca.endswith(".ca.crt")
+    assert os.path.exists(c.mqtt_ca)
+    with open(c.mqtt_ca, 'r') as f:
+        assert f.read() == ca_content
+    
+    assert c.mqtt_cert.endswith(".client.crt")
+    assert os.path.exists(c.mqtt_cert)
+    with open(c.mqtt_cert, 'r') as f:
+        assert f.read() == cert_content
+    
+    assert c.mqtt_key.endswith(".client.key")
+    assert os.path.exists(c.mqtt_key)
+    with open(c.mqtt_key, 'r') as f:
+        assert f.read() == key_content
+    
+    # Cleanup
+    os.unlink(c.mqtt_ca)
+    os.unlink(c.mqtt_cert)
+    os.unlink(c.mqtt_key)
+
+
+def test_cert_path_handling():
+    """Test that certificate paths are used as-is."""
+    from pathlib import Path
+    import importlib.util
+    
+    repo_root = Path(__file__).resolve().parents[3]
+    src = repo_root / "central-core-hub" / "mqtt_client.py"
+    spec = importlib.util.spec_from_file_location("mqtt_client_cert_path_test", str(src))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    CentralCoreClient = mod.CentralCoreClient
+    
+    options = {
+        "mqtt_host": "localhost",
+        "mqtt_port": 1883,
+        "mqtt_username": "",
+        "mqtt_password": "",
+        "mqtt_tls": True,
+        "mqtt_ca_cert": "/path/to/ca.pem",
+        "mqtt_client_cert": "/path/to/cert.pem",
+        "mqtt_client_key": "/path/to/key.pem",
+        "client_id": "test-cert-path",
+        "telemetry_interval": 30
+    }
+    
+    c = CentralCoreClient(options)
+    
+    # Should remain as paths
+    assert c.mqtt_ca == "/path/to/ca.pem"
+    assert c.mqtt_cert == "/path/to/cert.pem"
+    assert c.mqtt_key == "/path/to/key.pem"
