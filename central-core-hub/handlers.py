@@ -259,8 +259,12 @@ def handle_message(
                 enabled_map = {}
                 for ent in data_map.keys():
                     attrs = readback_attrs.get(ent, {}) or {}  # pragma: no cover
-                    names_map[ent] = attrs.get("friendly_name") or ent  # pragma: no cover
-                    enabled_map[ent] = not bool(attrs.get("disabled_by"))  # pragma: no cover
+                    names_map[ent] = (
+                        attrs.get("friendly_name") or ent
+                    )  # pragma: no cover
+                    enabled_map[ent] = not bool(
+                        attrs.get("disabled_by")
+                    )  # pragma: no cover
 
                 if data_map:  # pragma: no cover
                     telemetry_payload = {

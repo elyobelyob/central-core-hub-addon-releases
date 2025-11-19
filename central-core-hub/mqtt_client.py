@@ -9,8 +9,6 @@ Responsibilities:
 - Subscribe to `hubs/{client_id}/commands` and print received commands
 - Reconnect automatically and log connection lifecycle to stdout
 """
-from datetime import datetime, timezone
-
 import importlib.util
 import json
 import os
@@ -19,6 +17,14 @@ import socket
 import sys
 import time
 import traceback
+from datetime import datetime, timezone
+
+
+def _log(msg, file=sys.stdout):
+    """Log a message with UTC timestamp."""
+    ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    print(f"[{ts}] {msg}", file=file)
+
 
 try:
     import requests
@@ -32,9 +38,9 @@ except Exception:
     # in environments where `paho-mqtt` isn't installed. The runtime
     # CentralCoreClient will require a working `paho-mqtt` installation
     # if it is instantiated.
-    print(
+    _log(
         "paho-mqtt not installed; MQTT functionality disabled for import-time",
-        file=sys.stderr,
+        sys.stderr,
     )
     mqtt = None
 
@@ -193,7 +199,7 @@ except Exception:
     pass
 
 
-def _read_proc_stat():
+def _read_proc_stat():  # noqa: F811
     try:
         with open("/proc/stat", "r") as f:
             line = f.readline()
@@ -208,7 +214,7 @@ def _read_proc_stat():
         return None, None
 
 
-def get_cpu_percent():
+def get_cpu_percent():  # noqa: F811
     # Simple /proc/stat based CPU percentage over short interval
     idle1, total1 = _read_proc_stat()
     if idle1 is None:
@@ -353,7 +359,7 @@ class CentralCoreClient:
     def _publish(self, topic, payload, qos=0):
         """Publish and log the MQTT publish action and result."""
         try:
-            print(
+            _log(
                 f"MQTT -> PUBLISH to {topic} qos={qos} len={len(payload) if payload is not None else 0}"
             )
             result = self._client.publish(topic, payload, qos=qos)
@@ -362,35 +368,31 @@ class CentralCoreClient:
                 rc = getattr(result, "rc", None)
             except Exception:
                 rc = None
-            print(f"MQTT <- PUBLISH result for {topic} rc={rc}")
+            _log(f"MQTT <- PUBLISH result for {topic} rc={rc}")
             return result
         except Exception:
-            print(f"MQTT ERROR publishing to {topic}", file=sys.stderr)
+            _log(f"MQTT ERROR publishing to {topic}", sys.stderr)
             traceback.print_exc()
             return None
 
     def on_connect(self, client, userdata, flags, rc):
-        print(
-            f"{datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')} Connected to MQTT broker with rc={rc}"
-        )
+        _log(f"Connected to MQTT broker with rc={rc}")
         try:
             # Subscribe to Vault command pattern with QoS=1
             client.subscribe(self.cmd_sub_topic, qos=1)
-            print(f"Subscribed to {self.cmd_sub_topic} (Vault command pattern)")
+            _log(f"Subscribed to {self.cmd_sub_topic} (Vault command pattern)")
         except Exception:
-            print("Subscription failed", file=sys.stderr)
+            _log("Subscription failed", sys.stderr)
         self._connected = True
         # Publish sensors list immediately on startup/connection
         try:
             self.publish_sensors()
         except Exception:
             # do not let sensor publish failures prevent client
-            print("Failed to publish sensors on connect", file=sys.stderr)
+            _log("Failed to publish sensors on connect", sys.stderr)
 
     def on_disconnect(self, client, userdata, rc):
-        print(
-            f"{datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')} Disconnected from MQTT broker rc={rc}"
-        )
+        _log(f"Disconnected from MQTT broker rc={rc}")
         self._connected = False
 
     def on_message(self, client, userdata, msg):
@@ -399,7 +401,7 @@ class CentralCoreClient:
                 payload = msg.payload.decode("utf-8", errors="replace")
             except Exception:
                 payload = "<binary>"
-            print(f"Received message on {msg.topic}: {payload}")
+            _log(f"Received message on {msg.topic}: {payload}")
             # Prefer a local import of the handlers module; fall back to
             # loading relative to the file for test contexts.
             try:
@@ -442,7 +444,7 @@ class CentralCoreClient:
                     return True
                 # timed out waiting for on_connect
                 try:
-                    print("Connection timed out, retrying in 5s")
+                    _log("Connection timed out, retrying in 5s")
                 except Exception:
                     pass
                 try:
@@ -451,7 +453,7 @@ class CentralCoreClient:
                     pass
             else:
                 try:
-                    print("MQTT connect failed, retrying in 5s")
+                    _log("MQTT connect failed, retrying in 5s")
                 except Exception:
                     pass
             time.sleep(5)
@@ -463,9 +465,7 @@ class CentralCoreClient:
         shim raises or returns errors).
         """
         try:
-            print(
-                f"{datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')} Connecting to {self.mqtt_host}:{self.mqtt_port} as {self.client_id}"
-            )
+            _log(f"Connecting to {self.mqtt_host}:{self.mqtt_port} as {self.client_id}")
             self._client.connect(self.mqtt_host, self.mqtt_port, keepalive=60)
             self._client.loop_start()
             return True
@@ -488,28 +488,28 @@ class CentralCoreClient:
         payload = build_telemetry(self.client_id)
         try:
             self._publish(self.telemetry_topic, payload)
-            print(f"Published telemetry to {self.telemetry_topic}")
+            _log(f"Published telemetry to {self.telemetry_topic}")
         except Exception:
-            print("Failed to publish telemetry")
+            _log("Failed to publish telemetry")
         # Also publish to an optional vault-specific topic if configured.
         if self.vault_topic:
             try:
                 vault_payload = build_vault_payload(payload)
                 if vault_payload:
                     self._publish(self.vault_topic, vault_payload)
-                    print(
+                    _log(
                         f"Also published vault-formatted telemetry to {self.vault_topic}"
                     )
                 else:
                     # Fallback: publish the full payload if transformation failed
                     self._publish(self.vault_topic, payload)
-                    print(
+                    _log(
                         f"Also published (fallback) telemetry to vault topic {self.vault_topic}"
                     )
             except Exception:
-                print(
+                _log(
                     f"Failed to publish telemetry to vault topic {self.vault_topic}",
-                    file=sys.stderr,
+                    sys.stderr,
                 )
 
     def publish_sensors(self):
@@ -531,13 +531,13 @@ class CentralCoreClient:
         # Publish to preferred Vault topic (development-only; legacy dropped)
         try:
             self._publish(self.preferred_sensors_topic, json.dumps(payload), qos=0)
-            print(
+            _log(
                 f"Published sensors list to {self.preferred_sensors_topic} (count={len(payload['sensors'])})"
             )
         except Exception:
-            print(
+            _log(
                 f"Failed to publish sensors to {self.preferred_sensors_topic}",
-                file=sys.stderr,
+                sys.stderr,
             )
         self._last_sensors_sent = int(time.time())
 
@@ -561,21 +561,21 @@ class CentralCoreClient:
         """
         if not self._connected:
             try:
-                print("Not connected, attempting reconnect")
+                _log("Not connected, attempting reconnect")
             except Exception:
                 pass
             self.connect()
         try:
             self.publish_telemetry()
         except Exception:
-            print("Telemetry publish exception", file=sys.stderr)
+            _log("Telemetry publish exception", sys.stderr)
         # send telemetry every 30s; send sensors every hour
         now = int(time.time())
         try:
             if now - self._last_sensors_sent >= 3600:
                 self.publish_sensors()
         except Exception:
-            print("Sensors publish exception", file=sys.stderr)
+            _log("Sensors publish exception", sys.stderr)
 
 
 def main():

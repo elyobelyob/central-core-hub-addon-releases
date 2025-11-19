@@ -3,6 +3,7 @@ import types
 import importlib.util
 from pathlib import Path
 
+
 def _load_client_module():
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "mqtt_client.py"
