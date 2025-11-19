@@ -2,6 +2,14 @@
 
 All notable changes to this add-on will be documented in this file.
 
+## 1.0.58 - 2025-11-19
+- Fix: corrected Dockerfile to copy all Python files for proper module imports in container
+- Chore: updated version metadata and repository listing to `1.0.58`
+
+### Details (v1.0.58)
+- Fix: Dockerfile now copies *.py files to root directory to ensure relative imports work in the container
+- Chore: bumped package metadata and repository version to `1.0.58`
+
 ## 1.0.57 - 2025-11-19
 - Fix: added debug logging for MQTT connection troubleshooting
 - Chore: updated version metadata and repository listing to `1.0.57`

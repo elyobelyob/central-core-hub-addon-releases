@@ -1,7 +1,7 @@
 home-assistant
 name: "Central Core Hub"
 description: "Central Core Hub Add-on"
-version: "1.0.57"
+version: "1.0.58"
 slug: "central-core-hub"
 init: false
 arch:
