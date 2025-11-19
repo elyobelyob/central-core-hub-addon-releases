@@ -51,8 +51,18 @@ OPTIONS_PATH = "/data/options.json"
 
 def get_addon_version():
     """Get the add-on version from config.json."""
+    # Try HA add-on location first
     try:
-        # In Home Assistant add-on environment, config.json is in the root
+        with open("/config.json", "r") as f:
+            config = json.load(f)
+            version = config.get("version")
+            if version:
+                return version
+    except Exception:
+        pass
+
+    # Fallback to development location
+    try:
         config_path = pathlib.Path(__file__).parent / "config.json"
         with open(config_path, "r") as f:
             config = json.load(f)
