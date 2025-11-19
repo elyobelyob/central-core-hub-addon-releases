@@ -586,7 +586,12 @@ class CentralCoreClient:
 
 def main():
     options = load_options()
+    _log(f"Loaded options: {options}")
     c = CentralCoreClient(options)
+    _log(f"Created client with mqtt_host={c.mqtt_host}, mqtt_port={c.mqtt_port}")
+    if not c.mqtt_host:
+        _log("ERROR: mqtt_host is not configured. Please set MQTT_HOST environment variable or configure in options.", sys.stderr)
+        return
     c.run()
 
 
