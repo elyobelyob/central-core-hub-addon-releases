@@ -2,6 +2,14 @@
 
 All notable changes to this add-on will be documented in this file.
 
+## 1.0.59 - 2025-11-19
+- Test: added test to verify required Python files exist for Dockerfile copy operations
+- Chore: updated version metadata and repository listing to `1.0.59`
+
+### Details (v1.0.59)
+- Test: added `test_container_files_present_for_dockerfile_copy` to ensure all necessary module files are present before deployment
+- Chore: bumped package metadata and repository version to `1.0.59`
+
 ## 1.0.58 - 2025-11-19
 - Fix: corrected Dockerfile to copy all Python files for proper module imports in container
 - Chore: updated version metadata and repository listing to `1.0.58`
