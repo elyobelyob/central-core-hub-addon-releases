@@ -390,6 +390,11 @@ class CentralCoreClient:
         except Exception:
             # do not let sensor publish failures prevent client
             _log("Failed to publish sensors on connect", sys.stderr)
+        # Publish initial telemetry on connection
+        try:
+            self.publish_telemetry()
+        except Exception:
+            _log("Failed to publish telemetry on connect", sys.stderr)
 
     def on_disconnect(self, client, userdata, rc):
         _log(f"Disconnected from MQTT broker rc={rc}")

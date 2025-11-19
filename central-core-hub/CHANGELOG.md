@@ -2,6 +2,14 @@
 
 All notable changes to this add-on will be documented in this file.
 
+## 1.0.53 - 2025-11-19
+- Feat: publish initial telemetry on MQTT connect for immediate state availability
+- Chore: updated version metadata and repository listing to `1.0.53`
+
+### Details (v1.0.53)
+- Feat: on MQTT connection, publish both sensors (if HA configured) and telemetry immediately
+- Chore: bumped package metadata and repository version to `1.0.53`
+
 ## 1.0.52 - 2025-11-19
 - Fix: updated MQTT client to use Callback API version 2 to resolve deprecation warnings and improve compatibility
 - Chore: updated version metadata and repository listing to `1.0.52`
