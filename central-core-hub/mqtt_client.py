@@ -552,7 +552,7 @@ class CentralCoreClient:
         try:
             while True:
                 self.run_iteration()
-                time.sleep(30)
+                time.sleep(10)
         finally:
             try:
                 self._client.loop_stop()
@@ -562,7 +562,7 @@ class CentralCoreClient:
 
     def run_iteration(self):
         """Single run loop iteration: reconnect if needed, publish telemetry
-        and optionally publish sensors. Extracted for unit testing.
+        and optionally publish sensors. Called every 10 seconds.
         """
         if not self._connected:
             try:
