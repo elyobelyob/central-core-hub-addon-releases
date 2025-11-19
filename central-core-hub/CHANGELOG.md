@@ -2,6 +2,17 @@
 
 All notable changes to this add-on will be documented in this file.
 
+## 1.0.51 - 2025-11-19
+- Feat: added UTC timestamps to all log messages for better debugging
+- Chore: formatted code with Black and fixed Flake8 linting issues
+- Chore: updated version metadata and repository listing to `1.0.51`
+
+### Details (v1.0.51)
+- Feat: all print statements replaced with timestamped logging using ISO 8601 UTC format
+- Chore: code reformatted with Black for consistent style
+- Chore: resolved all Flake8 linting warnings and errors
+- Chore: bumped package metadata and repository version to `1.0.51`
+
 ## 1.0.50 - 2025-11-19
 - Test: comprehensive unit test suite with 95%+ coverage; Docker-based cross-platform testing
 - Feat: include friendly names and enabled status in sensor telemetry payloads
