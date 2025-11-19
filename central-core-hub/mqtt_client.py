@@ -15,6 +15,7 @@ import os
 import pathlib
 import socket
 import sys
+import tempfile
 import time
 import traceback
 from datetime import datetime, timezone
@@ -275,6 +276,8 @@ class CentralCoreClient:
         self.mqtt_ca = options.get("mqtt_ca_cert") or ""
         self.mqtt_cert = options.get("mqtt_client_cert") or ""
         self.mqtt_key = options.get("mqtt_client_key") or ""
+        # Handle certificate content vs paths
+        self._setup_cert_files()
         self.client_id = options.get(
             "client_id"
         ) or socket.gethostname().lower().replace(" ", "-")
@@ -356,6 +359,24 @@ class CentralCoreClient:
         self._connected = False
         # track last sensors publish time (epoch seconds)
         self._last_sensors_sent = 0
+
+    def _setup_cert_files(self):
+        """Handle certificate content vs file paths."""
+        def _handle_cert(cert_str, suffix):
+            if not cert_str:
+                return ""
+            if cert_str.startswith("-----BEGIN"):
+                # It's certificate content, write to temp file
+                with tempfile.NamedTemporaryFile(mode='w', suffix=suffix, delete=False) as f:
+                    f.write(cert_str)
+                    return f.name
+            else:
+                # It's a file path
+                return cert_str
+        
+        self.mqtt_ca = _handle_cert(self.mqtt_ca, ".ca.crt")
+        self.mqtt_cert = _handle_cert(self.mqtt_cert, ".client.crt")
+        self.mqtt_key = _handle_cert(self.mqtt_key, ".client.key")
 
     def _publish(self, topic, payload, qos=0):
         """Publish and log the MQTT publish action and result."""
