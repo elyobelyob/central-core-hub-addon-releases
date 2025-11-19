@@ -2,6 +2,14 @@
 
 All notable changes to this add-on will be documented in this file.
 
+## 1.0.61 - 2025-11-19
+- Security: changed certificate and password config fields to password type for UI hiding
+- Chore: updated version metadata and repository listing to `1.0.61`
+
+### Details (v1.0.61)
+- Security: MQTT password, CA cert, client cert, and client key fields now use "password" schema type to hide sensitive data in Home Assistant UI
+- Chore: bumped package metadata and repository version to `1.0.61`
+
 ## 1.0.60 - 2025-11-19
 - Feature: support certificate content in config options, automatically writes to temp files for MQTT TLS
 - Test: added tests for certificate content and path handling
