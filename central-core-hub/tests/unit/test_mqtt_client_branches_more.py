@@ -166,7 +166,7 @@ def test_publish_telemetry_vault_transform_raises(monkeypatch):
 
     dummy.publish = pub
     c._client = dummy
-    mod.build_telemetry = lambda cid: "raw"
+    mod.build_telemetry = lambda cid, **kwargs: "raw"
 
     def bad_vault(raw):
         raise RuntimeError("vault-err")

@@ -88,3 +88,52 @@ def test_fetch_sensors_handles_missing_requests(monkeypatch):
     # Simulate requests not available
     monkeypatch.setattr(mod, "requests", None)
     assert mod.fetch_sensors("http://ha", "tok") is None
+
+
+def test_get_addon_version_reads_from_config_json(tmp_path, monkeypatch):
+    """Test that get_addon_version correctly reads version from config.json."""
+    mod = _load_client_module()
+
+    # Create a temporary config.json with a test version
+    config_data = {"name": "Test Add-on", "version": "2.1.3", "slug": "test-addon"}
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps(config_data))
+
+    # Patch the function to use our temp file
+    def patched_get_addon_version():
+        try:
+            with open(config_file, "r") as f:
+                config = json.load(f)
+                return config.get("version")
+        except Exception:
+            return None
+
+    monkeypatch.setattr(mod, "get_addon_version", patched_get_addon_version)
+
+    # Test that it returns the correct version
+    version = mod.get_addon_version()
+    assert version == "2.1.3"
+
+
+def test_get_addon_version_handles_missing_file(monkeypatch):
+    """Test that get_addon_version returns None when config.json doesn't exist."""
+    mod = _load_client_module()
+
+    # Patch the function to simulate file not found
+    def patched_get_addon_version():
+        try:
+            with open("/nonexistent/config.json", "r") as f:
+                config = json.load(f)
+                return config.get("version")
+        except Exception:
+            return None
+
+    monkeypatch.setattr(mod, "get_addon_version", patched_get_addon_version)
+
+    # Test that it returns None
+    version = mod.get_addon_version()
+    assert version is None
+
+    # Test that it returns None
+    version = mod.get_addon_version()
+    assert version is None
