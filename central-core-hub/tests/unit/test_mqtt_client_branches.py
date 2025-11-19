@@ -56,7 +56,7 @@ def test_publish_telemetry_with_vault_transform():
     dummy = DummyPub()
     c._client = dummy
     # stub telemetry builders
-    mod.build_telemetry = lambda cid: "raw-payload"
+    mod.build_telemetry = lambda cid, **kwargs: "raw-payload"
     mod.build_vault_payload = lambda raw: "vault-payload"
     c.publish_telemetry()
     topics = [p["topic"] for p in dummy.published]
@@ -74,7 +74,7 @@ def test_publish_telemetry_with_vault_fallback():
     c = CentralCoreClient(options)
     dummy = DummyPub()
     c._client = dummy
-    mod.build_telemetry = lambda cid: "raw-payload-2"
+    mod.build_telemetry = lambda cid, **kwargs: "raw-payload-2"
     mod.build_vault_payload = lambda raw: None
     c.publish_telemetry()
     vault_msgs = [p for p in dummy.published if p["topic"] == c.vault_topic]

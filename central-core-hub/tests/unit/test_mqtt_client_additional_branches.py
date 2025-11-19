@@ -109,7 +109,7 @@ def test_publish_telemetry_vault_transform_exception_fallback(monkeypatch):
     c._client = PubClient()
 
     # stub telemetry builder: telemetry returns 'raw'
-    monkeypatch.setattr(mod, "build_telemetry", lambda cid: "raw-payload")
+    monkeypatch.setattr(mod, "build_telemetry", lambda cid, **kwargs: "raw-payload")
 
     # Case A: vault transform returns None -> fallback publish expected
     published.clear()

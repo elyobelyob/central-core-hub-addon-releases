@@ -112,7 +112,7 @@ def test_publish_telemetry_handles_publish_exception(monkeypatch):
     # monkeypatch _publish to raise and ensure publish_telemetry handles it
     monkeypatch.setattr(c, "_publish", bad_publish)
     # also ensure build_telemetry exists
-    monkeypatch.setattr(mc, "build_telemetry", lambda cid: "x")
+    monkeypatch.setattr(mc, "build_telemetry", lambda cid, **kwargs: "x")
 
     # should not raise
     c.publish_telemetry()
