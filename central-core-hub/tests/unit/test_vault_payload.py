@@ -5,8 +5,8 @@ import importlib.util
 
 def _load_client_module():
     repo_root = Path(__file__).resolve().parents[3]
-    src = repo_root / 'central-core-hub' / 'mqtt_client.py'
-    spec = importlib.util.spec_from_file_location('mqtt_client', str(src))
+    src = repo_root / "central-core-hub" / "mqtt_client.py"
+    spec = importlib.util.spec_from_file_location("mqtt_client", str(src))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -33,15 +33,15 @@ def test_build_vault_payload_basic():
     v = build_vault_payload(raw)
     assert v is not None
     data = json.loads(v)
-    assert data.get('schema_version') == 2
-    assert data.get('id') == 'test-hub'
-    assert data.get('ts') == payload['timestamp']
-    assert data.get('host') == payload['hostname']
-    assert data.get('ip') == payload['ip']
-    metrics = data.get('metrics')
-    assert metrics['cpu_count'] == 4
-    assert metrics['cpu_percent'] == 12.3
-    assert metrics['uptime'] == 3600
+    assert data.get("schema_version") == 2
+    assert data.get("id") == "test-hub"
+    assert data.get("ts") == payload["timestamp"]
+    assert data.get("host") == payload["hostname"]
+    assert data.get("ip") == payload["ip"]
+    metrics = data.get("metrics")
+    assert metrics["cpu_count"] == 4
+    assert metrics["cpu_percent"] == 12.3
+    assert metrics["uptime"] == 3600
 
 
 def test_build_vault_payload_missing_fields():
@@ -57,5 +57,5 @@ def test_build_vault_payload_missing_fields():
     v = build_vault_payload(raw)
     assert v is not None
     data = json.loads(v)
-    assert data.get('id') == 'test-hub-2'
-    assert isinstance(data.get('metrics'), dict)
+    assert data.get("id") == "test-hub-2"
+    assert isinstance(data.get("metrics"), dict)
