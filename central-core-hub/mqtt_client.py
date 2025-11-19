@@ -83,7 +83,16 @@ try:
     get_cpu_percent = _helpers_mod.get_cpu_percent
 
     # wrap telemetry.build_telemetry to inject this module's get_cpu_percent at call time
-    def build_telemetry(client_id, get_cpu_percent=None, uptime_fn=None, loadavg_fn=None, mem_info_fn=None, disk_info_fn=None, version=None, telemetry_interval=None):
+    def build_telemetry(
+        client_id,
+        get_cpu_percent=None,
+        uptime_fn=None,
+        loadavg_fn=None,
+        mem_info_fn=None,
+        disk_info_fn=None,
+        version=None,
+        telemetry_interval=None,
+    ):
         return _tele_mod.build_telemetry(
             client_id,
             get_cpu_percent=get_cpu_percent or get_cpu_percent,
@@ -94,6 +103,7 @@ try:
             version=version or get_addon_version(),
             telemetry_interval=telemetry_interval or 30,
         )
+
     build_vault_payload = _tele_mod.build_vault_payload
 except Exception:
     # Fallback: load modules relative to this file using importlib
@@ -158,7 +168,16 @@ except Exception:
         spec_t.loader.exec_module(_tele)
 
         # build_telemetry wrapper injects this module's get_cpu_percent
-        def build_telemetry(client_id, get_cpu_percent=None, uptime_fn=None, loadavg_fn=None, mem_info_fn=None, disk_info_fn=None, version=None, telemetry_interval=None):
+        def build_telemetry(
+            client_id,
+            get_cpu_percent=None,
+            uptime_fn=None,
+            loadavg_fn=None,
+            mem_info_fn=None,
+            disk_info_fn=None,
+            version=None,
+            telemetry_interval=None,
+        ):
             return _tele.build_telemetry(
                 client_id,
                 get_cpu_percent=get_cpu_percent or get_cpu_percent,
@@ -187,7 +206,9 @@ except Exception:
 try:
     _orig_bt = build_telemetry
 
-    def _wrapped_build_telemetry(client_id, version=None, telemetry_interval=None, **kwargs):
+    def _wrapped_build_telemetry(
+        client_id, version=None, telemetry_interval=None, **kwargs
+    ):
         modname = getattr(_orig_bt, "__module__", None)
         tele_mod = sys.modules.get(modname) if modname else None
         old = None
@@ -198,7 +219,13 @@ try:
             except Exception:
                 pass
         try:
-            return _orig_bt(client_id, get_cpu_percent=get_cpu_percent, version=version, telemetry_interval=telemetry_interval, **kwargs)
+            return _orig_bt(
+                client_id,
+                get_cpu_percent=get_cpu_percent,
+                version=version,
+                telemetry_interval=telemetry_interval,
+                **kwargs,
+            )
         finally:
             if tele_mod is not None:
                 try:
@@ -377,6 +404,7 @@ class CentralCoreClient:
 
     def _setup_cert_files(self):
         """Handle certificate content vs file paths, and parse bundle if provided."""
+
         def _read_content_or_file(value):
             if not value:
                 return ""
@@ -385,31 +413,33 @@ class CentralCoreClient:
             else:
                 # Assume it's a file path, try to read
                 try:
-                    with open(value, 'r') as f:
+                    with open(value, "r") as f:
                         return f.read()
                 except Exception:
                     _log(f"Warning: Could not read cert file {value}")
                     return ""
-        
+
         # If bundle is provided, parse it
         if self.mqtt_cert_bundle:
             bundle_content = _read_content_or_file(self.mqtt_cert_bundle)
             if bundle_content:
                 self._parse_cert_bundle(bundle_content)
-        
+
         # Now handle individual certs
         def _handle_cert(cert_str, suffix):
             if not cert_str:
                 return ""
             if cert_str.startswith("-----BEGIN"):
                 # It's certificate content, write to temp file
-                with tempfile.NamedTemporaryFile(mode='w', suffix=suffix, delete=False) as f:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", suffix=suffix, delete=False
+                ) as f:
                     f.write(cert_str)
                     return f.name
             else:
                 # It's a file path
                 return cert_str
-        
+
         self.mqtt_ca = _handle_cert(self.mqtt_ca, ".ca.crt")
         self.mqtt_cert = _handle_cert(self.mqtt_cert, ".client.crt")
         self.mqtt_key = _handle_cert(self.mqtt_key, ".client.key")
@@ -419,17 +449,19 @@ class CentralCoreClient:
         # Find all PEM blocks
         pem_pattern = r"-----BEGIN ([^-]+)-----\n(.*?)\n-----END \1-----"
         matches = re.findall(pem_pattern, bundle_content, re.DOTALL)
-        
+
         certs = []
         keys = []
-        
+
         for block_type, content in matches:
-            full_block = f"-----BEGIN {block_type}-----\n{content}\n-----END {block_type}-----"
+            full_block = (
+                f"-----BEGIN {block_type}-----\n{content}\n-----END {block_type}-----"
+            )
             if "CERTIFICATE" in block_type:
                 certs.append(full_block)
             elif "PRIVATE KEY" in block_type:
                 keys.append(full_block)
-        
+
         # Assume first cert is CA, second is client cert
         if not self.mqtt_ca and len(certs) > 0:
             self.mqtt_ca = certs[0]
@@ -572,7 +604,11 @@ class CentralCoreClient:
         return False
 
     def publish_telemetry(self):
-        payload = build_telemetry(self.client_id, version=get_addon_version(), telemetry_interval=self.telemetry_interval)
+        payload = build_telemetry(
+            self.client_id,
+            version=get_addon_version(),
+            telemetry_interval=self.telemetry_interval,
+        )
         try:
             self._publish(self.telemetry_topic, payload)
             _log(f"Published telemetry to {self.telemetry_topic}")
@@ -668,16 +704,23 @@ class CentralCoreClient:
 def main():
     options = load_options()
     # Sanitize options for logging (hide sensitive data)
-    safe_options = {k: v for k, v in options.items() if k not in ['mqtt_password', 'mqtt_cert_bundle']}
-    if 'mqtt_cert_bundle' in options and options['mqtt_cert_bundle']:
-        safe_options['mqtt_cert_bundle'] = '[REDACTED]'
-    if 'mqtt_password' in options and options['mqtt_password']:
-        safe_options['mqtt_password'] = '[REDACTED]'
+    safe_options = {
+        k: v
+        for k, v in options.items()
+        if k not in ["mqtt_password", "mqtt_cert_bundle"]
+    }
+    if "mqtt_cert_bundle" in options and options["mqtt_cert_bundle"]:
+        safe_options["mqtt_cert_bundle"] = "[REDACTED]"
+    if "mqtt_password" in options and options["mqtt_password"]:
+        safe_options["mqtt_password"] = "[REDACTED]"
     _log(f"Loaded options: {safe_options}")
     c = CentralCoreClient(options)
     _log(f"Created client with mqtt_host={c.mqtt_host}, mqtt_port={c.mqtt_port}")
     if not c.mqtt_host:
-        _log("ERROR: mqtt_host is not configured. Please set MQTT_HOST environment variable or configure in options.", sys.stderr)
+        _log(
+            "ERROR: mqtt_host is not configured. Please set MQTT_HOST environment variable or configure in options.",
+            sys.stderr,
+        )
         return
     c.run()
 
