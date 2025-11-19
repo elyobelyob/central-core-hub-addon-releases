@@ -2,6 +2,14 @@
 
 All notable changes to this add-on will be documented in this file.
 
+## 1.0.67 - 2025-11-19
+- Fix: corrected addon_version path resolution in telemetry payload
+- Chore: updated version metadata and repository listing to `1.0.67`
+
+### Details (v1.0.67)
+- Fix: get_addon_version() now correctly reads config.json from the add-on directory instead of absolute path
+- Chore: bumped package metadata and repository version to `1.0.67`
+
 ## 1.0.66 - 2025-11-19
 - Chore: applied Black code formatting and Flake8 linting fixes
 - Chore: updated version metadata and repository listing to `1.0.66`
