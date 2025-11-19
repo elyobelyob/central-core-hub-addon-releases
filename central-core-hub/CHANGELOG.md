@@ -2,6 +2,15 @@
 
 All notable changes to this add-on will be documented in this file.
 
+## 1.0.63 - 2025-11-19
+- UI: removed individual certificate config fields, simplified to use only `mqtt_cert_bundle`
+- Chore: updated version metadata and repository listing to `1.0.63`
+
+### Details (v1.0.63)
+- UI: removed `mqtt_ca_cert`, `mqtt_client_cert`, `mqtt_client_key` from config options to simplify certificate setup
+- Feature: certificate bundle parsing now handles all TLS certificates automatically
+- Chore: bumped package metadata and repository version to `1.0.63`
+
 ## 1.0.62 - 2025-11-19
 - Feature: added mqtt_cert_bundle option to accept combined certificate file
 - Chore: updated version metadata and repository listing to `1.0.62`
