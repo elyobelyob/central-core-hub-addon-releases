@@ -68,7 +68,7 @@ def test_build_telemetry_structure(monkeypatch):
 
     monkeypatch.setattr(_socket, "socket", lambda *a, **k: DummySocket())
 
-    payload = mod.build_telemetry("dev-unit")
+    payload = mod.build_telemetry("dev-unit", uptime_fn=lambda: 100, loadavg_fn=lambda: ["0.00", "0.01", "0.05"], mem_info_fn=lambda: (8000000, 4000000), disk_info_fn=lambda path="/": (10000000, 5000000))
     assert payload is not None
     j = json.loads(payload)
     assert j.get("client_id") == "dev-unit"

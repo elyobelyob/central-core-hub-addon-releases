@@ -49,6 +49,16 @@ except Exception:
 OPTIONS_PATH = "/data/options.json"
 
 
+def get_addon_version():
+    """Get the add-on version from config.json."""
+    try:
+        with open("/config.json", "r") as f:
+            config = json.load(f)
+            return config.get("version")
+    except Exception:
+        return None
+
+
 def load_options():
     if not os.path.exists(OPTIONS_PATH):
         return {}
@@ -73,16 +83,17 @@ try:
     get_cpu_percent = _helpers_mod.get_cpu_percent
 
     # wrap telemetry.build_telemetry to inject this module's get_cpu_percent at call time
-    def build_telemetry(client_id):
+    def build_telemetry(client_id, get_cpu_percent=None, uptime_fn=None, loadavg_fn=None, mem_info_fn=None, disk_info_fn=None, version=None, telemetry_interval=None):
         return _tele_mod.build_telemetry(
             client_id,
-            get_cpu_percent=get_cpu_percent,
-            uptime_fn=uptime_seconds,
-            loadavg_fn=loadavg,
-            mem_info_fn=mem_info_kb,
-            disk_info_fn=disk_info_kb,
+            get_cpu_percent=get_cpu_percent or get_cpu_percent,
+            uptime_fn=uptime_fn,
+            loadavg_fn=loadavg_fn,
+            mem_info_fn=mem_info_fn,
+            disk_info_fn=disk_info_fn,
+            version=version or get_addon_version(),
+            telemetry_interval=telemetry_interval or 30,
         )
-
     build_vault_payload = _tele_mod.build_vault_payload
 except Exception:
     # Fallback: load modules relative to this file using importlib
@@ -147,14 +158,16 @@ except Exception:
         spec_t.loader.exec_module(_tele)
 
         # build_telemetry wrapper injects this module's get_cpu_percent
-        def build_telemetry(client_id):
+        def build_telemetry(client_id, get_cpu_percent=None, uptime_fn=None, loadavg_fn=None, mem_info_fn=None, disk_info_fn=None, version=None, telemetry_interval=None):
             return _tele.build_telemetry(
                 client_id,
-                get_cpu_percent=get_cpu_percent,
-                uptime_fn=uptime_seconds,
-                loadavg_fn=loadavg,
-                mem_info_fn=mem_info_kb,
-                disk_info_fn=disk_info_kb,
+                get_cpu_percent=get_cpu_percent or get_cpu_percent,
+                uptime_fn=uptime_fn,
+                loadavg_fn=loadavg_fn,
+                mem_info_fn=mem_info_fn,
+                disk_info_fn=disk_info_fn,
+                version=version or get_addon_version(),
+                telemetry_interval=telemetry_interval or 30,
             )
 
         build_vault_payload = _tele.build_vault_payload
@@ -174,7 +187,7 @@ except Exception:
 try:
     _orig_bt = build_telemetry
 
-    def _wrapped_build_telemetry(client_id):
+    def _wrapped_build_telemetry(client_id, version=None, telemetry_interval=None, **kwargs):
         modname = getattr(_orig_bt, "__module__", None)
         tele_mod = sys.modules.get(modname) if modname else None
         old = None
@@ -185,7 +198,7 @@ try:
             except Exception:
                 pass
         try:
-            return _orig_bt(client_id)
+            return _orig_bt(client_id, get_cpu_percent=get_cpu_percent, version=version, telemetry_interval=telemetry_interval, **kwargs)
         finally:
             if tele_mod is not None:
                 try:
@@ -559,7 +572,7 @@ class CentralCoreClient:
         return False
 
     def publish_telemetry(self):
-        payload = build_telemetry(self.client_id)
+        payload = build_telemetry(self.client_id, version=get_addon_version(), telemetry_interval=self.telemetry_interval)
         try:
             self._publish(self.telemetry_topic, payload)
             _log(f"Published telemetry to {self.telemetry_topic}")

@@ -64,6 +64,8 @@ def build_telemetry(
     loadavg_fn=None,
     mem_info_fn=None,
     disk_info_fn=None,
+    version=None,
+    telemetry_interval=None,
 ):
     hostname = socket.gethostname()
     ip = "unknown"
@@ -147,6 +149,8 @@ def build_telemetry(
         "cpu_percent": cpu_percent,
         "platform": platform_info,
         "python_version": py_version,
+        "addon_version": version,
+        "telemetry_interval": telemetry_interval,
     }
     return json.dumps(payload)
 
