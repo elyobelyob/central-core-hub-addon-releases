@@ -288,6 +288,7 @@ class CentralCoreClient:
         # to the default `telemetry/{client_id}` topic. If set, telemetry
         # payloads will be published to both topics.
         self.vault_topic = options.get("vault_topic") or ""
+        self.telemetry_interval = int(options.get("telemetry_interval", 30))
         self.telemetry_topic = f"telemetry/{self.client_id}"
         self.commands_topic = f"hubs/{self.client_id}/commands"
         # Preferred sensors telemetry topic for Vault
@@ -552,7 +553,7 @@ class CentralCoreClient:
         try:
             while True:
                 self.run_iteration()
-                time.sleep(10)
+                time.sleep(self.telemetry_interval)
         finally:
             try:
                 self._client.loop_stop()
@@ -562,7 +563,7 @@ class CentralCoreClient:
 
     def run_iteration(self):
         """Single run loop iteration: reconnect if needed, publish telemetry
-        and optionally publish sensors. Called every 10 seconds.
+        and optionally publish sensors. Called every telemetry_interval seconds.
         """
         if not self._connected:
             try:
