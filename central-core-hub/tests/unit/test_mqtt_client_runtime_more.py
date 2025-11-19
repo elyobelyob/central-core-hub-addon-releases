@@ -343,3 +343,61 @@ def test_cert_path_handling():
     assert c.mqtt_ca == "/path/to/ca.pem"
     assert c.mqtt_cert == "/path/to/cert.pem"
     assert c.mqtt_key == "/path/to/key.pem"
+
+
+def test_cert_bundle_parsing():
+    """Test that certificate bundle is parsed into individual certs."""
+    from pathlib import Path
+    import importlib.util
+    
+    repo_root = Path(__file__).resolve().parents[3]
+    src = repo_root / "central-core-hub" / "mqtt_client.py"
+    spec = importlib.util.spec_from_file_location("mqtt_client_bundle_test", str(src))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    CentralCoreClient = mod.CentralCoreClient
+    
+    bundle_content = """-----BEGIN CERTIFICATE-----
+CA CERT CONTENT
+-----END CERTIFICATE-----
+-----BEGIN CERTIFICATE-----
+CLIENT CERT CONTENT
+-----END CERTIFICATE-----
+-----BEGIN PRIVATE KEY-----
+PRIVATE KEY CONTENT
+-----END PRIVATE KEY-----"""
+    
+    options = {
+        "mqtt_host": "localhost",
+        "mqtt_port": 1883,
+        "mqtt_username": "",
+        "mqtt_password": "",
+        "mqtt_tls": True,
+        "mqtt_ca_cert": "",
+        "mqtt_client_cert": "",
+        "mqtt_client_key": "",
+        "mqtt_cert_bundle": bundle_content,
+        "client_id": "test-bundle",
+        "telemetry_interval": 30
+    }
+    
+    c = CentralCoreClient(options)
+    
+    # Check that temp files were created with content
+    assert c.mqtt_ca.endswith(".ca.crt")
+    with open(c.mqtt_ca, 'r') as f:
+        assert "CA CERT CONTENT" in f.read()
+    
+    assert c.mqtt_cert.endswith(".client.crt")
+    with open(c.mqtt_cert, 'r') as f:
+        assert "CLIENT CERT CONTENT" in f.read()
+    
+    assert c.mqtt_key.endswith(".client.key")
+    with open(c.mqtt_key, 'r') as f:
+        assert "PRIVATE KEY CONTENT" in f.read()
+    
+    # Cleanup
+    import os
+    os.unlink(c.mqtt_ca)
+    os.unlink(c.mqtt_cert)
+    os.unlink(c.mqtt_key)

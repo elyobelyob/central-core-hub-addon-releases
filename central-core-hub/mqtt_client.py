@@ -13,6 +13,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import socket
 import sys
 import tempfile
@@ -276,6 +277,7 @@ class CentralCoreClient:
         self.mqtt_ca = options.get("mqtt_ca_cert") or ""
         self.mqtt_cert = options.get("mqtt_client_cert") or ""
         self.mqtt_key = options.get("mqtt_client_key") or ""
+        self.mqtt_cert_bundle = options.get("mqtt_cert_bundle") or ""
         # Handle certificate content vs paths
         self._setup_cert_files()
         self.client_id = options.get(
@@ -361,7 +363,28 @@ class CentralCoreClient:
         self._last_sensors_sent = 0
 
     def _setup_cert_files(self):
-        """Handle certificate content vs file paths."""
+        """Handle certificate content vs file paths, and parse bundle if provided."""
+        def _read_content_or_file(value):
+            if not value:
+                return ""
+            if value.startswith("-----BEGIN"):
+                return value
+            else:
+                # Assume it's a file path, try to read
+                try:
+                    with open(value, 'r') as f:
+                        return f.read()
+                except Exception:
+                    _log(f"Warning: Could not read cert file {value}")
+                    return ""
+        
+        # If bundle is provided, parse it
+        if self.mqtt_cert_bundle:
+            bundle_content = _read_content_or_file(self.mqtt_cert_bundle)
+            if bundle_content:
+                self._parse_cert_bundle(bundle_content)
+        
+        # Now handle individual certs
         def _handle_cert(cert_str, suffix):
             if not cert_str:
                 return ""
@@ -377,6 +400,30 @@ class CentralCoreClient:
         self.mqtt_ca = _handle_cert(self.mqtt_ca, ".ca.crt")
         self.mqtt_cert = _handle_cert(self.mqtt_cert, ".client.crt")
         self.mqtt_key = _handle_cert(self.mqtt_key, ".client.key")
+
+    def _parse_cert_bundle(self, bundle_content):
+        """Parse a certificate bundle and set individual certs if not already set."""
+        # Find all PEM blocks
+        pem_pattern = r"-----BEGIN ([^-]+)-----\n(.*?)\n-----END \1-----"
+        matches = re.findall(pem_pattern, bundle_content, re.DOTALL)
+        
+        certs = []
+        keys = []
+        
+        for block_type, content in matches:
+            full_block = f"-----BEGIN {block_type}-----\n{content}\n-----END {block_type}-----"
+            if "CERTIFICATE" in block_type:
+                certs.append(full_block)
+            elif "PRIVATE KEY" in block_type:
+                keys.append(full_block)
+        
+        # Assume first cert is CA, second is client cert
+        if not self.mqtt_ca and len(certs) > 0:
+            self.mqtt_ca = certs[0]
+        if not self.mqtt_cert and len(certs) > 1:
+            self.mqtt_cert = certs[1]
+        if not self.mqtt_key and keys:
+            self.mqtt_key = keys[0]
 
     def _publish(self, topic, payload, qos=0):
         """Publish and log the MQTT publish action and result."""

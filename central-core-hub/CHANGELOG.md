@@ -2,6 +2,14 @@
 
 All notable changes to this add-on will be documented in this file.
 
+## 1.0.62 - 2025-11-19
+- Feature: added mqtt_cert_bundle option to accept combined certificate file
+- Chore: updated version metadata and repository listing to `1.0.62`
+
+### Details (v1.0.62)
+- Feature: new `mqtt_cert_bundle` config option accepts a file path or content containing combined CA cert, client cert, and private key; automatically parses and assigns to individual cert fields
+- Chore: bumped package metadata and repository version to `1.0.62`
+
 ## 1.0.61 - 2025-11-19
 - Security: changed certificate and password config fields to password type for UI hiding
 - Chore: updated version metadata and repository listing to `1.0.61`
