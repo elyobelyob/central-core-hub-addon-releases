@@ -6,6 +6,13 @@ client shim so it can be unit-tested independently.
 """
 import sys
 import traceback
+from datetime import datetime, timezone
+
+
+def _log(msg, file=sys.stdout):
+    """Log a message with UTC timestamp."""
+    ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    print(f"[{ts}] {msg}", file=file)
 
 
 def setup_mqtt_client(ctx, mqtt_mod):
@@ -78,7 +85,7 @@ def setup_mqtt_client(ctx, mqtt_mod):
             ctx._client.tls_set(**tls_kwargs)
         except Exception:
             try:
-                print("Failed to configure TLS for MQTT", file=sys.stderr)
+                _log("Failed to configure TLS for MQTT", sys.stderr)
             except Exception:
                 pass  # pragma: no cover
 
