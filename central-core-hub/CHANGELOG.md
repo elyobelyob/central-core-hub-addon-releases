@@ -2,6 +2,15 @@
 
 All notable changes to this add-on will be documented in this file.
 
+## 1.0.57 - 2025-11-19
+- Fix: added debug logging for MQTT connection troubleshooting
+- Chore: updated version metadata and repository listing to `1.0.57`
+
+### Details (v1.0.57)
+- Fix: added logging of loaded options and MQTT configuration on startup
+- Fix: added validation to ensure mqtt_host is configured before attempting connection
+- Chore: bumped package metadata and repository version to `1.0.57`
+
 ## 1.0.56 - 2025-11-19
 - Chore: applied Black code formatting
 - Chore: updated version metadata and repository listing to `1.0.56`
