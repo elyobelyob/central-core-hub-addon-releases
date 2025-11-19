@@ -10,7 +10,7 @@ ENV LANG=C.UTF-8
 RUN apk add --no-cache bash curl ca-certificates mosquitto-clients jq python3 py3-paho-mqtt py3-requests
 
 COPY run.sh /run.sh
-COPY mqtt_client.py /mqtt_client.py
-RUN chmod +x /run.sh /mqtt_client.py
+COPY *.py /
+RUN chmod +x /run.sh
 
 CMD ["/run.sh"]
