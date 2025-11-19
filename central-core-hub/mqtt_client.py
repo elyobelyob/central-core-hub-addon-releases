@@ -654,7 +654,13 @@ class CentralCoreClient:
 
 def main():
     options = load_options()
-    _log(f"Loaded options: {options}")
+    # Sanitize options for logging (hide sensitive data)
+    safe_options = {k: v for k, v in options.items() if k not in ['mqtt_password', 'mqtt_cert_bundle']}
+    if 'mqtt_cert_bundle' in options and options['mqtt_cert_bundle']:
+        safe_options['mqtt_cert_bundle'] = '[REDACTED]'
+    if 'mqtt_password' in options and options['mqtt_password']:
+        safe_options['mqtt_password'] = '[REDACTED]'
+    _log(f"Loaded options: {safe_options}")
     c = CentralCoreClient(options)
     _log(f"Created client with mqtt_host={c.mqtt_host}, mqtt_port={c.mqtt_port}")
     if not c.mqtt_host:
