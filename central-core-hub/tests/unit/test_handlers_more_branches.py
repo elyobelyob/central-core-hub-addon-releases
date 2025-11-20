@@ -1,0 +1,94 @@
+import json
+import importlib.util
+from pathlib import Path
+
+
+def _load_client_module():
+    repo_root = Path(__file__).resolve().parents[3]
+    src = repo_root / "central-core-hub" / "mqtt_client.py"
+    spec = importlib.util.spec_from_file_location("mqtt_client", str(src))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class DummyClient:
+    def __init__(self):
+        self.published = []
+
+    def publish(self, topic, payload, qos=0):
+        self.published.append({"topic": topic, "payload": payload, "qos": qos})
+
+
+class DummyMsg:
+    def __init__(self, topic, payload_bytes=b""):
+        self.topic = topic
+        self.payload = payload_bytes
+
+
+def test_poll_data_type_parsing(monkeypatch):
+    mc = _load_client_module()
+    CentralCoreClient = mc.CentralCoreClient
+
+    sample = [
+        {"entity_id": "sensor.on", "state": "on", "attributes": {}},
+        {"entity_id": "sensor.off", "state": "off", "attributes": {}},
+        {"entity_id": "sensor.int", "state": "42", "attributes": {}},
+        {"entity_id": "sensor.float", "state": "3.14", "attributes": {}},
+        {"entity_id": "sensor.text", "state": "n/a", "attributes": {}},
+    ]
+    monkeypatch.setattr(mc, "fetch_sensors", lambda url, token: sample)
+
+    options = {"client_id": "unit-hub", "ha_api_url": "http://ha", "ha_api_token": "tok"}
+    c = CentralCoreClient(options)
+    dummy = DummyClient()
+    c._client = dummy
+    c.vault_topic = ""
+
+    cmd = {"command_id": "cid1", "action": "sensors/poll", "payload": {}}
+    msg = DummyMsg(f"hubs/{c.client_id}/cmd/sensors/poll", json.dumps(cmd).encode("utf-8"))
+
+    c.on_message(None, None, msg)
+
+    tele_payload = json.loads(next(p["payload"] for p in dummy.published if p["topic"] == c.preferred_sensors_topic))
+    data = tele_payload.get("data")
+    assert data["sensor.on"] is True
+    assert data["sensor.off"] is False
+    assert isinstance(data["sensor.int"], int)
+    assert isinstance(data["sensor.float"], float)
+    assert data["sensor.text"] == "n/a"
+
+
+def test_on_message_binary_payload_and_set_no_ha_config(monkeypatch):
+    mc = _load_client_module()
+    CentralCoreClient = mc.CentralCoreClient
+
+    # fetch_sensors returns one
+    monkeypatch.setattr(mc, "fetch_sensors", lambda url, token: [{"entity_id": "sensor.x", "state": "1", "attributes": {}}])
+
+    options = {"client_id": "unit-hub"}  # no HA config
+    c = CentralCoreClient(options)
+    dummy = DummyClient()
+    c._client = dummy
+
+    # Create a message whose payload.decode will raise to force '<binary>' branch
+    class BadPayload:
+        def decode(self, *a, **k):
+            raise RuntimeError("bad")
+
+    msg = DummyMsg(f"hubs/{c.client_id}/cmd/sensors/poll", BadPayload())
+    # Should not raise
+    c.on_message(None, None, msg)
+
+    # Now test sensors/set with no HA config -> results.failed should be reported
+    cmd = {"command_id": "cid2", "action": "sensors/set", "payload": {"sensors": [{"entity_id": "sensor.x", "state": "2"}]}}
+    msg2 = DummyMsg(f"hubs/{c.client_id}/cmd/sensors/set", json.dumps(cmd).encode("utf-8"))
+    c.on_message(None, None, msg2)
+
+    # find completion response
+    resp_topic = f"hubs/{c.client_id}/cmd/{cmd['command_id']}/response"
+    comps = [p for p in dummy.published if p["topic"] == resp_topic]
+    assert comps, "completion response not published"
+    comp_payload = json.loads(comps[-1]["payload"])
+    assert "result" in comp_payload
+    assert comp_payload["result"]["failed"]
