@@ -428,7 +428,17 @@ class CentralCoreClient:
                     with open(value, "r") as f:
                         return f.read()
                 except Exception:
-                    _log(f"Warning: Could not read cert file {value}")
+                    # Sanitize value for logging to avoid exposing certificates
+                    def _sanitize_for_logging(text):
+                        import re
+                        # Redact certificate content
+                        text = re.sub(r'-----BEGIN CERTIFICATE-----[^-]*-----END CERTIFICATE-----', '[CERTIFICATE REDACTED]', text, flags=re.DOTALL)
+                        text = re.sub(r'-----BEGIN PRIVATE KEY-----[^-]*-----END PRIVATE KEY-----', '[PRIVATE KEY REDACTED]', text, flags=re.DOTALL)
+                        text = re.sub(r'-----BEGIN [^-]*-----[^-]*-----END [^-]*-----', '[CERT DATA REDACTED]', text, flags=re.DOTALL)
+                        return text
+
+                    safe_value = _sanitize_for_logging(str(value))
+                    _log(f"Warning: Could not read cert file {safe_value}")
                     return ""
 
         # If bundle is provided, parse it
@@ -532,7 +542,18 @@ class CentralCoreClient:
                 payload = msg.payload.decode("utf-8", errors="replace")
             except Exception:
                 payload = "<binary>"
-            _log(f"Received message on {msg.topic}: {payload}")
+
+            # Sanitize payload for logging to avoid exposing certificates
+            def _sanitize_payload_for_logging(text):
+                import re
+                # Redact certificate content
+                text = re.sub(r'-----BEGIN CERTIFICATE-----[^-]*-----END CERTIFICATE-----', '[CERTIFICATE REDACTED]', text, flags=re.DOTALL)
+                text = re.sub(r'-----BEGIN PRIVATE KEY-----[^-]*-----END PRIVATE KEY-----', '[PRIVATE KEY REDACTED]', text, flags=re.DOTALL)
+                text = re.sub(r'-----BEGIN [^-]*-----[^-]*-----END [^-]*-----', '[CERT DATA REDACTED]', text, flags=re.DOTALL)
+                return text
+
+            safe_payload = _sanitize_payload_for_logging(payload)
+            _log(f"Received message on {msg.topic}: {safe_payload}")
             # Prefer a local import of the handlers module; fall back to
             # loading relative to the file for test contexts.
             try:
