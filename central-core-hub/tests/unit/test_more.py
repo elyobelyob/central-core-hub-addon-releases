@@ -34,7 +34,7 @@ def test_publish_telemetry_and_vault(monkeypatch):
     mod = _load_client_module()
     # stub payload builders
     monkeypatch.setattr(
-        mod, "build_telemetry", lambda cid, **kwargs: json.dumps({"client_id": cid})
+        mod, "build_telemetry", lambda client_id, **kwargs: json.dumps({"client_id": client_id})
     )
     monkeypatch.setattr(
         mod, "build_vault_payload", lambda raw: json.dumps({"schema_version": 2})
