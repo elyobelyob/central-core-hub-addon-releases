@@ -1,7 +1,7 @@
 home-assistant
 name: "Central Core Hub"
 description: "Central Core Hub Add-on"
-version: "1.0.58"
+version: "1.0.69"
 slug: "central-core-hub"
 init: false
 arch:
@@ -22,13 +22,10 @@ options:
   mqtt_username: ""
   mqtt_password: ""
   mqtt_tls: false
-  mqtt_ca_cert: ""
-  mqtt_client_cert: ""
-  mqtt_client_key: ""
+  mqtt_cert_bundle: ""
   client_id: "home-assistant"
   ha_api_url: ""
   ha_api_token: ""
-  vault_topic: ""
   telemetry_interval: 30
 schema:
   mqtt_host: str
@@ -36,11 +33,8 @@ schema:
   mqtt_username: str?
   mqtt_password: str?
   mqtt_tls: bool
-  mqtt_ca_cert: str?
-  mqtt_client_cert: str?
-  mqtt_client_key: str?
+  mqtt_cert_bundle: password
   client_id: str?
   ha_api_url: str?
   ha_api_token: str?
-  vault_topic: str?
   telemetry_interval: int
