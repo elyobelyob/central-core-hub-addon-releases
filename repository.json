@@ -2,6 +2,8 @@
 	"name": "Central Core Hub Releases",
 	"url": "https://github.com/elyobelyob/central-core-hub-addon-releases",
 	"maintainer": "elyobelyob",
-	"version": "1.0.69",
-	"addons": ["central-core-hub"]
+	"version": "1.0.70",
+	"addons": [
+		"central-core-hub"
+	]
 }
