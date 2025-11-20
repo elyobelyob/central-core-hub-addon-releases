@@ -39,18 +39,30 @@ def test_poll_data_type_parsing(monkeypatch):
     ]
     monkeypatch.setattr(mc, "fetch_sensors", lambda url, token: sample)
 
-    options = {"client_id": "unit-hub", "ha_api_url": "http://ha", "ha_api_token": "tok"}
+    options = {
+        "client_id": "unit-hub",
+        "ha_api_url": "http://ha",
+        "ha_api_token": "tok",
+    }
     c = CentralCoreClient(options)
     dummy = DummyClient()
     c._client = dummy
     c.vault_topic = ""
 
     cmd = {"command_id": "cid1", "action": "sensors/poll", "payload": {}}
-    msg = DummyMsg(f"hubs/{c.client_id}/cmd/sensors/poll", json.dumps(cmd).encode("utf-8"))
+    msg = DummyMsg(
+        f"hubs/{c.client_id}/cmd/sensors/poll", json.dumps(cmd).encode("utf-8")
+    )
 
     c.on_message(None, None, msg)
 
-    tele_payload = json.loads(next(p["payload"] for p in dummy.published if p["topic"] == c.preferred_sensors_topic))
+    tele_payload = json.loads(
+        next(
+            p["payload"]
+            for p in dummy.published
+            if p["topic"] == c.preferred_sensors_topic
+        )
+    )
     data = tele_payload.get("data")
     assert data["sensor.on"] is True
     assert data["sensor.off"] is False
@@ -64,7 +76,11 @@ def test_on_message_binary_payload_and_set_no_ha_config(monkeypatch):
     CentralCoreClient = mc.CentralCoreClient
 
     # fetch_sensors returns one
-    monkeypatch.setattr(mc, "fetch_sensors", lambda url, token: [{"entity_id": "sensor.x", "state": "1", "attributes": {}}])
+    monkeypatch.setattr(
+        mc,
+        "fetch_sensors",
+        lambda url, token: [{"entity_id": "sensor.x", "state": "1", "attributes": {}}],
+    )
 
     options = {"client_id": "unit-hub"}  # no HA config
     c = CentralCoreClient(options)
@@ -81,8 +97,14 @@ def test_on_message_binary_payload_and_set_no_ha_config(monkeypatch):
     c.on_message(None, None, msg)
 
     # Now test sensors/set with no HA config -> results.failed should be reported
-    cmd = {"command_id": "cid2", "action": "sensors/set", "payload": {"sensors": [{"entity_id": "sensor.x", "state": "2"}]}}
-    msg2 = DummyMsg(f"hubs/{c.client_id}/cmd/sensors/set", json.dumps(cmd).encode("utf-8"))
+    cmd = {
+        "command_id": "cid2",
+        "action": "sensors/set",
+        "payload": {"sensors": [{"entity_id": "sensor.x", "state": "2"}]},
+    }
+    msg2 = DummyMsg(
+        f"hubs/{c.client_id}/cmd/sensors/set", json.dumps(cmd).encode("utf-8")
+    )
     c.on_message(None, None, msg2)
 
     # find completion response

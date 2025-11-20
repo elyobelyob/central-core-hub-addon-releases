@@ -1,7 +1,6 @@
 import json
 import importlib.util
 from pathlib import Path
-import types
 
 
 def _load_modules():
@@ -40,12 +39,24 @@ def test_poll_updates_selected_and_publishes_reminder(monkeypatch):
 
     # stub fetch_sensors to return sample sensors
     sample = [
-        {"entity_id": "sensor.temp", "state": "21.5", "attributes": {"friendly_name": "Temp"}},
-        {"entity_id": "sensor.hum", "state": "42", "attributes": {"friendly_name": "Humidity"}},
+        {
+            "entity_id": "sensor.temp",
+            "state": "21.5",
+            "attributes": {"friendly_name": "Temp"},
+        },
+        {
+            "entity_id": "sensor.hum",
+            "state": "42",
+            "attributes": {"friendly_name": "Humidity"},
+        },
     ]
     monkeypatch.setattr(mc, "fetch_sensors", lambda url, token: sample)
 
-    options = {"client_id": "unit-hub", "ha_api_url": "http://ha", "ha_api_token": "tok"}
+    options = {
+        "client_id": "unit-hub",
+        "ha_api_url": "http://ha",
+        "ha_api_token": "tok",
+    }
     c = CentralCoreClient(options)
     dummy = DummyClient()
     # paho shim uses .publish; our handlers call client._publish via CentralCoreClient
@@ -53,8 +64,14 @@ def test_poll_updates_selected_and_publishes_reminder(monkeypatch):
     c._client = dummy
     c.vault_topic = "vault/unit"
 
-    cmd = {"command_id": "abc123", "action": "sensors/poll", "payload": {"sensors": ["sensor.temp", "sensor.hum"]}}
-    msg = DummyMsg(f"hubs/{c.client_id}/cmd/sensors/poll", json.dumps(cmd).encode("utf-8"))
+    cmd = {
+        "command_id": "abc123",
+        "action": "sensors/poll",
+        "payload": {"sensors": ["sensor.temp", "sensor.hum"]},
+    }
+    msg = DummyMsg(
+        f"hubs/{c.client_id}/cmd/sensors/poll", json.dumps(cmd).encode("utf-8")
+    )
 
     # call through the client's on_message handler which loads handlers
     c.on_message(None, None, msg)
@@ -94,9 +111,18 @@ def test_set_publishes_reminder_prefers_client_selected(monkeypatch):
         # return a readback matching posted values for test
         return FakeResp({"state": "22.0", "attributes": {}})
 
-    monkeypatch.setattr(mc, "requests", type("R", (), {"post": staticmethod(fake_post), "get": staticmethod(fake_get)}))
+    monkeypatch.setattr(
+        mc,
+        "requests",
+        type("R", (), {"post": staticmethod(fake_post), "get": staticmethod(fake_get)}),
+    )
 
-    options = {"client_id": "unit-hub", "ha_api_url": "http://ha", "ha_api_token": "tok", "ha_readback_after_set": True}
+    options = {
+        "client_id": "unit-hub",
+        "ha_api_url": "http://ha",
+        "ha_api_token": "tok",
+        "ha_readback_after_set": True,
+    }
     c = CentralCoreClient(options)
     dummy = DummyClient()
     c._client = dummy
@@ -104,8 +130,14 @@ def test_set_publishes_reminder_prefers_client_selected(monkeypatch):
     # Pretend Vault previously told us the authoritative selection
     c.selected_sensors = ["sensor.temp"]
 
-    command = {"command_id": "set123", "action": "sensors/set", "payload": {"sensors": [{"entity_id": "sensor.temp", "state": "22.0"}]}}
-    msg = DummyMsg(f"hubs/{c.client_id}/cmd/sensors/set", json.dumps(command).encode("utf-8"))
+    command = {
+        "command_id": "set123",
+        "action": "sensors/set",
+        "payload": {"sensors": [{"entity_id": "sensor.temp", "state": "22.0"}]},
+    }
+    msg = DummyMsg(
+        f"hubs/{c.client_id}/cmd/sensors/set", json.dumps(command).encode("utf-8")
+    )
 
     c.on_message(None, None, msg)
 

@@ -11,12 +11,15 @@ def _load_telemetry():
     spec.loader.exec_module(mod)
     return mod
 
+
 tele = _load_telemetry()
 
 
 def test_build_vault_payload_missing_metrics():
     # minimal telemetry payload with only identifying fields
-    raw = json.dumps({"client_id": "hub1", "timestamp": "2025-01-01T00:00:00Z", "hostname": "h"})
+    raw = json.dumps(
+        {"client_id": "hub1", "timestamp": "2025-01-01T00:00:00Z", "hostname": "h"}
+    )
     v = tele.build_vault_payload(raw)
     assert v is not None
     obj = json.loads(v)
