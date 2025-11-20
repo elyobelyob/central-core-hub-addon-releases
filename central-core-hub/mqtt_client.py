@@ -431,10 +431,26 @@ class CentralCoreClient:
                     # Sanitize value for logging to avoid exposing certificates
                     def _sanitize_for_logging(text):
                         import re
+
                         # Redact certificate content
-                        text = re.sub(r'-----BEGIN CERTIFICATE-----[^-]*-----END CERTIFICATE-----', '[CERTIFICATE REDACTED]', text, flags=re.DOTALL)
-                        text = re.sub(r'-----BEGIN PRIVATE KEY-----[^-]*-----END PRIVATE KEY-----', '[PRIVATE KEY REDACTED]', text, flags=re.DOTALL)
-                        text = re.sub(r'-----BEGIN [^-]*-----[^-]*-----END [^-]*-----', '[CERT DATA REDACTED]', text, flags=re.DOTALL)
+                        text = re.sub(
+                            r"-----BEGIN CERTIFICATE-----[^-]*-----END CERTIFICATE-----",
+                            "[CERTIFICATE REDACTED]",
+                            text,
+                            flags=re.DOTALL,
+                        )
+                        text = re.sub(
+                            r"-----BEGIN PRIVATE KEY-----[^-]*-----END PRIVATE KEY-----",
+                            "[PRIVATE KEY REDACTED]",
+                            text,
+                            flags=re.DOTALL,
+                        )
+                        text = re.sub(
+                            r"-----BEGIN [^-]*-----[^-]*-----END [^-]*-----",
+                            "[CERT DATA REDACTED]",
+                            text,
+                            flags=re.DOTALL,
+                        )
                         return text
 
                     safe_value = _sanitize_for_logging(str(value))
@@ -546,10 +562,26 @@ class CentralCoreClient:
             # Sanitize payload for logging to avoid exposing certificates
             def _sanitize_payload_for_logging(text):
                 import re
+
                 # Redact certificate content
-                text = re.sub(r'-----BEGIN CERTIFICATE-----[^-]*-----END CERTIFICATE-----', '[CERTIFICATE REDACTED]', text, flags=re.DOTALL)
-                text = re.sub(r'-----BEGIN PRIVATE KEY-----[^-]*-----END PRIVATE KEY-----', '[PRIVATE KEY REDACTED]', text, flags=re.DOTALL)
-                text = re.sub(r'-----BEGIN [^-]*-----[^-]*-----END [^-]*-----', '[CERT DATA REDACTED]', text, flags=re.DOTALL)
+                text = re.sub(
+                    r"-----BEGIN CERTIFICATE-----[^-]*-----END CERTIFICATE-----",
+                    "[CERTIFICATE REDACTED]",
+                    text,
+                    flags=re.DOTALL,
+                )
+                text = re.sub(
+                    r"-----BEGIN PRIVATE KEY-----[^-]*-----END PRIVATE KEY-----",
+                    "[PRIVATE KEY REDACTED]",
+                    text,
+                    flags=re.DOTALL,
+                )
+                text = re.sub(
+                    r"-----BEGIN [^-]*-----[^-]*-----END [^-]*-----",
+                    "[CERT DATA REDACTED]",
+                    text,
+                    flags=re.DOTALL,
+                )
                 return text
 
             safe_payload = _sanitize_payload_for_logging(payload)
@@ -740,10 +772,23 @@ def main():
     safe_options = {
         k: v
         for k, v in options.items()
-        if k not in ["mqtt_password", "mqtt_cert_bundle", "mqtt_ca_cert", "mqtt_client_cert", "mqtt_client_key"]
+        if k
+        not in [
+            "mqtt_password",
+            "mqtt_cert_bundle",
+            "mqtt_ca_cert",
+            "mqtt_client_cert",
+            "mqtt_client_key",
+        ]
     }
     # Redact sensitive certificate fields
-    sensitive_fields = ["mqtt_password", "mqtt_cert_bundle", "mqtt_ca_cert", "mqtt_client_cert", "mqtt_client_key"]
+    sensitive_fields = [
+        "mqtt_password",
+        "mqtt_cert_bundle",
+        "mqtt_ca_cert",
+        "mqtt_client_cert",
+        "mqtt_client_key",
+    ]
     for field in sensitive_fields:
         if field in options and options[field]:
             safe_options[field] = "[REDACTED]"
