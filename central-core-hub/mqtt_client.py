@@ -413,6 +413,10 @@ class CentralCoreClient:
         self._connected = False
         # track last sensors publish time (epoch seconds)
         self._last_sensors_sent = 0
+        # the list of sensor entity_ids that Vault has indicated are selected
+        # Vault is considered authoritative for selections when it requests/sets
+        # them; handlers will update this list accordingly.
+        self.selected_sensors = []
 
     def _setup_cert_files(self):
         """Handle certificate content vs file paths, and parse bundle if provided."""

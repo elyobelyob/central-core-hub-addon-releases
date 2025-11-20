@@ -63,8 +63,17 @@ def handle_message(
                         sensors_requested = srv
             except Exception:
                 sensors_requested = None
-
             sensors = fetch_sensors(client.ha_api_url, client.ha_api_token) or []
+            # If the Vault requested a specific set of sensors, treat that
+            # list as authoritative and remember it on the client for future
+            # reminder publications.
+            try:
+                if sensors_requested:
+                    # normalize to list of ids
+                    client.selected_sensors = list(sensors_requested)
+            except Exception:
+                # don't let selection storage failure stop command handling
+                pass
             if sensors_requested:
                 sensors = [
                     s for s in sensors if s.get("entity_id") in sensors_requested
@@ -113,6 +122,26 @@ def handle_message(
                 client._publish(
                     client.preferred_sensors_topic, json.dumps(telemetry_payload), qos=0
                 )
+            except Exception:
+                pass  # pragma: no cover
+
+            # If a vault topic is configured, remind the Vault server which
+            # sensors were selected/reported by publishing a short payload
+            # containing the selected sensor IDs. The Vault-authoritative
+            # list (`client.selected_sensors`) is preferred when available.
+            try:
+                if getattr(client, "vault_topic", None):
+                    selected = (
+                        getattr(client, "selected_sensors", None)
+                        or list(data_map.keys())
+                    )
+                    reminder = {
+                        "schema_version": 1,
+                        "client_id": client.client_id,
+                        "timestamp": now_iso,
+                        "selected_sensors": list(selected),
+                    }
+                    client._publish(client.vault_topic, json.dumps(reminder), qos=0)
             except Exception:
                 pass  # pragma: no cover
 
@@ -280,6 +309,24 @@ def handle_message(
                             json.dumps(telemetry_payload),
                             qos=0,
                         )
+                    except Exception:
+                        pass  # pragma: no cover
+                    # Remind Vault of the sensors that were set/readback.
+                    # If the client has a Vault-authoritative selection, prefer
+                    # that list; otherwise fall back to the data_map keys.
+                    try:
+                        if getattr(client, "vault_topic", None):
+                            selected = (
+                                getattr(client, "selected_sensors", None)
+                                or list(data_map.keys())
+                            )
+                            reminder = {
+                                "schema_version": 1,
+                                "client_id": client.client_id,
+                                "timestamp": now_iso,
+                                "selected_sensors": list(selected),
+                            }
+                            client._publish(client.vault_topic, json.dumps(reminder), qos=0)
                     except Exception:
                         pass  # pragma: no cover
             except Exception:
