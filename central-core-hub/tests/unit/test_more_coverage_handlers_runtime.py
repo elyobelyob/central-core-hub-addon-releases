@@ -13,10 +13,10 @@ def load_module(path, name):
     return m
 
 
-HANDLERS_P = os.path.join(os.getcwd(), "handlers.py")
-RUNTIME_P = os.path.join(os.getcwd(), "mqtt_runtime.py")
-TELE_P = os.path.join(os.getcwd(), "telemetry.py")
-HELP_P = os.path.join(os.getcwd(), "helpers.py")
+HANDLERS_P = os.path.join(os.path.dirname(__file__), "../../handlers.py")
+RUNTIME_P = os.path.join(os.path.dirname(__file__), "../../mqtt_runtime.py")
+TELE_P = os.path.join(os.path.dirname(__file__), "../../telemetry.py")
+HELP_P = os.path.join(os.path.dirname(__file__), "../../helpers.py")
 
 
 def test_handle_message_poll_invalid_and_missing_entity(monkeypatch):
