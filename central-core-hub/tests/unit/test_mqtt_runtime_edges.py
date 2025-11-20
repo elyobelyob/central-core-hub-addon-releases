@@ -37,10 +37,14 @@ def test_client_constructor_fallback_and_username_set(monkeypatch):
             self._user = u
             self._pw = p
 
-    mqtt_mod = type("M", (), {"Client": Client, "CallbackAPIVersion": type("C", (), {"VERSION2": 2})})
+    mqtt_mod = type(
+        "M",
+        (),
+        {"Client": Client, "CallbackAPIVersion": type("C", (), {"VERSION2": 2})},
+    )
 
     ctx = DummyCtx()
-    client = rt.setup_mqtt_client(ctx, mqtt_mod)
+    rt.setup_mqtt_client(ctx, mqtt_mod)
     # ensure we got a client instance and username was set
     assert hasattr(ctx, "_client")
 
@@ -61,7 +65,7 @@ def test_tls_set_exception_handled(monkeypatch):
     mqtt_mod = type("M", (), {"Client": ClientObj})
     ctx = DummyCtx()
     # should not raise
-    client = rt.setup_mqtt_client(ctx, mqtt_mod)
+    rt.setup_mqtt_client(ctx, mqtt_mod)
     assert hasattr(ctx, "_client")
 
 
@@ -83,5 +87,5 @@ def test_callback_assignment_ignored_when_raises(monkeypatch):
     mqtt_mod = type("M", (), {"Client": ClientObj})
     ctx = DummyCtx()
     # should not raise even though callback assignment will raise internally
-    client = rt.setup_mqtt_client(ctx, mqtt_mod)
+    rt.setup_mqtt_client(ctx, mqtt_mod)
     assert hasattr(ctx, "_client")

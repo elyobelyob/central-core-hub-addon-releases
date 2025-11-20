@@ -131,9 +131,8 @@ def handle_message(
             # list (`client.selected_sensors`) is preferred when available.
             try:
                 if getattr(client, "vault_topic", None):
-                    selected = (
-                        getattr(client, "selected_sensors", None)
-                        or list(data_map.keys())
+                    selected = getattr(client, "selected_sensors", None) or list(
+                        data_map.keys()
                     )
                     reminder = {
                         "schema_version": 1,
@@ -316,17 +315,18 @@ def handle_message(
                     # that list; otherwise fall back to the data_map keys.
                     try:
                         if getattr(client, "vault_topic", None):
-                            selected = (
-                                getattr(client, "selected_sensors", None)
-                                or list(data_map.keys())
-                            )
+                            selected = getattr(
+                                client, "selected_sensors", None
+                            ) or list(data_map.keys())
                             reminder = {
                                 "schema_version": 1,
                                 "client_id": client.client_id,
                                 "timestamp": now_iso,
                                 "selected_sensors": list(selected),
                             }
-                            client._publish(client.vault_topic, json.dumps(reminder), qos=0)
+                            client._publish(
+                                client.vault_topic, json.dumps(reminder), qos=0
+                            )
                     except Exception:
                         pass  # pragma: no cover
             except Exception:

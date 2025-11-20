@@ -31,9 +31,17 @@ def test_poll_malformed_payload_no_ack(monkeypatch):
     CentralCoreClient = mc.CentralCoreClient
 
     # fetch_sensors returns something so handler publishes telemetry
-    monkeypatch.setattr(mc, "fetch_sensors", lambda url, token: [{"entity_id": "sensor.x", "state": "1", "attributes": {}}])
+    monkeypatch.setattr(
+        mc,
+        "fetch_sensors",
+        lambda url, token: [{"entity_id": "sensor.x", "state": "1", "attributes": {}}],
+    )
 
-    options = {"client_id": "unit-hub", "ha_api_url": "http://ha", "ha_api_token": "tok"}
+    options = {
+        "client_id": "unit-hub",
+        "ha_api_url": "http://ha",
+        "ha_api_token": "tok",
+    }
     c = CentralCoreClient(options)
     dummy = DummyClient()
     c._client = dummy
@@ -75,9 +83,18 @@ def test_set_with_sensors_as_dict_and_readback_failure(monkeypatch):
     def fake_get(url, headers=None, timeout=10):
         raise RuntimeError("readback failed")
 
-    monkeypatch.setattr(mc, "requests", type("R", (), {"post": staticmethod(fake_post), "get": staticmethod(fake_get)}))
+    monkeypatch.setattr(
+        mc,
+        "requests",
+        type("R", (), {"post": staticmethod(fake_post), "get": staticmethod(fake_get)}),
+    )
 
-    options = {"client_id": "unit-hub", "ha_api_url": "http://ha", "ha_api_token": "tok", "ha_readback_after_set": True}
+    options = {
+        "client_id": "unit-hub",
+        "ha_api_url": "http://ha",
+        "ha_api_token": "tok",
+        "ha_readback_after_set": True,
+    }
     c = CentralCoreClient(options)
     dummy = DummyClient()
     c._client = dummy
@@ -86,7 +103,9 @@ def test_set_with_sensors_as_dict_and_readback_failure(monkeypatch):
     # sensors payload as dict form
     payload = {"sensors": {"sensor.a": "10", "sensor.b": "20"}}
     cmd = {"command_id": "cid", "action": "sensors/set", "payload": payload}
-    msg = DummyMsg(f"hubs/{c.client_id}/cmd/sensors/set", json.dumps(cmd).encode("utf-8"))
+    msg = DummyMsg(
+        f"hubs/{c.client_id}/cmd/sensors/set", json.dumps(cmd).encode("utf-8")
+    )
 
     c.on_message(None, None, msg)
 
