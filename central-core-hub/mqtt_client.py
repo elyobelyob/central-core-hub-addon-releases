@@ -719,12 +719,13 @@ def main():
     safe_options = {
         k: v
         for k, v in options.items()
-        if k not in ["mqtt_password", "mqtt_cert_bundle"]
+        if k not in ["mqtt_password", "mqtt_cert_bundle", "mqtt_ca_cert", "mqtt_client_cert", "mqtt_client_key"]
     }
-    if "mqtt_cert_bundle" in options and options["mqtt_cert_bundle"]:
-        safe_options["mqtt_cert_bundle"] = "[REDACTED]"
-    if "mqtt_password" in options and options["mqtt_password"]:
-        safe_options["mqtt_password"] = "[REDACTED]"
+    # Redact sensitive certificate fields
+    sensitive_fields = ["mqtt_password", "mqtt_cert_bundle", "mqtt_ca_cert", "mqtt_client_cert", "mqtt_client_key"]
+    for field in sensitive_fields:
+        if field in options and options[field]:
+            safe_options[field] = "[REDACTED]"
     _log(f"Loaded options: {safe_options}")
     c = CentralCoreClient(options)
     _log(f"Created client with mqtt_host={c.mqtt_host}, mqtt_port={c.mqtt_port}")
