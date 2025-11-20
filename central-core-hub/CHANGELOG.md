@@ -2,6 +2,14 @@
 
 All notable changes to this add-on will be documented in this file.
 
+## 1.0.69 - 2025-11-20
+- Security: Redact all certificate fields in options logging
+- Chore: updated version metadata and repository listing to `1.0.69`
+
+### Details (v1.0.69)
+- Security: Prevent certificate content from appearing in logs by redacting mqtt_ca_cert, mqtt_client_cert, and mqtt_client_key fields
+- Chore: bumped package metadata and repository version to `1.0.69`
+
 ## 1.0.68 - 2025-11-19
 - Fix: Ensure addon_version is properly reported in HA add-on environment
 - Chore: updated version metadata and repository listing to `1.0.68`
