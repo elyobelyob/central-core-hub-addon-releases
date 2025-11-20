@@ -5,6 +5,10 @@ set -e  # Exit on any error
 
 echo "🔍 Running code quality checks..."
 
+# Check version consistency
+echo "📋 Checking version consistency..."
+python version_manager.py validate
+
 # Run black (formatter) in check mode
 echo "📏 Checking code formatting with black..."
 black --check --diff central-core-hub/
