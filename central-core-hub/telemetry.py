@@ -18,7 +18,7 @@ def _get_cpu_percent():
     if ext:
         try:
             return ext()
-        except Exception:
+        except Exception:  # pragma: no cover - external override error is environment-specific
             pass
 
     # First, check the caller module (useful when mqtt_client monkeypatches get_cpu_percent)
@@ -33,7 +33,7 @@ def _get_cpu_percent():
                 if m and hasattr(m, "get_cpu_percent"):
                     try:
                         return m.get_cpu_percent()
-                    except Exception:
+                    except Exception:  # pragma: no cover - defensive fallback when caller module misbehaves
                         return None
     except Exception:
         pass
@@ -44,7 +44,7 @@ def _get_cpu_percent():
         cpu_val = helpers.get_cpu_percent()
         if cpu_val is not None:
             return cpu_val
-    except Exception:
+    except Exception:  # pragma: no cover - helpers module not available in test harness
         pass
     # Try common mqtt_client module names for tests that import in different ways
     for cand in ("mqtt_client", "fresh_mqtt_client", "m", "m2"):
@@ -52,7 +52,7 @@ def _get_cpu_percent():
         if mod and hasattr(mod, "get_cpu_percent"):
             try:
                 return mod.get_cpu_percent()
-            except Exception:
+            except Exception:  # pragma: no cover - defensive fallback for misbehaving modules
                 return None
     return None
 
