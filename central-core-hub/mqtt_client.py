@@ -417,6 +417,8 @@ class CentralCoreClient:
         # Vault is considered authoritative for selections when it requests/sets
         # them; handlers will update this list accordingly.
         self.selected_sensors = []
+        # cache of last published selected sensor values for change detection
+        self._selected_sensor_cache = {}
 
     def _setup_cert_files(self):
         """Handle certificate content vs file paths, and parse bundle if provided."""
@@ -733,6 +735,72 @@ class CentralCoreClient:
             )
         self._last_sensors_sent = int(time.time())
 
+    def _normalize_sensor_value(self, state):
+        val = state
+        try:
+            if isinstance(state, str):
+                low = state.lower()
+                if low in ("on", "true"):
+                    val = True
+                elif low in ("off", "false"):
+                    val = False
+                else:
+                    if "." in state:
+                        val = float(state)
+                    else:
+                        val = int(state)
+        except Exception:
+            val = state
+        return val
+
+    def publish_selected_sensor_changes(self):
+        """Publish telemetry for selected sensors when their state changes."""
+        if not self.selected_sensors:
+            return
+        if not self.ha_api_url or not self.ha_api_token or requests is None:
+            return
+        sensors = fetch_sensors(self.ha_api_url, self.ha_api_token) or []
+        selected_set = set(self.selected_sensors)
+        filtered = [s for s in sensors if s.get("entity_id") in selected_set]
+
+        data_map = {}
+        names_map = {}
+        enabled_map = {}
+        attrs_map = {}
+        for s in filtered:
+            ent = s.get("entity_id")
+            if not ent:
+                continue
+            raw_state = s.get("state")
+            attrs = s.get("attributes", {}) or {}
+            data_map[ent] = self._normalize_sensor_value(raw_state)
+            names_map[ent] = attrs.get("friendly_name") or s.get("name") or ent
+            enabled_map[ent] = not bool(attrs.get("disabled_by"))
+            attrs_map[ent] = attrs
+
+        if not data_map:
+            return
+
+        snapshot = {k: data_map[k] for k in data_map.keys()}
+        if snapshot == self._selected_sensor_cache:
+            return
+
+        self._selected_sensor_cache = snapshot
+        now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        telemetry_payload = {
+            "data": data_map,
+            "names": names_map,
+            "enabled": enabled_map,
+            "attributes": attrs_map,
+            "timestamp": now_iso,
+        }
+        try:
+            self._publish(
+                self.preferred_sensors_topic, json.dumps(telemetry_payload), qos=0
+            )
+        except Exception:
+            _log("Failed to publish selected sensor changes", sys.stderr)
+
     def run(self):
         # connect first
         self.connect()
@@ -761,6 +829,10 @@ class CentralCoreClient:
             self.publish_telemetry()
         except Exception:
             _log("Telemetry publish exception", sys.stderr)
+        try:
+            self.publish_selected_sensor_changes()
+        except Exception:
+            _log("Selected sensor change publish exception", sys.stderr)
         # send telemetry every 30s; send sensors every hour
         now = int(time.time())
         try:
