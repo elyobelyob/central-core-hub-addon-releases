@@ -352,8 +352,9 @@ class CentralCoreClient:
         self.preferred_sensors_topic = f"hubs/{self.client_id}/telemetry/sensors"
         # Legacy sensors topic (kept for backward compatibility)
         self.sensors_topic = f"telemetry/{self.client_id}/sensors"
-        # Subscribe pattern for Vault commands (e.g. hubs/<hub_id>/cmd/sensors/poll)
-        self.cmd_sub_topic = f"hubs/{self.client_id}/cmd/+"
+        # Subscribe pattern for Vault commands (wildcard to capture nested paths
+        # like hubs/<hub_id>/cmd/sensors/poll or .../sensors/set)
+        self.cmd_sub_topic = f"hubs/{self.client_id}/cmd/#"
         # Delegate client creation and TLS setup to mqtt_runtime so it can
         # be unit-tested separately and to keep this class focused on
         # higher-level behavior.

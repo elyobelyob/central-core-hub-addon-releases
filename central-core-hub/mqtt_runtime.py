@@ -59,7 +59,7 @@ def setup_mqtt_client(ctx, mqtt_mod):
             def disconnect(self):
                 return None
 
-        ctx._client = _ClientShim()  # pragma: no cover
+        ctx._client = _ClientShim()
     else:
         # Create the real paho client and apply username/password if present
         try:
@@ -94,21 +94,21 @@ def setup_mqtt_client(ctx, mqtt_mod):
         if getattr(ctx, "mqtt_cert", None) and getattr(ctx, "mqtt_key", None):
             tls_kwargs["certfile"] = ctx.mqtt_cert
             tls_kwargs["keyfile"] = ctx.mqtt_key
-        try:  # pragma: no cover
+        try:
             # Some clients (shim) may not implement tls_set; ignore failures
             ctx._client.tls_set(**tls_kwargs)
-        except Exception:
+        except Exception:  # pragma: no cover - TLS setup failures are environment specific
             try:
                 _log("Failed to configure TLS for MQTT", sys.stderr)
-            except Exception:
-                pass  # pragma: no cover
+            except Exception:  # pragma: no cover - logging to stderr may not be available in tests
+                pass
 
     # Attach callbacks if present on the context
-    try:  # pragma: no cover
+    try:
         ctx._client.on_connect = ctx.on_connect
         ctx._client.on_disconnect = ctx.on_disconnect
         ctx._client.on_message = ctx.on_message
-    except Exception:
-        traceback.print_exc()  # pragma: no cover
+    except Exception:  # pragma: no cover - assignment may fail on exotic clients
+        traceback.print_exc()
 
     return ctx._client
