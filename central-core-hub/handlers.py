@@ -32,11 +32,25 @@ except Exception:
             raise ImportError("shared package not found locally")
 
     except Exception:  # pragma: no cover
+
         class _FallbackTopics:
+            TELEMETRY_SYSTEM = "hubs/{hub_id}/v{version}/telemetry/system"
             TELEMETRY_SENSORS = "hubs/{hub_id}/v{version}/telemetry/sensors"
+            TELEMETRY_EVENTS = "hubs/{hub_id}/v{version}/telemetry/events"
+            TELEMETRY_GENERAL = "hubs/{hub_id}/v{version}/telemetry/general"
+            STATUS_ONLINE = "hubs/{hub_id}/v{version}/status/online"
+            STATUS_OFFLINE = "hubs/{hub_id}/v{version}/status/offline"
             CMD_SENSORS_POLL = "hubs/{hub_id}/v{version}/cmd/sensors/poll"
             CMD_SENSORS_SET = "hubs/{hub_id}/v{version}/cmd/sensors/set"
+            CMD_CONFIG_UPDATE = "hubs/{hub_id}/v{version}/cmd/config/update"
+            CMD_FIRMWARE_UPDATE = "hubs/{hub_id}/v{version}/cmd/firmware/update"
+            CMD_TUNNEL_START = "hubs/{hub_id}/v{version}/cmd/tunnel/start"
+            CMD_TUNNEL_STOP = "hubs/{hub_id}/v{version}/cmd/tunnel/stop"
             ACK_GENERIC = "hubs/{hub_id}/v{version}/ack/{command_name}/{command_id}"
+            BROADCAST_CMD = "hubs/broadcast/v{version}/cmd/{command}"
+            ADDON_HA_TELEMETRY = "hubs/{hub_id}/v{version}/addon/ha/telemetry"
+            ADDON_HA_STATUS = "hubs/{hub_id}/v{version}/addon/ha/status"
+            ADDON_HA_CMD = "hubs/{hub_id}/v{version}/addon/ha/cmd/{command}"
 
         class _FallbackSchemas:
             class AckStatus:
@@ -46,6 +60,47 @@ except Exception:
             class CommandName:
                 SENSORS_POLL = "sensors.poll"
                 SENSORS_SET = "sensors.set"
+                CONFIG_UPDATE = "config.update"
+                FIRMWARE_UPDATE = "firmware.update"
+                TUNNEL_START = "tunnel.start"
+                TUNNEL_STOP = "tunnel.stop"
+
+            class CommandAck:
+                def __init__(self, command_id, status, message=None, timestamp=None):
+                    self.command_id = command_id
+                    self.status = status
+                    self.message = message
+                    self.timestamp = timestamp
+
+                def model_dump_json(self):
+                    return json.dumps(
+                        {
+                            "command_id": self.command_id,
+                            "status": self.status,
+                            "message": self.message,
+                            "timestamp": self.timestamp,
+                        }
+                    )
+
+            class StatusOnline:
+                def __init__(self, timestamp=None):
+                    self.status = "online"
+                    self.timestamp = timestamp
+
+                def model_dump_json(self):
+                    return json.dumps(
+                        {"status": self.status, "timestamp": self.timestamp}
+                    )
+
+            class StatusOffline:
+                def __init__(self, timestamp=None):
+                    self.status = "offline"
+                    self.timestamp = timestamp
+
+                def model_dump_json(self):
+                    return json.dumps(
+                        {"status": self.status, "timestamp": self.timestamp}
+                    )
 
         shared_schemas = _FallbackSchemas()
         shared_topics = _FallbackTopics()
@@ -93,7 +148,9 @@ def handle_message(
                 # Log explicitly that we are publishing an ack (use client logger if available)
                 log_fn = getattr(client, "_log", None)
                 try:
-                    now_ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                    now_ts = (
+                        datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                    )
                     msg_txt = (
                         f"Publishing ack to {ack_topic} status={status} "
                         f"command_id={command_id} at {now_ts}"
@@ -103,7 +160,7 @@ def handle_message(
                     else:
                         print(f"[{now_ts}] {msg_txt}", file=sys.stdout)
                 except Exception:
-                    pass
+                    traceback.print_exc()
                 if hasattr(shared_schemas, "CommandAck"):
                     ack_payload = shared_schemas.CommandAck(
                         command_id=command_id,
@@ -122,7 +179,7 @@ def handle_message(
                     )
                 client._publish(ack_topic, ack_payload, qos=1)
             except Exception:
-                pass  # pragma: no cover - do not break handling on ack failure
+                traceback.print_exc()  # pragma: no cover - do not break handling on ack failure
 
         def _sensor_topics():
             """Return versioned sensor telemetry topic."""
@@ -139,7 +196,7 @@ def handle_message(
                 if versioned not in topics:
                     topics.append(versioned)
             except Exception:
-                pass
+                traceback.print_exc()
             return topics
 
         def _val(obj, fallback):
@@ -164,16 +221,34 @@ def handle_message(
             else "success"
         )
 
-        expected_cmd_topic_v = (
-            build_topic(
-                shared_topics.CMD_SENSORS_POLL,
-                hub_id=client.client_id,
-                version=protocol_version,
+        expected_cmd_topics = []
+        try:
+            expected_cmd_topic_v = (
+                build_topic(
+                    shared_topics.CMD_SENSORS_POLL,
+                    hub_id=client.client_id,
+                    version=protocol_version,
+                )
+                if shared_topics
+                else None
             )
-            if shared_topics
-            else None
-        )
-        if topic == expected_cmd_topic_v:
+            if expected_cmd_topic_v:
+                expected_cmd_topics.append(expected_cmd_topic_v)
+        except Exception:
+            expected_cmd_topics = []
+        try:
+            bcast_template = getattr(shared_topics, "BROADCAST_CMD", None)
+            if bcast_template:
+                expected_cmd_topics.append(
+                    build_topic(
+                        bcast_template,
+                        version=protocol_version,
+                        command="sensors/poll",
+                    )
+                )
+        except Exception:
+            traceback.print_exc()
+        if topic in expected_cmd_topics:
             try:
                 cmd = (
                     json.loads(payload_str)
@@ -209,7 +284,7 @@ def handle_message(
                     client.selected_sensors = list(sensors_requested)
             except Exception:
                 # don't let selection storage failure stop command handling
-                pass
+                traceback.print_exc()
             if sensors_requested:
                 sensors = [
                     s for s in sensors if s.get("entity_id") in sensors_requested
@@ -258,7 +333,7 @@ def handle_message(
                 for t in _sensor_topics():
                     client._publish(t, json.dumps(telemetry_payload), qos=0)
             except Exception:
-                pass  # pragma: no cover
+                traceback.print_exc()  # pragma: no cover
 
             # If a vault topic is configured, remind the Vault server which
             # sensors were selected/reported by publishing a short payload
@@ -277,22 +352,41 @@ def handle_message(
                     }
                     client._publish(client.vault_topic, json.dumps(reminder), qos=0)
             except Exception:
-                pass  # pragma: no cover
+                traceback.print_exc()  # pragma: no cover
 
             if command_id:
                 _publish_shared_ack(cmd_name_poll, command_id, ack_success, "completed")
             return
 
-        expected_set_topic_v = (
-            build_topic(
-                shared_topics.CMD_SENSORS_SET,
-                hub_id=client.client_id,
-                version=protocol_version,
+        expected_set_topics = []
+        try:
+            expected_set_topic_v = (
+                build_topic(
+                    shared_topics.CMD_SENSORS_SET,
+                    hub_id=client.client_id,
+                    version=protocol_version,
+                )
+                if shared_topics
+                else None
             )
-            if shared_topics
-            else None
-        )
-        if topic == expected_set_topic_v:
+            if expected_set_topic_v:
+                expected_set_topics.append(expected_set_topic_v)
+        except Exception:
+            expected_set_topics = []
+        try:
+            bcast_template = getattr(shared_topics, "BROADCAST_CMD", None)
+            if bcast_template:
+                expected_set_topics.append(
+                    build_topic(
+                        bcast_template,
+                        version=protocol_version,
+                        command="sensors/set",
+                    )
+                )
+        except Exception:
+            traceback.print_exc()
+
+        if topic in expected_set_topics:
             try:
                 cmd = (
                     json.loads(payload_str)
@@ -422,7 +516,7 @@ def handle_message(
                         for t in _sensor_topics():
                             client._publish(t, json.dumps(telemetry_payload), qos=0)
                     except Exception:
-                        pass  # pragma: no cover
+                        traceback.print_exc()  # pragma: no cover
                     # Remind Vault of the sensors that were set/readback.
                     # If the client has a Vault-authoritative selection, prefer
                     # that list; otherwise fall back to the data_map keys.
@@ -441,7 +535,7 @@ def handle_message(
                                 client.vault_topic, json.dumps(reminder), qos=0
                             )
                     except Exception:
-                        pass  # pragma: no cover
+                        traceback.print_exc()  # pragma: no cover
             except (
                 Exception
             ):  # pragma: no cover - defensive branch hard to reproduce in tests

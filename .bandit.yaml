@@ -1,0 +1,6 @@
+exclude_dirs:
+  - central-core-hub/tests
+
+# Allow test asserts; production code should use explicit error handling/logging.
+skips:
+  - B101

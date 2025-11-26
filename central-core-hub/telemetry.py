@@ -2,6 +2,7 @@ import json
 import platform
 import socket
 import sys
+import traceback
 from datetime import datetime, timezone
 
 
@@ -21,7 +22,7 @@ def _get_cpu_percent():
         except (
             Exception
         ):  # pragma: no cover - external override error is environment-specific
-            pass
+            traceback.print_exc()
 
     # First, check the caller module (useful when mqtt_client monkeypatches get_cpu_percent)
     try:
@@ -40,7 +41,7 @@ def _get_cpu_percent():
                     ):  # pragma: no cover - defensive fallback when caller module misbehaves
                         return None
     except Exception:
-        pass
+        traceback.print_exc()
 
     try:
         import helpers
@@ -49,7 +50,7 @@ def _get_cpu_percent():
         if cpu_val is not None:
             return cpu_val
     except Exception:  # pragma: no cover - helpers module not available in test harness
-        pass
+        traceback.print_exc()
     # Try common mqtt_client module names for tests that import in different ways
     for cand in ("mqtt_client", "fresh_mqtt_client", "m", "m2"):
         mod = sys.modules.get(cand)
@@ -81,7 +82,7 @@ def build_telemetry(
         ip = s.getsockname()[0]
         s.close()
     except Exception:
-        pass
+        traceback.print_exc()
     # Resolve helpers: prefer injected functions, otherwise try helpers module
     up = None
     la = []
