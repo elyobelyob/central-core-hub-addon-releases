@@ -199,6 +199,37 @@ def handle_message(
                 traceback.print_exc()
             return topics
 
+        def _fetch_by_ids(ids):
+            """Best-effort per-entity fetch for richer state (timestamps)."""
+            if requests is None or not getattr(client, "ha_api_url", None):
+                return None
+            url_base = client.ha_api_url.rstrip("/")
+            headers = {
+                "Authorization": f"Bearer {getattr(client, 'ha_api_token', '')}",
+                "Content-Type": "application/json",
+            }
+            results = []
+            for ent_id in ids or []:
+                try:
+                    r = requests.get(
+                        f"{url_base}/api/states/{ent_id}", headers=headers, timeout=10
+                    )
+                    r.raise_for_status()
+                    data = r.json()
+                    if data.get("entity_id"):
+                        results.append(
+                            {
+                                "entity_id": data.get("entity_id"),
+                                "state": data.get("state"),
+                                "attributes": data.get("attributes", {}) or {},
+                                "last_changed": data.get("last_changed"),
+                                "last_updated": data.get("last_updated"),
+                            }
+                        )
+                except Exception:
+                    traceback.print_exc()
+            return results
+
         def _val(obj, fallback):
             try:
                 return obj.value
@@ -275,6 +306,10 @@ def handle_message(
             ):  # pragma: no cover - defensive branch hard to reproduce in tests
                 sensors_requested = None
             sensors = fetch_sensors(client.ha_api_url, client.ha_api_token) or []
+            if sensors_requested and not sensors:
+                enriched = _fetch_by_ids(sensors_requested)
+                if enriched:
+                    sensors = enriched
             # If the Vault requested a specific set of sensors, treat that
             # list as authoritative and remember it on the client for future
             # reminder publications.
