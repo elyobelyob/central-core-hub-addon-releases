@@ -21,6 +21,42 @@ import tempfile
 import time
 import traceback
 from datetime import datetime, timezone
+# HA integration helpers (websocket + REST fetch). Load sibling file when direct
+# import isn't on sys.path (e.g. tests using spec_from_file_location).
+try:
+    import ha_client
+except Exception:
+    try:
+        _ha_base = pathlib.Path(__file__).resolve().parent
+        _ha_spec = importlib.util.spec_from_file_location(
+            "ha_client", str(_ha_base / "ha_client.py")
+        )
+        ha_client = importlib.util.module_from_spec(_ha_spec)
+        sys.modules["ha_client"] = ha_client
+        _ha_spec.loader.exec_module(ha_client)
+    except Exception:
+        raise
+try:
+    import telemetry_helpers
+except Exception:
+    try:
+        _tele_base = pathlib.Path(__file__).resolve().parent
+        _tele_spec = importlib.util.spec_from_file_location(
+            "telemetry_helpers", str(_tele_base / "telemetry_helpers.py")
+        )
+        telemetry_helpers = importlib.util.module_from_spec(_tele_spec)
+        sys.modules["telemetry_helpers"] = telemetry_helpers
+        _tele_spec.loader.exec_module(telemetry_helpers)
+    except Exception:
+        raise
+
+from ha_client import HAWebSocketListener, fetch_sensors, fetch_sensors_by_ids
+from telemetry_helpers import (
+    attach_ha_timestamps,
+    build_sensor_event_payload,
+    build_sensor_maps,
+    normalize_sensor_value,
+)
 
 # Shared MQTT protocol (topics/schemas)
 try:
@@ -390,39 +426,20 @@ def get_cpu_percent():  # noqa: F811
 
 
 def fetch_sensors(ha_api_url, ha_api_token):
-    if not ha_api_url or not ha_api_token or requests is None:
-        return None
-    try:
-        url = ha_api_url.rstrip("/") + "/api/states"
-        headers = {
-            "Authorization": f"Bearer {ha_api_token}",
-            "Content-Type": "application/json",
-        }
-        r = requests.get(url, headers=headers, timeout=10)
-        r.raise_for_status()
-        data = r.json()
-        sensors = []
-        for ent in data:
-            ent_id = ent.get("entity_id")
-            if ent_id and ent_id.startswith("sensor."):
-                sensors.append(
-                    {
-                        "entity_id": ent_id,
-                        "state": ent.get("state"),
-                        "name": ent.get("attributes", {}).get("friendly_name")
-                        or ent_id,
-                        "attributes": ent.get("attributes", {}) or {},
-                        # Preserve HA timestamps when present so downstream systems
-                        # can reason about data recency.
-                        "last_changed": ent.get("last_changed"),
-                        "last_updated": ent.get("last_updated"),
-                    }
-                )
-        return sensors
-    except Exception:
-        return None
+    """Delegate to ha_client but allow tests to override requests module."""
+    return ha_client.fetch_sensors(
+        ha_api_url, ha_api_token, requests_mod=requests
+    )
 
 
+def fetch_sensors_by_ids(ha_api_url, ha_api_token, entity_ids, requests_mod=None):
+    """Delegate to ha_client when extra TTL data is needed."""
+    return ha_client.fetch_sensors_by_ids(
+        ha_api_url,
+        ha_api_token,
+        entity_ids,
+        requests_mod=requests_mod or requests,
+    )
 class CentralCoreClient:
     def __init__(self, options):
         self.options = options
@@ -585,6 +602,8 @@ class CentralCoreClient:
         self._configure_will()
 
         self._connected = False
+        # optional HA websocket listener for state_changed events
+        self._ha_ws_listener = None
         # track last status heartbeat publish
         self._last_status_sent = 0
         # track last sensors publish time (epoch seconds)
@@ -1005,24 +1024,19 @@ class CentralCoreClient:
             return
         if not self.ha_api_url or not self.ha_api_token:
             return
+        self._ensure_ha_ws_listener()
         sensors = fetch_sensors(self.ha_api_url, self.ha_api_token) or []
+        # If nothing returned from full-state API, try more detailed per-entity fetch.
+        if not sensors and self.selected_sensors:
+            sensors = (
+                fetch_sensors_by_ids(
+                    self.ha_api_url, self.ha_api_token, self.selected_sensors
+                )
+                or []
+            )
         selected_set = set(self.selected_sensors)
         filtered = [s for s in sensors if s.get("entity_id") in selected_set]
-
-        data_map = {}
-        names_map = {}
-        enabled_map = {}
-        attrs_map = {}
-        for s in filtered:
-            ent = s.get("entity_id")
-            if not ent:
-                continue
-            raw_state = s.get("state")
-            attrs = s.get("attributes", {}) or {}
-            data_map[ent] = self._normalize_sensor_value(raw_state)
-            names_map[ent] = attrs.get("friendly_name") or s.get("name") or ent
-            enabled_map[ent] = not bool(attrs.get("disabled_by"))
-            attrs_map[ent] = attrs
+        data_map, names_map, enabled_map, attrs_map = build_sensor_maps(filtered)
 
         if not data_map:
             return
@@ -1047,6 +1061,43 @@ class CentralCoreClient:
         except Exception:
             _log("Failed to publish selected sensor changes", sys.stderr)
 
+    def _handle_ha_state_event(self, entity_id, new_state):
+        """Handle HA websocket state_changed event for selected sensors."""
+        try:
+            if not entity_id or entity_id not in set(self.selected_sensors or []):
+                return
+            attrs = new_state.get("attributes", {}) or {}
+            attach_ha_timestamps(attrs, new_state)
+            telemetry_payload = build_sensor_event_payload(
+                entity_id,
+                attrs,
+                normalize_sensor_value(new_state.get("state")),
+            )
+            self._publish(
+                self.preferred_sensors_topic, telemetry_payload, qos=0
+            )
+        except Exception:
+            traceback.print_exc()
+
+    def _ensure_ha_ws_listener(self):
+        """Start HA websocket listener for state changes when possible."""
+        if not self.ha_api_url or not self.ha_api_token or not self.selected_sensors:
+            return
+        try:
+            if self._ha_ws_listener is None:
+                self._ha_ws_listener = HAWebSocketListener(
+                    self.ha_api_url,
+                    self.ha_api_token,
+                    self._handle_ha_state_event,
+                    _log,
+                    self.selected_sensors,
+                )
+            else:
+                self._ha_ws_listener.update_selectors(self.selected_sensors)
+            self._ha_ws_listener.start()
+        except Exception:
+            traceback.print_exc()
+
     def run(self):
         # connect first
         self.connect()
@@ -1058,6 +1109,11 @@ class CentralCoreClient:
             try:
                 self._client.loop_stop()
                 self._client.disconnect()
+            except Exception:
+                traceback.print_exc()
+            try:
+                if self._ha_ws_listener:
+                    self._ha_ws_listener.stop()
             except Exception:
                 traceback.print_exc()
 
