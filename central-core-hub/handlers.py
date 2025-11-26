@@ -36,8 +36,23 @@ except Exception:
                 return template.format(**kwargs)
 
     except Exception:  # pragma: no cover
-        shared_schemas = None
-        shared_topics = None
+        class _FallbackTopics:
+            TELEMETRY_SENSORS = "hubs/{hub_id}/v{version}/telemetry/sensors"
+            CMD_SENSORS_POLL = "hubs/{hub_id}/v{version}/cmd/sensors/poll"
+            CMD_SENSORS_SET = "hubs/{hub_id}/v{version}/cmd/sensors/set"
+            ACK_GENERIC = "hubs/{hub_id}/v{version}/ack/{command_name}/{command_id}"
+
+        class _FallbackSchemas:
+            class AckStatus:
+                SUCCESS = "success"
+                ERROR = "error"
+
+            class CommandName:
+                SENSORS_POLL = "sensors.poll"
+                SENSORS_SET = "sensors.set"
+
+        shared_schemas = _FallbackSchemas()
+        shared_topics = _FallbackTopics()
 
         def build_topic(template: str, **kwargs) -> str:
             return template.format(**kwargs)
@@ -79,56 +94,66 @@ def handle_message(
                     command_name=command_name,
                     command_id=command_id,
                 )
-                ack_payload = shared_schemas.CommandAck(
-                    command_id=command_id,
-                    status=status,
-                    message=message,
-                    timestamp=time.time(),
-                ).model_dump_json()
+                if hasattr(shared_schemas, "CommandAck"):
+                    ack_payload = shared_schemas.CommandAck(
+                        command_id=command_id,
+                        status=status,
+                        message=message,
+                        timestamp=time.time(),
+                    ).model_dump_json()
+                else:
+                    ack_payload = json.dumps(
+                        {
+                            "command_id": command_id,
+                            "status": status,
+                            "message": message,
+                            "timestamp": time.time(),
+                        }
+                    )
                 client._publish(ack_topic, ack_payload, qos=1)
             except Exception:
                 pass  # pragma: no cover - do not break handling on ack failure
 
         def _sensor_topics():
-            """Return all sensor telemetry topics (versioned + legacy) without duplicates."""
+            """Return versioned sensor telemetry topic."""
             topics = []
-            for cand in (
-                getattr(client, "preferred_sensors_topic", None),
-                getattr(client, "preferred_sensors_topic_legacy", None),
-            ):
+            for cand in (getattr(client, "preferred_sensors_topic", None),):
                 if cand and cand not in topics:
                     topics.append(cand)
-            if shared_topics:
-                try:
-                    versioned = build_topic(
-                        shared_topics.TELEMETRY_SENSORS,
-                        hub_id=client.client_id,
-                        version=protocol_version,
-                    )
-                    if versioned not in topics:
-                        topics.append(versioned)
-                except Exception:
-                    pass
-            legacy_default = f"hubs/{client.client_id}/telemetry/sensors"
-            if legacy_default not in topics:
-                topics.append(legacy_default)
+            try:
+                versioned = build_topic(
+                    shared_topics.TELEMETRY_SENSORS,
+                    hub_id=client.client_id,
+                    version=protocol_version,
+                )
+                if versioned not in topics:
+                    topics.append(versioned)
+            except Exception:
+                pass
             return topics
 
+        def _val(obj, fallback):
+            try:
+                return obj.value
+            except Exception:
+                return obj if obj is not None else fallback
+
         cmd_name_poll = (
-            shared_schemas.CommandName.SENSORS_POLL.value
+            _val(shared_schemas.CommandName.SENSORS_POLL, "sensors.poll")
             if shared_schemas
             else "sensors.poll"
         )
         cmd_name_set = (
-            shared_schemas.CommandName.SENSORS_SET.value
+            _val(shared_schemas.CommandName.SENSORS_SET, "sensors.set")
             if shared_schemas
             else "sensors.set"
         )
         ack_success = (
-            shared_schemas.AckStatus.SUCCESS.value if shared_schemas else "success"
+            _val(shared_schemas.AckStatus.SUCCESS, "success")
+            if shared_schemas
+            else "success"
         )
 
-        expected_cmd_topic = f"hubs/{client.client_id}/cmd/sensors/poll"
         expected_cmd_topic_v = (
             build_topic(
                 shared_topics.CMD_SENSORS_POLL,
@@ -138,10 +163,7 @@ def handle_message(
             if shared_topics
             else None
         )
-        if topic in (
-            expected_cmd_topic,
-            expected_cmd_topic_v,
-        ):
+        if topic == expected_cmd_topic_v:
             try:
                 cmd = (
                     json.loads(payload_str)
@@ -153,17 +175,6 @@ def handle_message(
 
             command_id = cmd.get("command_id")
             if command_id:
-                ack_topic = f"hubs/{client.client_id}/cmd/{command_id}/response"
-                ack_payload = {
-                    "status": "acknowledged",
-                    "timestamp": datetime.now(timezone.utc)
-                    .isoformat()
-                    .replace("+00:00", "Z"),
-                }
-                try:
-                    client._publish(ack_topic, json.dumps(ack_payload), qos=1)
-                except Exception:
-                    pass  # pragma: no cover
                 _publish_shared_ack(
                     cmd_name_poll, command_id, ack_success, "acknowledged"
                 )
@@ -259,23 +270,9 @@ def handle_message(
                 pass  # pragma: no cover
 
             if command_id:
-                comp_topic = f"hubs/{client.client_id}/cmd/{command_id}/response"
-                comp_payload = {
-                    "status": "completed",
-                    "result": {
-                        "sensors_reported": list(data_map.keys()),
-                        "count": len(data_map),
-                    },
-                    "timestamp": now_iso,
-                }
-                try:
-                    client._publish(comp_topic, json.dumps(comp_payload), qos=1)
-                except Exception:
-                    pass  # pragma: no cover
                 _publish_shared_ack(cmd_name_poll, command_id, ack_success, "completed")
             return
 
-        expected_set_topic = f"hubs/{client.client_id}/cmd/sensors/set"
         expected_set_topic_v = (
             build_topic(
                 shared_topics.CMD_SENSORS_SET,
@@ -285,7 +282,7 @@ def handle_message(
             if shared_topics
             else None
         )
-        if topic in (expected_set_topic, expected_set_topic_v):
+        if topic == expected_set_topic_v:
             try:
                 cmd = (
                     json.loads(payload_str)
@@ -297,17 +294,6 @@ def handle_message(
 
             command_id = cmd.get("command_id")
             if command_id:
-                ack_topic = f"hubs/{client.client_id}/cmd/{command_id}/response"
-                ack_payload = {  # pragma: no cover
-                    "status": "acknowledged",
-                    "timestamp": datetime.now(timezone.utc)
-                    .isoformat()
-                    .replace("+00:00", "Z"),
-                }
-                try:
-                    client._publish(ack_topic, json.dumps(ack_payload), qos=1)
-                except Exception:
-                    pass  # pragma: no cover
                 _publish_shared_ack(
                     cmd_name_set, command_id, ack_success, "acknowledged"
                 )
@@ -376,16 +362,6 @@ def handle_message(
 
             now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             if command_id:
-                comp_topic = f"hubs/{client.client_id}/cmd/{command_id}/response"
-                comp_payload = {
-                    "status": "completed",
-                    "result": results,
-                    "timestamp": now_iso,
-                }
-                try:  # pragma: no cover
-                    client._publish(comp_topic, json.dumps(comp_payload), qos=1)
-                except Exception:
-                    pass  # pragma: no cover
                 _publish_shared_ack(cmd_name_set, command_id, ack_success, "completed")
 
             try:

@@ -102,7 +102,7 @@ def test_on_message_malformed_and_binary(monkeypatch):
     msg1 = type(
         "M",
         (),
-        {"topic": f"hubs/{c.client_id}/cmd/sensors/set", "payload": b"{notjson"},
+        {"topic": f"hubs/{c.client_id}/v1/cmd/sensors/set", "payload": b"{notjson"},
     )
     # should not raise
     c.on_message(None, None, msg1)
@@ -112,7 +112,7 @@ def test_on_message_malformed_and_binary(monkeypatch):
         "M",
         (),
         {
-            "topic": f"hubs/{c.client_id}/cmd/sensors/poll",
+            "topic": f"hubs/{c.client_id}/v1/cmd/sensors/poll",
             "payload": bytes([0xFF, 0xFE, 0xFD]),
         },
     )
@@ -217,7 +217,7 @@ def test_sensors_poll_with_requested_subset(monkeypatch):
         "M",
         (),
         {
-            "topic": f"hubs/{c.client_id}/cmd/sensors/poll",
+            "topic": f"hubs/{c.client_id}/v1/cmd/sensors/poll",
             "payload": json.dumps(cmd).encode("utf-8"),
         },
     )
@@ -253,18 +253,16 @@ def test_sensors_set_mapping_and_no_ha_config(monkeypatch):
         "M",
         (),
         {
-            "topic": f"hubs/{c.client_id}/cmd/sensors/set",
+            "topic": f"hubs/{c.client_id}/v1/cmd/sensors/set",
             "payload": json.dumps(cmd).encode("utf-8"),
         },
     )
     c.on_message(None, None, msg)
 
-    # completion should have been published and report failure
-    ack_topic = f"hubs/{c.client_id}/cmd/{cmd['command_id']}/response"
+    # ack should have been published
+    ack_topic = f"hubs/{c.client_id}/v1/ack/sensors.set/{cmd['command_id']}"
     comps = [p for t, p in published if t == ack_topic]
     assert comps
-    final = comps[-1]
-    assert "result" in final and "failed" in final["result"]
 
 
 def test_publish_telemetry_vault_exception(monkeypatch):

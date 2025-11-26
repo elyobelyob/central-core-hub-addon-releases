@@ -64,7 +64,7 @@ def test_set_readback_exception_falls_back():
     )
     handlers.handle_message(
         client,
-        make_msg(f"hubs/{client.client_id}/cmd/sensors/set"),
+        make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/set"),
         payload,
         None,
         None,
@@ -97,7 +97,7 @@ def test_set_post_raises_records_failure():
     )
     handlers.handle_message(
         client,
-        make_msg(f"hubs/{client.client_id}/cmd/sensors/set"),
+        make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/set"),
         payload,
         None,
         None,
@@ -121,7 +121,7 @@ def test_set_item_without_entity_skipped_and_no_ha_config():
     )
     handlers.handle_message(
         client,
-        make_msg(f"hubs/{client.client_id}/cmd/sensors/set"),
+        make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/set"),
         payload,
         None,
         None,
@@ -148,7 +148,7 @@ def test_poll_prefers_client_selected_sensors_for_reminder():
     payload = json.dumps({"command_id": "c4", "payload": {}})
     handlers.handle_message(
         client,
-        make_msg(f"hubs/{client.client_id}/cmd/sensors/poll"),
+        make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/poll"),
         payload,
         fetch_sensors,
         None,

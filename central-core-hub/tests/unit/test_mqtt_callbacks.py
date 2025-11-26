@@ -71,7 +71,7 @@ def test_on_message_handles_binary_payload_gracefully(monkeypatch):
     # create a message whose payload is not utf-8 decodable (simulate by bytes)
     class M:
         def __init__(self):
-            self.topic = f"hubs/{c.client_id}/cmd/sensors/poll"
+            self.topic = f"hubs/{c.client_id}/v1/cmd/sensors/poll"
             self.payload = b"\xff\xfe\xfd"  # invalid utf-8
 
     # Ensure handlers exists and is callable; use the real handlers

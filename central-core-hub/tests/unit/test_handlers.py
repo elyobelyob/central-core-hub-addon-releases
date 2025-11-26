@@ -30,7 +30,7 @@ class DummyClient:
         self.ha_api_url = ""
         self.ha_api_token = ""
         self.ha_readback_after_set = True
-        self.preferred_sensors_topic = f"hubs/{self.client_id}/telemetry/sensors"
+        self.preferred_sensors_topic = f"hubs/{self.client_id}/v1/telemetry/sensors"
 
     def _publish(self, topic, payload, qos=0):
         self.published.append({"topic": topic, "payload": payload, "qos": qos})
@@ -39,7 +39,7 @@ class DummyClient:
 def test_handle_sensors_poll_no_ha():
     mqtt_mod, handlers = _load_modules()
     c = DummyClient()
-    topic = f"hubs/{c.client_id}/cmd/sensors/poll"
+    topic = f"hubs/{c.client_id}/v1/cmd/sensors/poll"
     msg = DummyMsg(topic, b"{}")
     # fetch_sensors is expected to be provided; pass a stub that returns empty
     handlers.handle_message(
@@ -58,7 +58,7 @@ def test_handle_sensors_poll_no_ha():
 def test_handle_sensors_set_no_ha_fails():
     mqtt_mod, handlers = _load_modules()
     c = DummyClient()
-    topic = f"hubs/{c.client_id}/cmd/sensors/set"
+    topic = f"hubs/{c.client_id}/v1/cmd/sensors/set"
     cmd = {"command_id": "cmd1", "payload": {"sensors": {"sensor.x": "on"}}}
     msg = DummyMsg(topic, json.dumps(cmd).encode("utf-8"))
     handlers.handle_message(
@@ -71,5 +71,5 @@ def test_handle_sensors_set_no_ha_fails():
         requests=None,
     )
     # completion response should be published to the command response topic
-    resp_topic = f"hubs/{c.client_id}/cmd/cmd1/response"
-    assert any(p["topic"] == resp_topic for p in c.published)
+    ack_topic = f"hubs/{c.client_id}/v1/ack/sensors.set/cmd1"
+    assert any(p["topic"] == ack_topic for p in c.published)

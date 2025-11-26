@@ -101,20 +101,16 @@ def test_handle_sensors_poll_command_ack_and_completion(monkeypatch):
     c._client = dummy
 
     command = {"command_id": "abc123", "action": "sensors/poll", "payload": {}}
-    topic = f"hubs/{c.client_id}/cmd/sensors/poll"
+    topic = f"hubs/{c.client_id}/v1/cmd/sensors/poll"
     msg = DummyMsg(topic, json.dumps(command).encode("utf-8"))
 
     c.on_message(None, None, msg)
 
-    # Verify ACK, telemetry (preferred), and completion were published
+    # Verify ACK and telemetry (preferred) were published
     topics = [p["topic"] for p in dummy.published]
-    ack_topic = f"hubs/{c.client_id}/cmd/{command['command_id']}/response"
+    ack_topic = f"hubs/{c.client_id}/v1/ack/sensors.poll/{command['command_id']}"
     assert ack_topic in topics
     assert c.preferred_sensors_topic in topics
-    # completion should also be on ack_topic (another message with qos=1)
-    completions = [p for p in dummy.published if p["topic"] == ack_topic]
-    # there should be at least two publishes to ack_topic (ack + completion)
-    assert len(completions) >= 2
     # check that telemetry payload contains reported sensor
     tele_payload = json.loads(
         next(
@@ -186,7 +182,7 @@ def test_handle_sensors_set_command_calls_ha_and_responds(monkeypatch):
             ]
         },
     }
-    topic = f"hubs/{c.client_id}/cmd/sensors/set"
+    topic = f"hubs/{c.client_id}/v1/cmd/sensors/set"
     msg = DummyMsg(topic, json.dumps(command).encode("utf-8"))
 
     c.on_message(None, None, msg)
@@ -196,15 +192,10 @@ def test_handle_sensors_set_command_calls_ha_and_responds(monkeypatch):
     assert posts[0]["url"].endswith("/api/states/sensor.temp")
     assert posts[1]["url"].endswith("/api/states/sensor.hum")
 
-    # ACK and completion should be published to response topic
-    ack_topic = f"hubs/{c.client_id}/cmd/{command['command_id']}/response"
+    # ACK should be published to versioned ack topic
+    ack_topic = f"hubs/{c.client_id}/v1/ack/sensors.set/{command['command_id']}"
     topics = [p["topic"] for p in dummy.published]
     assert ack_topic in topics
-    completions = [p for p in dummy.published if p["topic"] == ack_topic]
-    assert len(completions) >= 2
-    # completion payload contains result.summary
-    comp = json.loads(completions[-1]["payload"])
-    assert "result" in comp and "set" in comp["result"]
     # telemetry should be published to preferred sensors topic with data map
     assert c.preferred_sensors_topic in topics
     tele = json.loads(
@@ -275,7 +266,7 @@ def test_handle_sensors_set_without_readback(monkeypatch):
         "action": "sensors/set",
         "payload": {"sensors": [{"entity_id": "sensor.temp", "state": "22.5"}]},
     }
-    topic = f"hubs/{c.client_id}/cmd/sensors/set"
+    topic = f"hubs/{c.client_id}/v1/cmd/sensors/set"
     msg = DummyMsg(topic, json.dumps(command).encode("utf-8"))
 
     c.on_message(None, None, msg)

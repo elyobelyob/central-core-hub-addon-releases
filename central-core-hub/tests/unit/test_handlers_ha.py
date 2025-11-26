@@ -25,7 +25,7 @@ class DummyClient:
         self.ha_api_url = "http://ha"
         self.ha_api_token = "tok"
         self.ha_readback_after_set = True
-        self.preferred_sensors_topic = f"hubs/{self.client_id}/telemetry/sensors"
+        self.preferred_sensors_topic = f"hubs/{self.client_id}/v1/telemetry/sensors"
 
     def _publish(self, topic, payload, qos=0):
         self.published.append({"topic": topic, "payload": payload, "qos": qos})
@@ -45,7 +45,7 @@ class Resp:
 def test_set_with_ha_readback():
     mqtt_mod, handlers = _load_modules()
     c = DummyClient()
-    topic = f"hubs/{c.client_id}/cmd/sensors/set"
+    topic = f"hubs/{c.client_id}/v1/cmd/sensors/set"
     cmd = {"command_id": "cmd1", "payload": {"sensors": {"sensor.x": "42"}}}
     msg_payload = json.dumps(cmd)
 
@@ -70,8 +70,8 @@ def test_set_with_ha_readback():
     )
 
     # Expect completion response and telemetry publish
-    resp_topic = f"hubs/{c.client_id}/cmd/cmd1/response"
-    assert any(p["topic"] == resp_topic for p in c.published)
+    ack_topic = f"hubs/{c.client_id}/v1/ack/sensors.set/cmd1"
+    assert any(p["topic"] == ack_topic for p in c.published)
     assert any(p["topic"] == c.preferred_sensors_topic for p in c.published)
 
 
@@ -79,7 +79,7 @@ def test_set_with_readback_disabled():
     mqtt_mod, handlers = _load_modules()
     c = DummyClient()
     c.ha_readback_after_set = False
-    topic = f"hubs/{c.client_id}/cmd/sensors/set"
+    topic = f"hubs/{c.client_id}/v1/cmd/sensors/set"
     cmd = {"command_id": "cmd2", "payload": {"sensors": {"sensor.y": "on"}}}
     msg_payload = json.dumps(cmd)
 
@@ -102,5 +102,5 @@ def test_set_with_readback_disabled():
         requests=requests_stub,
     )
 
-    resp_topic = f"hubs/{c.client_id}/cmd/cmd2/response"
-    assert any(p["topic"] == resp_topic for p in c.published)
+    ack_topic = f"hubs/{c.client_id}/v1/ack/sensors.set/cmd2"
+    assert any(p["topic"] == ack_topic for p in c.published)

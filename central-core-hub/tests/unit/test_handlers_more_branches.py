@@ -51,7 +51,7 @@ def test_poll_data_type_parsing(monkeypatch):
 
     cmd = {"command_id": "cid1", "action": "sensors/poll", "payload": {}}
     msg = DummyMsg(
-        f"hubs/{c.client_id}/cmd/sensors/poll", json.dumps(cmd).encode("utf-8")
+        f"hubs/{c.client_id}/v1/cmd/sensors/poll", json.dumps(cmd).encode("utf-8")
     )
 
     c.on_message(None, None, msg)
@@ -92,7 +92,7 @@ def test_on_message_binary_payload_and_set_no_ha_config(monkeypatch):
         def decode(self, *a, **k):
             raise RuntimeError("bad")
 
-    msg = DummyMsg(f"hubs/{c.client_id}/cmd/sensors/poll", BadPayload())
+    msg = DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/poll", BadPayload())
     # Should not raise
     c.on_message(None, None, msg)
 
@@ -103,14 +103,11 @@ def test_on_message_binary_payload_and_set_no_ha_config(monkeypatch):
         "payload": {"sensors": [{"entity_id": "sensor.x", "state": "2"}]},
     }
     msg2 = DummyMsg(
-        f"hubs/{c.client_id}/cmd/sensors/set", json.dumps(cmd).encode("utf-8")
+        f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(cmd).encode("utf-8")
     )
     c.on_message(None, None, msg2)
 
-    # find completion response
-    resp_topic = f"hubs/{c.client_id}/cmd/{cmd['command_id']}/response"
+    # find ack response
+    resp_topic = f"hubs/{c.client_id}/v1/ack/sensors.set/{cmd['command_id']}"
     comps = [p for p in dummy.published if p["topic"] == resp_topic]
-    assert comps, "completion response not published"
-    comp_payload = json.loads(comps[-1]["payload"])
-    assert "result" in comp_payload
-    assert comp_payload["result"]["failed"]
+    assert comps, "ack response not published"

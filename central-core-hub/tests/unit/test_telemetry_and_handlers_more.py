@@ -94,7 +94,7 @@ def test_handlers_poll_with_disabled_and_names(monkeypatch):
     class C:
         def __init__(self):
             self.client_id = "hub1"
-            self.preferred_sensors_topic = "hubs/hub1/telemetry/sensors"
+            self.preferred_sensors_topic = "hubs/hub1/v1/telemetry/sensors"
             self.ha_api_url = ""
             self.ha_api_token = ""
 
@@ -123,7 +123,7 @@ def test_handlers_poll_with_disabled_and_names(monkeypatch):
         return sensors
 
     # call handle_message for poll topic
-    msg = types.SimpleNamespace(topic="hubs/hub1/cmd/sensors/poll", payload=b"{}")
+    msg = types.SimpleNamespace(topic="hubs/hub1/v1/cmd/sensors/poll", payload=b"{}")
     handlers.handle_message(
         client, msg, "{}", fetch_sensors, lambda cid: "{}", lambda raw: None, None
     )
@@ -143,7 +143,7 @@ def test_handlers_set_no_ha_config_causes_failed(monkeypatch):
     class C:
         def __init__(self):
             self.client_id = "hub2"
-            self.preferred_sensors_topic = "hubs/hub2/telemetry/sensors"
+            self.preferred_sensors_topic = "hubs/hub2/v1/telemetry/sensors"
             self.ha_api_url = ""
             self.ha_api_token = ""
 
@@ -157,7 +157,7 @@ def test_handlers_set_no_ha_config_causes_failed(monkeypatch):
         {"command_id": "c1", "payload": {"sensors": {"sensor.x": "1"}}}
     )
     msg = types.SimpleNamespace(
-        topic="hubs/hub2/cmd/sensors/set", payload=payload.encode("utf-8")
+        topic="hubs/hub2/v1/cmd/sensors/set", payload=payload.encode("utf-8")
     )
     # requests is None, so should mark as failed due to no_ha_config
     handlers.handle_message(
