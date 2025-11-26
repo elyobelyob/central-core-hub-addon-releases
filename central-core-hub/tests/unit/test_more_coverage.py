@@ -168,6 +168,8 @@ def test_fetch_sensors_happy_path(monkeypatch):
                     "entity_id": "sensor.a",
                     "state": "1",
                     "attributes": {"friendly_name": "A"},
+                    "last_changed": "2025-01-01T00:00:00Z",
+                    "last_updated": "2025-01-01T00:00:01Z",
                 },
                 {"entity_id": "device.x", "state": "on", "attributes": {}},
             ]
@@ -178,6 +180,9 @@ def test_fetch_sensors_happy_path(monkeypatch):
     sensors = m.fetch_sensors("http://ha", "token")
     assert isinstance(sensors, list)
     assert any(s["entity_id"] == "sensor.a" for s in sensors)
+    sensor_a = next(s for s in sensors if s["entity_id"] == "sensor.a")
+    assert sensor_a.get("last_changed") == "2025-01-01T00:00:00Z"
+    assert sensor_a.get("last_updated") == "2025-01-01T00:00:01Z"
 
 
 def test_sensors_poll_with_requested_subset(monkeypatch):

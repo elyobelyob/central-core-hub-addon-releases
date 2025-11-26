@@ -412,6 +412,10 @@ def fetch_sensors(ha_api_url, ha_api_token):
                         "name": ent.get("attributes", {}).get("friendly_name")
                         or ent_id,
                         "attributes": ent.get("attributes", {}) or {},
+                        # Preserve HA timestamps when present so downstream systems
+                        # can reason about data recency.
+                        "last_changed": ent.get("last_changed"),
+                        "last_updated": ent.get("last_updated"),
                     }
                 )
         return sensors
