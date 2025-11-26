@@ -90,6 +90,20 @@ def handle_message(
                     command_name=command_name,
                     command_id=command_id,
                 )
+                # Log explicitly that we are publishing an ack (use client logger if available)
+                log_fn = getattr(client, "_log", None)
+                try:
+                    now_ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                    msg_txt = (
+                        f"Publishing ack to {ack_topic} status={status} "
+                        f"command_id={command_id} at {now_ts}"
+                    )
+                    if callable(log_fn):
+                        log_fn(msg_txt)
+                    else:
+                        print(f"[{now_ts}] {msg_txt}", file=sys.stdout)
+                except Exception:
+                    pass
                 if hasattr(shared_schemas, "CommandAck"):
                     ack_payload = shared_schemas.CommandAck(
                         command_id=command_id,
