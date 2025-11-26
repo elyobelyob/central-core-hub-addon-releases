@@ -18,8 +18,7 @@ try:
 except Exception:
     try:
         _bases = [
-            pathlib.Path(__file__).resolve().parent.parent
-            / "central-core-mqtt-shared",
+            pathlib.Path(__file__).resolve().parent.parent / "central-core-mqtt-shared",
             pathlib.Path(__file__).resolve().parent.parent.parent
             / "central-core-mqtt-shared",
         ]
@@ -35,6 +34,7 @@ except Exception:
 
             def build_topic(template: str, **kwargs) -> str:
                 return template.format(**kwargs)
+
     except Exception:  # pragma: no cover
         shared_schemas = None
         shared_topics = None
@@ -127,7 +127,6 @@ def handle_message(
         ack_success = (
             shared_schemas.AckStatus.SUCCESS.value if shared_schemas else "success"
         )
-        ack_error = shared_schemas.AckStatus.ERROR.value if shared_schemas else "error"
 
         expected_cmd_topic = f"hubs/{client.client_id}/cmd/sensors/poll"
         expected_cmd_topic_v = (
@@ -165,7 +164,9 @@ def handle_message(
                     client._publish(ack_topic, json.dumps(ack_payload), qos=1)
                 except Exception:
                     pass  # pragma: no cover
-                _publish_shared_ack(cmd_name_poll, command_id, ack_success, "acknowledged")
+                _publish_shared_ack(
+                    cmd_name_poll, command_id, ack_success, "acknowledged"
+                )
 
             sensors_requested = None
             try:
@@ -173,7 +174,9 @@ def handle_message(
                     srv = cmd.get("payload").get("sensors")
                     if isinstance(srv, list):
                         sensors_requested = srv
-            except Exception:  # pragma: no cover - defensive branch hard to reproduce in tests
+            except (
+                Exception
+            ):  # pragma: no cover - defensive branch hard to reproduce in tests
                 sensors_requested = None
             sensors = fetch_sensors(client.ha_api_url, client.ha_api_token) or []
             # If the Vault requested a specific set of sensors, treat that
@@ -305,7 +308,9 @@ def handle_message(
                     client._publish(ack_topic, json.dumps(ack_payload), qos=1)
                 except Exception:
                     pass  # pragma: no cover
-                _publish_shared_ack(cmd_name_set, command_id, ack_success, "acknowledged")
+                _publish_shared_ack(
+                    cmd_name_set, command_id, ack_success, "acknowledged"
+                )
 
             sensors_to_set = []
             try:
@@ -319,7 +324,9 @@ def handle_message(
                         for item in s:
                             if isinstance(item, dict) and item.get("entity_id"):
                                 sensors_to_set.append(item)
-            except Exception:  # pragma: no cover - defensive branch hard to reproduce in tests
+            except (
+                Exception
+            ):  # pragma: no cover - defensive branch hard to reproduce in tests
                 sensors_to_set = []
 
             results = {"set": [], "failed": []}
@@ -449,7 +456,9 @@ def handle_message(
                             )
                     except Exception:
                         pass  # pragma: no cover
-            except Exception:  # pragma: no cover - defensive branch hard to reproduce in tests
+            except (
+                Exception
+            ):  # pragma: no cover - defensive branch hard to reproduce in tests
                 traceback.print_exc()  # pragma: no cover
             return
     except Exception:

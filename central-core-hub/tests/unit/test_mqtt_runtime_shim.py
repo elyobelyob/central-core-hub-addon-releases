@@ -26,7 +26,9 @@ def test_shim_client_exists_and_methods_work():
     assert hasattr(r, "rc")
     assert client.subscribe("t") == (0, 1)
     assert client.connect() == 0
-    client.loop_start(); client.loop_stop(); client.disconnect()
+    client.loop_start()
+    client.loop_stop()
+    client.disconnect()
 
 
 def test_shim_tls_and_callback_assignment_no_errors(capsys):

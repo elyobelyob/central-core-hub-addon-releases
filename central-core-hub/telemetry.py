@@ -18,7 +18,9 @@ def _get_cpu_percent():
     if ext:
         try:
             return ext()
-        except Exception:  # pragma: no cover - external override error is environment-specific
+        except (
+            Exception
+        ):  # pragma: no cover - external override error is environment-specific
             pass
 
     # First, check the caller module (useful when mqtt_client monkeypatches get_cpu_percent)
@@ -33,7 +35,9 @@ def _get_cpu_percent():
                 if m and hasattr(m, "get_cpu_percent"):
                     try:
                         return m.get_cpu_percent()
-                    except Exception:  # pragma: no cover - defensive fallback when caller module misbehaves
+                    except (
+                        Exception
+                    ):  # pragma: no cover - defensive fallback when caller module misbehaves
                         return None
     except Exception:
         pass
@@ -52,7 +56,9 @@ def _get_cpu_percent():
         if mod and hasattr(mod, "get_cpu_percent"):
             try:
                 return mod.get_cpu_percent()
-            except Exception:  # pragma: no cover - defensive fallback for misbehaving modules
+            except (
+                Exception
+            ):  # pragma: no cover - defensive fallback for misbehaving modules
                 return None
     return None
 

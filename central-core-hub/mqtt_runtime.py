@@ -97,10 +97,14 @@ def setup_mqtt_client(ctx, mqtt_mod):
         try:
             # Some clients (shim) may not implement tls_set; ignore failures
             ctx._client.tls_set(**tls_kwargs)
-        except Exception:  # pragma: no cover - TLS setup failures are environment specific
+        except (
+            Exception
+        ):  # pragma: no cover - TLS setup failures are environment specific
             try:
                 _log("Failed to configure TLS for MQTT", sys.stderr)
-            except Exception:  # pragma: no cover - logging to stderr may not be available in tests
+            except (
+                Exception
+            ):  # pragma: no cover - logging to stderr may not be available in tests
                 pass
 
     # Attach callbacks if present on the context
