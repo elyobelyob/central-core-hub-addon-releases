@@ -3,12 +3,28 @@
 Message dispatch handlers extracted from `mqtt_client` to make the
 command lifecycles testable independently.
 """
+import importlib
 import json
 import traceback
 from datetime import datetime, timezone
 import sys
 import pathlib
 import time
+try:
+    import telemetry_helpers
+except Exception:
+    try:
+        _th_base = pathlib.Path(__file__).resolve().parent
+        _th_spec = importlib.util.spec_from_file_location(
+            "telemetry_helpers", str(_th_base / "telemetry_helpers.py")
+        )
+        telemetry_helpers = importlib.util.module_from_spec(_th_spec)
+        sys.modules["telemetry_helpers"] = telemetry_helpers
+        _th_spec.loader.exec_module(telemetry_helpers)
+    except Exception:
+        raise
+
+build_sensor_maps = telemetry_helpers.build_sensor_maps
 
 # Shared MQTT protocol (topics/schemas)
 try:
@@ -114,9 +130,10 @@ def handle_message(
     msg,
     payload_str,
     fetch_sensors,
-    build_telemetry,
-    build_vault_payload,
-    requests,
+    fetch_sensors_by_ids=None,
+    build_telemetry=None,
+    requests=None,
+    build_vault_payload=None,
 ):
     """Handle an incoming MQTT message for Vault-style commands.
 
@@ -199,37 +216,6 @@ def handle_message(
                 traceback.print_exc()
             return topics
 
-        def _fetch_by_ids(ids):
-            """Best-effort per-entity fetch for richer state (timestamps)."""
-            if requests is None or not getattr(client, "ha_api_url", None):
-                return None
-            url_base = client.ha_api_url.rstrip("/")
-            headers = {
-                "Authorization": f"Bearer {getattr(client, 'ha_api_token', '')}",
-                "Content-Type": "application/json",
-            }
-            results = []
-            for ent_id in ids or []:
-                try:
-                    r = requests.get(
-                        f"{url_base}/api/states/{ent_id}", headers=headers, timeout=10
-                    )
-                    r.raise_for_status()
-                    data = r.json()
-                    if data.get("entity_id"):
-                        results.append(
-                            {
-                                "entity_id": data.get("entity_id"),
-                                "state": data.get("state"),
-                                "attributes": data.get("attributes", {}) or {},
-                                "last_changed": data.get("last_changed"),
-                                "last_updated": data.get("last_updated"),
-                            }
-                        )
-                except Exception:
-                    traceback.print_exc()
-            return results
-
         def _val(obj, fallback):
             try:
                 return obj.value
@@ -303,13 +289,21 @@ def handle_message(
                         sensors_requested = srv
             except (
                 Exception
-            ):  # pragma: no cover - defensive branch hard to reproduce in tests
+            ):
                 sensors_requested = None
-            sensors = fetch_sensors(client.ha_api_url, client.ha_api_token) or []
-            if sensors_requested and not sensors:
-                enriched = _fetch_by_ids(sensors_requested)
-                if enriched:
-                    sensors = enriched
+            if sensors_requested and fetch_sensors_by_ids:
+                sensors = (
+                    fetch_sensors_by_ids(
+                        client.ha_api_url, client.ha_api_token, sensors_requested
+                    )
+                    or []
+                )
+                if not sensors:
+                    sensors = fetch_sensors(
+                        client.ha_api_url, client.ha_api_token
+                    ) or []
+            else:
+                sensors = fetch_sensors(client.ha_api_url, client.ha_api_token) or []
             # If the Vault requested a specific set of sensors, treat that
             # list as authoritative and remember it on the client for future
             # reminder publications.
@@ -325,43 +319,13 @@ def handle_message(
                     s for s in sensors if s.get("entity_id") in sensors_requested
                 ]
 
-            data_map = {}
-            for s in sensors:  # pragma: no cover
-                ent = s.get("entity_id")  # pragma: no cover
-                st = s.get("state")  # pragma: no cover
-                val = st
-                try:
-                    if isinstance(st, str):
-                        low = st.lower()
-                        if low in ("on", "true"):
-                            val = True
-                        elif low in ("off", "false"):
-                            val = False
-                        else:
-                            if "." in st:
-                                val = float(st)
-                            else:
-                                val = int(st)
-                except Exception:
-                    val = st
-                data_map[ent] = val
-            # also include friendly names and enabled status if available
-            names_map = {}
-            enabled_map = {}
-            for s in sensors:
-                ent = s.get("entity_id")
-                if not ent:
-                    continue
-                attrs = s.get("attributes", {}) or {}
-                names_map[ent] = attrs.get("friendly_name") or s.get("name") or ent
-                # consider entity disabled if 'disabled_by' attribute is set
-                enabled_map[ent] = not bool(attrs.get("disabled_by"))
-
+            data_map, names_map, enabled_map, attrs_map = build_sensor_maps(sensors)
             now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             telemetry_payload = {
                 "data": data_map,
                 "names": names_map,
                 "enabled": enabled_map,
+                "attributes": attrs_map,
                 "timestamp": now_iso,
             }
             try:

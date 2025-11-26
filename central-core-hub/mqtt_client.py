@@ -867,15 +867,18 @@ class CentralCoreClient:
                     _hm = None
 
             if _hm is not None:
-                _hm(
-                    self,
-                    msg,
-                    payload,
-                    fetch_sensors,
-                    build_telemetry,
-                    build_vault_payload,
-                    requests,
-                )
+                kwargs = {
+                    "fetch_sensors": fetch_sensors,
+                    "fetch_sensors_by_ids": fetch_sensors_by_ids,
+                    "build_telemetry": build_telemetry,
+                    "build_vault_payload": build_vault_payload,
+                    "requests": requests,
+                }
+                try:
+                    _hm(self, msg, payload, **kwargs)
+                except TypeError:
+                    kwargs.pop("fetch_sensors_by_ids", None)
+                    _hm(self, msg, payload, **kwargs)
                 return
         except Exception:
             traceback.print_exc()
