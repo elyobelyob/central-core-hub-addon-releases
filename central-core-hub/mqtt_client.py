@@ -999,7 +999,7 @@ class CentralCoreClient:
         """Publish telemetry for selected sensors when their state changes."""
         if not self.selected_sensors:
             return
-        if not self.ha_api_url or not self.ha_api_token or requests is None:
+        if not self.ha_api_url or not self.ha_api_token:
             return
         sensors = fetch_sensors(self.ha_api_url, self.ha_api_token) or []
         selected_set = set(self.selected_sensors)
