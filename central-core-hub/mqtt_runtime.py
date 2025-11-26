@@ -44,6 +44,9 @@ def setup_mqtt_client(ctx, mqtt_mod):
 
                 return R()
 
+            def will_set(self, topic, payload=None, qos=0, retain=False):
+                return None
+
             def subscribe(self, topic, qos=0):
                 return (0, 1)
 
@@ -105,7 +108,7 @@ def setup_mqtt_client(ctx, mqtt_mod):
             except (
                 Exception
             ):  # pragma: no cover - logging to stderr may not be available in tests
-                pass
+                traceback.print_exc()
 
     # Attach callbacks if present on the context
     try:
