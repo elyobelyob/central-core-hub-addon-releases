@@ -59,7 +59,9 @@ def test_set_readback_exception_falls_back():
 
     requests = SimpleNamespace(post=post, get=get)
 
-    payload = json.dumps({"command_id": "c1", "payload": {"sensors": {"sensor.one": "123"}}})
+    payload = json.dumps(
+        {"command_id": "c1", "payload": {"sensors": {"sensor.one": "123"}}}
+    )
     handlers.handle_message(
         client,
         make_msg(f"hubs/{client.client_id}/cmd/sensors/set"),
@@ -71,7 +73,14 @@ def test_set_readback_exception_falls_back():
     )
 
     # ensure POST was attempted and the set was recorded
-    assert any("sensor.one" in str(p[1]) or (isinstance(p[1], dict) and "sensor.one" in json.dumps(p[1])) for p in client.publishes) or True
+    assert (
+        any(
+            "sensor.one" in str(p[1])
+            or (isinstance(p[1], dict) and "sensor.one" in json.dumps(p[1]))
+            for p in client.publishes
+        )
+        or True
+    )
 
 
 def test_set_post_raises_records_failure():
@@ -83,7 +92,9 @@ def test_set_post_raises_records_failure():
 
     requests = SimpleNamespace(post=post, get=lambda *a, **k: None)
 
-    payload = json.dumps({"command_id": "c2", "payload": {"sensors": {"sensor.two": "on"}}})
+    payload = json.dumps(
+        {"command_id": "c2", "payload": {"sensors": {"sensor.two": "on"}}}
+    )
     handlers.handle_message(
         client,
         make_msg(f"hubs/{client.client_id}/cmd/sensors/set"),
@@ -105,7 +116,9 @@ def test_set_item_without_entity_skipped_and_no_ha_config():
     client.ha_api_url = None
     client.ha_api_token = None
 
-    payload = json.dumps({"command_id": "c3", "payload": {"sensors": [{"state": "on"}]}})
+    payload = json.dumps(
+        {"command_id": "c3", "payload": {"sensors": [{"state": "on"}]}}
+    )
     handlers.handle_message(
         client,
         make_msg(f"hubs/{client.client_id}/cmd/sensors/set"),

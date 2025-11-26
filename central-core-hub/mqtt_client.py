@@ -30,8 +30,7 @@ except Exception:
     # Allow development without an installed package by falling back to a sibling checkout
     try:
         _bases = [
-            pathlib.Path(__file__).resolve().parent.parent
-            / "central-core-mqtt-shared",
+            pathlib.Path(__file__).resolve().parent.parent / "central-core-mqtt-shared",
             pathlib.Path(__file__).resolve().parent.parent.parent
             / "central-core-mqtt-shared",
         ]
@@ -47,7 +46,10 @@ except Exception:
 
             def build_topic(template: str, **kwargs) -> str:
                 return template.format(**kwargs)
-    except Exception:  # pragma: no cover - defensive fallback if even sibling import fails
+
+    except (
+        Exception
+    ):  # pragma: no cover - defensive fallback if even sibling import fails
         shared_schemas = None
         shared_topics = None
 
@@ -403,9 +405,7 @@ class CentralCoreClient:
         else:  # pragma: no cover - legacy fallback when shared package unavailable
             self.preferred_sensors_topic = f"hubs/{self.client_id}/telemetry/sensors"
         # Legacy sensors topic (kept for backward compatibility/publish)
-        self.preferred_sensors_topic_legacy = (
-            f"hubs/{self.client_id}/telemetry/sensors"
-        )
+        self.preferred_sensors_topic_legacy = f"hubs/{self.client_id}/telemetry/sensors"
         # Legacy sensors topic alias (kept for tests/backward compatibility)
         self.sensors_topic = f"telemetry/{self.client_id}/sensors"
         # Subscribe patterns for commands (versioned preferred, legacy for compat)
@@ -755,7 +755,10 @@ class CentralCoreClient:
         try:
             self._publish(self.telemetry_topic, payload)
             _log(f"Published telemetry to {self.telemetry_topic}")
-            if self.telemetry_topic_legacy and self.telemetry_topic_legacy != self.telemetry_topic:
+            if (
+                self.telemetry_topic_legacy
+                and self.telemetry_topic_legacy != self.telemetry_topic
+            ):
                 try:
                     self._publish(self.telemetry_topic_legacy, payload)
                     _log(
