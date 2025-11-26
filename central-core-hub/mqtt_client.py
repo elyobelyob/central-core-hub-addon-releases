@@ -41,11 +41,7 @@ except Exception:
             from central_core_mqtt_shared import topics as shared_topics
             from central_core_mqtt_shared.topics import build_topic
         else:  # pragma: no cover - defensive fallback
-            shared_schemas = None
-            shared_topics = None
-
-            def build_topic(template: str, **kwargs) -> str:
-                return template.format(**kwargs)
+            raise ImportError("shared package not found locally")
 
     except Exception:  # pragma: no cover - defensive fallback if even sibling import fails
         class _FallbackTopics:
