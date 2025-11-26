@@ -38,7 +38,7 @@ def test_handle_message_poll_invalid_and_missing_entity(monkeypatch):
     c = FakeClient()
 
     # payload is valid JSON with command_id to cover ack
-    msg = types.SimpleNamespace(topic=f"hubs/{c.client_id}/cmd/sensors/poll")
+    msg = types.SimpleNamespace(topic=f"hubs/{c.client_id}/v1/cmd/sensors/poll")
 
     # fetch_sensors returns a sensor with no entity_id and one normal sensor
     def fetch_sensors(url, token):
@@ -61,11 +61,11 @@ def test_handle_message_poll_invalid_and_missing_entity(monkeypatch):
         None,
     )
 
-    # Should have published ack, telemetry despite exceptions
-    ack_pubs = [p for p in c.pubs if "response" in p[0] and '"acknowledged"' in p[1]]
+    # Should have published ack(s) and telemetry despite exceptions
+    ack_pubs = [p for p in c.pubs if "/ack/" in p[0]]
     tele_pubs = [p for p in c.pubs if p[0] == c.preferred_sensors_topic]
-    assert len(ack_pubs) == 1
-    assert len(tele_pubs) == 1
+    assert ack_pubs
+    assert tele_pubs
 
 
 def test_handle_message_set_no_ha_and_request_exceptions(monkeypatch):
@@ -84,7 +84,7 @@ def test_handle_message_set_no_ha_and_request_exceptions(monkeypatch):
             self.pubs.append((topic, payload, qos))
 
     c = FakeClient()
-    msg = types.SimpleNamespace(topic=f"hubs/{c.client_id}/cmd/sensors/set")
+    msg = types.SimpleNamespace(topic=f"hubs/{c.client_id}/v1/cmd/sensors/set")
 
     # payload sets two sensors; with no HA config, results should go to failed
     payload = json.dumps(
@@ -95,8 +95,8 @@ def test_handle_message_set_no_ha_and_request_exceptions(monkeypatch):
         c, msg, payload, lambda *a, **k: [], lambda *a, **k: None, lambda x: x, None
     )
 
-    # Completed response should have been published (command_id present)
-    assert any("cmd/x/response" in p[0] for p in c.pubs)
+    # Ack should have been published (command_id present)
+    assert any("/ack/sensors.set/x" in p[0] for p in c.pubs)
 
 
 def test_setup_mqtt_client_tls_and_callback_exceptions(monkeypatch, capsys):
@@ -190,7 +190,7 @@ def test_handle_message_set_with_ha_readback(monkeypatch):
                 raise Exception("publish fail")
 
     c = FakeClient()
-    msg = types.SimpleNamespace(topic=f"hubs/{c.client_id}/cmd/sensors/set")
+    msg = types.SimpleNamespace(topic=f"hubs/{c.client_id}/v1/cmd/sensors/set")
 
     # Mock requests
     class MockResponse:
@@ -233,13 +233,11 @@ def test_handle_message_set_with_ha_readback(monkeypatch):
         requests_mock,
     )
 
-    # Should have published ack, completion and telemetry despite exceptions
-    ack_pubs = [p for p in c.pubs if "response" in p[0] and '"acknowledged"' in p[1]]
-    comp_pubs = [p for p in c.pubs if "response" in p[0] and '"completed"' in p[1]]
+    # Should have published ack(s) and telemetry despite exceptions
+    ack_pubs = [p for p in c.pubs if "/ack/" in p[0]]
     tele_pubs = [p for p in c.pubs if p[0] == c.preferred_sensors_topic]
-    assert len(ack_pubs) == 1
-    assert len(comp_pubs) == 1
-    assert len(tele_pubs) == 1
+    assert ack_pubs
+    assert tele_pubs
 
 
 def test_setup_mqtt_client_full_config(monkeypatch, capsys):

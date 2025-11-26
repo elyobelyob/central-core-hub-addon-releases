@@ -39,7 +39,7 @@ def test_on_message_delegates_to_handlers_module():
     c = CentralCoreClient({"client_id": "unit-handle"})
 
     class Msg:
-        topic = f"hubs/{c.client_id}/cmd/sensors/poll"
+        topic = f"hubs/{c.client_id}/v1/cmd/sensors/poll"
         payload = b"{}"
 
     c.on_message(None, None, Msg())
@@ -232,7 +232,7 @@ def test_on_message_handles_binary_payload_and_calls_handler():
             raise RuntimeError("bad")
 
     class Msg:
-        topic = f"hubs/{c.client_id}/cmd/sensors/poll"
+        topic = f"hubs/{c.client_id}/v1/cmd/sensors/poll"
         payload = BadPayload()
 
     c.on_message(None, None, Msg())

@@ -19,7 +19,7 @@ class DummyClient:
         self.ha_api_url = "http://ha"
         self.ha_api_token = "tok"
         self.ha_readback_after_set = True
-        self.preferred_sensors_topic = f"hubs/{self.client_id}/telemetry/sensors"
+        self.preferred_sensors_topic = f"hubs/{self.client_id}/v1/telemetry/sensors"
 
     def _publish(self, topic, payload, qos=0):
         self.published.append({"topic": topic, "payload": payload, "qos": qos})
@@ -41,7 +41,7 @@ def test_poll_with_requested_sensors_filters(monkeypatch):
         "M",
         (),
         {
-            "topic": f"hubs/{c.client_id}/cmd/sensors/poll",
+            "topic": f"hubs/{c.client_id}/v1/cmd/sensors/poll",
             "payload": msg_payload.encode("utf-8"),
         },
     )
@@ -78,7 +78,7 @@ def test_set_handles_post_error_and_records_failed(monkeypatch):
         "M",
         (),
         {
-            "topic": f"hubs/{c.client_id}/cmd/sensors/set",
+            "topic": f"hubs/{c.client_id}/v1/cmd/sensors/set",
             "payload": msg_payload.encode("utf-8"),
         },
     )
@@ -102,8 +102,7 @@ def test_set_handles_post_error_and_records_failed(monkeypatch):
     )
 
     # At minimum an ACK should be present; completion may or may not be published
-    ack_topic = f"hubs/{c.client_id}/cmd/cmdfail/response"
-    # find any ACK or completion payloads (both use same topic)
+    ack_topic = f"hubs/{c.client_id}/v1/ack/sensors.set/cmdfail"
     founds = [json.loads(p["payload"]) for p in c.published if p["topic"] == ack_topic]
     assert founds, "No response published for command"
     # If a completion was published it should include a 'result' with 'failed'
@@ -124,7 +123,7 @@ def test_set_includes_attributes_from_readback(monkeypatch):
         "M",
         (),
         {
-            "topic": f"hubs/{c.client_id}/cmd/sensors/set",
+            "topic": f"hubs/{c.client_id}/v1/cmd/sensors/set",
             "payload": msg_payload.encode("utf-8"),
         },
     )

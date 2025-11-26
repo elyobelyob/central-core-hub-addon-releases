@@ -20,7 +20,7 @@ def test_on_message_handler_import_failure(monkeypatch):
 
     class M:
         def __init__(self):
-            self.topic = f"hubs/{c.client_id}/cmd/sensors/poll"
+            self.topic = f"hubs/{c.client_id}/v1/cmd/sensors/poll"
             self.payload = b"{}"
 
     # Ensure a normal import would fail by placing a blocker in builtins
@@ -93,7 +93,7 @@ def test_handler_ack_publish_raises_but_handler_continues(monkeypatch):
     # create a set command message
     cmd = {"command_id": "c1", "payload": {"sensors": {"sensor.z": "1"}}}
     m = types.SimpleNamespace(
-        topic=f"hubs/{c.client_id}/cmd/sensors/set",
+        topic=f"hubs/{c.client_id}/v1/cmd/sensors/set",
         payload=json.dumps(cmd).encode("utf-8"),
     )
 

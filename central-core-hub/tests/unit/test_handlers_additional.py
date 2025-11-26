@@ -18,7 +18,7 @@ class DummyClient:
         self.client_id = "unit-h"
         self.ha_api_url = ""
         self.ha_api_token = ""
-        self.preferred_sensors_topic = f"hubs/{self.client_id}/telemetry/sensors"
+        self.preferred_sensors_topic = f"hubs/{self.client_id}/v1/telemetry/sensors"
 
     def _publish(self, topic, payload, qos=0):
         self.published.append({"topic": topic, "payload": payload, "qos": qos})
@@ -35,7 +35,7 @@ def test_handle_poll_with_publish_exceptions():
     c._publish = bad_publish
 
     msg = type(
-        "M", (), {"topic": f"hubs/{c.client_id}/cmd/sensors/poll", "payload": b"{}"}
+        "M", (), {"topic": f"hubs/{c.client_id}/v1/cmd/sensors/poll", "payload": b"{}"}
     )
     # should not raise
     handlers.handle_message(
@@ -75,7 +75,7 @@ def test_handle_set_with_dict_payload_and_readback(monkeypatch):
         "M",
         (),
         {
-            "topic": f"hubs/{c.client_id}/cmd/sensors/set",
+            "topic": f"hubs/{c.client_id}/v1/cmd/sensors/set",
             "payload": json.dumps(cmd).encode("utf-8"),
         },
     )
@@ -88,9 +88,9 @@ def test_handle_set_with_dict_payload_and_readback(monkeypatch):
         build_vault_payload=lambda x: None,
         requests=Req(),
     )
-    # should have published at least an ACK/completion response
-    topics = [p["topic"] for p in c.published]
-    assert any(t.endswith("/response") for t in topics)
+    # should have published at least an ACK
+    ack_topic = f"hubs/{c.client_id}/v1/ack/sensors.set/{cmd['command_id']}"
+    assert any(p["topic"] == ack_topic for p in c.published)
 
 
 def test_handle_poll_boolean_and_numeric_coercion():
@@ -109,7 +109,7 @@ def test_handle_poll_boolean_and_numeric_coercion():
         "M",
         (),
         {
-            "topic": f"hubs/{c.client_id}/cmd/sensors/poll",
+            "topic": f"hubs/{c.client_id}/v1/cmd/sensors/poll",
             "payload": json.dumps(cmd).encode("utf-8"),
         },
     )

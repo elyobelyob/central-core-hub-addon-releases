@@ -88,7 +88,7 @@ def test_on_message_falls_back_to_file_load(monkeypatch):
 
     # call on_message which should import handlers via file and call handle_message
     msg = types.SimpleNamespace(
-        topic=f"hubs/{c.client_id}/cmd/sensors/poll", payload=b"{}"
+        topic=f"hubs/{c.client_id}/v1/cmd/sensors/poll", payload=b"{}"
     )
     c.on_message(None, None, msg)
 
