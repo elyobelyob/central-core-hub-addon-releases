@@ -1,3 +1,4 @@
+central-core-mqtt-shared @ git+https://github.com/elyobelyob/central-core-mqtt-shared.git
 pytest>=7.0.0
 pytest-cov>=4.0.0
 black>=24.1.0

@@ -21,6 +21,39 @@ import time
 import traceback
 from datetime import datetime, timezone
 
+# Shared MQTT protocol (topics/schemas)
+try:
+    from central_core_mqtt_shared import schemas as shared_schemas
+    from central_core_mqtt_shared import topics as shared_topics
+    from central_core_mqtt_shared.topics import build_topic
+except Exception:
+    # Allow development without an installed package by falling back to a sibling checkout
+    try:
+        _bases = [
+            pathlib.Path(__file__).resolve().parent.parent
+            / "central-core-mqtt-shared",
+            pathlib.Path(__file__).resolve().parent.parent.parent
+            / "central-core-mqtt-shared",
+        ]
+        _base = next((b for b in _bases if b.exists()), None)
+        if _base:
+            sys.path.insert(0, str(_base))
+            from central_core_mqtt_shared import schemas as shared_schemas
+            from central_core_mqtt_shared import topics as shared_topics
+            from central_core_mqtt_shared.topics import build_topic
+        else:  # pragma: no cover - defensive fallback
+            shared_schemas = None
+            shared_topics = None
+
+            def build_topic(template: str, **kwargs) -> str:
+                return template.format(**kwargs)
+    except Exception:  # pragma: no cover - defensive fallback if even sibling import fails
+        shared_schemas = None
+        shared_topics = None
+
+        def build_topic(template: str, **kwargs) -> str:
+            return template.format(**kwargs)
+
 
 def _log(msg, file=sys.stdout):
     """Log a message with UTC timestamp."""
@@ -346,15 +379,47 @@ class CentralCoreClient:
         # payloads will be published to both topics.
         self.vault_topic = options.get("vault_topic") or ""
         self.telemetry_interval = int(options.get("telemetry_interval", 30))
-        self.telemetry_topic = f"telemetry/{self.client_id}"
+        # MQTT protocol version for versioned topics (default v1)
+        self.protocol_version = int(options.get("protocol_version", 1))
+        # Versioned telemetry topics (preferred); fallback to legacy if shared topics unavailable
+        if shared_topics:
+            self.telemetry_topic = build_topic(
+                shared_topics.TELEMETRY_SYSTEM,
+                hub_id=self.client_id,
+                version=self.protocol_version,
+            )
+        else:  # pragma: no cover - legacy fallback when shared package unavailable
+            self.telemetry_topic = f"telemetry/{self.client_id}"
+        # Legacy telemetry topic retained for backward compatibility
+        self.telemetry_topic_legacy = f"telemetry/{self.client_id}"
         self.commands_topic = f"hubs/{self.client_id}/commands"
-        # Preferred sensors telemetry topic for Vault
-        self.preferred_sensors_topic = f"hubs/{self.client_id}/telemetry/sensors"
-        # Legacy sensors topic (kept for backward compatibility)
+        # Preferred sensors telemetry topic for Vault (versioned)
+        if shared_topics:
+            self.preferred_sensors_topic = build_topic(
+                shared_topics.TELEMETRY_SENSORS,
+                hub_id=self.client_id,
+                version=self.protocol_version,
+            )
+        else:  # pragma: no cover - legacy fallback when shared package unavailable
+            self.preferred_sensors_topic = f"hubs/{self.client_id}/telemetry/sensors"
+        # Legacy sensors topic (kept for backward compatibility/publish)
+        self.preferred_sensors_topic_legacy = (
+            f"hubs/{self.client_id}/telemetry/sensors"
+        )
+        # Legacy sensors topic alias (kept for tests/backward compatibility)
         self.sensors_topic = f"telemetry/{self.client_id}/sensors"
-        # Subscribe pattern for Vault commands (wildcard to capture nested paths
-        # like hubs/<hub_id>/cmd/sensors/poll or .../sensors/set)
-        self.cmd_sub_topic = f"hubs/{self.client_id}/cmd/#"
+        # Subscribe patterns for commands (versioned preferred, legacy for compat)
+        if shared_topics:
+            self.cmd_sub_topic = build_topic(
+                shared_topics.CMD_GENERIC,
+                hub_id=self.client_id,
+                version=self.protocol_version,
+                domain="+",
+                action="+",
+            )
+        else:  # pragma: no cover
+            self.cmd_sub_topic = f"hubs/{self.client_id}/cmd/#"
+        self.cmd_sub_topic_legacy = f"hubs/{self.client_id}/cmd/#"
         # Delegate client creation and TLS setup to mqtt_runtime so it can
         # be unit-tested separately and to keep this class focused on
         # higher-level behavior.
@@ -537,9 +602,15 @@ class CentralCoreClient:
     def on_connect(self, client, userdata, flags, rc):
         _log(f"Connected to MQTT broker with rc={rc}")
         try:
-            # Subscribe to Vault command pattern with QoS=1
+            # Subscribe to versioned command pattern with QoS=1
             client.subscribe(self.cmd_sub_topic, qos=1)
             _log(f"Subscribed to {self.cmd_sub_topic} (Vault command pattern)")
+            # Also subscribe to legacy pattern for backward compatibility
+            if self.cmd_sub_topic_legacy != self.cmd_sub_topic:
+                client.subscribe(self.cmd_sub_topic_legacy, qos=1)
+                _log(
+                    f"Subscribed to legacy command pattern {self.cmd_sub_topic_legacy}"
+                )
         except Exception:
             _log("Subscription failed", sys.stderr)
         self._connected = True
@@ -684,6 +755,17 @@ class CentralCoreClient:
         try:
             self._publish(self.telemetry_topic, payload)
             _log(f"Published telemetry to {self.telemetry_topic}")
+            if self.telemetry_topic_legacy and self.telemetry_topic_legacy != self.telemetry_topic:
+                try:
+                    self._publish(self.telemetry_topic_legacy, payload)
+                    _log(
+                        f"Published telemetry to legacy topic {self.telemetry_topic_legacy}"
+                    )
+                except Exception:
+                    _log(
+                        f"Failed to publish telemetry to legacy topic {self.telemetry_topic_legacy}",
+                        sys.stderr,
+                    )
         except Exception:
             _log("Failed to publish telemetry")
         # Also publish to an optional vault-specific topic if configured.
@@ -729,6 +811,24 @@ class CentralCoreClient:
             _log(
                 f"Published sensors list to {self.preferred_sensors_topic} (count={len(payload['sensors'])})"
             )
+            if (
+                self.preferred_sensors_topic_legacy
+                and self.preferred_sensors_topic_legacy != self.preferred_sensors_topic
+            ):
+                try:
+                    self._publish(
+                        self.preferred_sensors_topic_legacy, json.dumps(payload), qos=0
+                    )
+                    _log(
+                        "Published sensors list to legacy topic "
+                        f"{self.preferred_sensors_topic_legacy} "
+                        f"(count={len(payload['sensors'])})"
+                    )
+                except Exception:
+                    _log(
+                        f"Failed to publish sensors to legacy topic {self.preferred_sensors_topic_legacy}",
+                        sys.stderr,
+                    )
         except Exception:
             _log(
                 f"Failed to publish sensors to {self.preferred_sensors_topic}",
@@ -799,6 +899,21 @@ class CentralCoreClient:
             self._publish(
                 self.preferred_sensors_topic, json.dumps(telemetry_payload), qos=0
             )
+            if (
+                self.preferred_sensors_topic_legacy
+                and self.preferred_sensors_topic_legacy != self.preferred_sensors_topic
+            ):
+                try:
+                    self._publish(
+                        self.preferred_sensors_topic_legacy,
+                        json.dumps(telemetry_payload),
+                        qos=0,
+                    )
+                except Exception:
+                    _log(
+                        f"Failed to publish selected sensor changes to legacy topic {self.preferred_sensors_topic_legacy}",
+                        sys.stderr,
+                    )
         except Exception:
             _log("Failed to publish selected sensor changes", sys.stderr)
 
