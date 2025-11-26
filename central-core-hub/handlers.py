@@ -6,6 +6,41 @@ command lifecycles testable independently.
 import json
 import traceback
 from datetime import datetime, timezone
+import sys
+import pathlib
+import time
+
+# Shared MQTT protocol (topics/schemas)
+try:
+    from central_core_mqtt_shared import schemas as shared_schemas
+    from central_core_mqtt_shared import topics as shared_topics
+    from central_core_mqtt_shared.topics import build_topic
+except Exception:
+    try:
+        _bases = [
+            pathlib.Path(__file__).resolve().parent.parent
+            / "central-core-mqtt-shared",
+            pathlib.Path(__file__).resolve().parent.parent.parent
+            / "central-core-mqtt-shared",
+        ]
+        _base = next((b for b in _bases if b.exists()), None)
+        if _base:
+            sys.path.insert(0, str(_base))
+            from central_core_mqtt_shared import schemas as shared_schemas
+            from central_core_mqtt_shared import topics as shared_topics
+            from central_core_mqtt_shared.topics import build_topic
+        else:  # pragma: no cover - fallback to templated format
+            shared_schemas = None
+            shared_topics = None
+
+            def build_topic(template: str, **kwargs) -> str:
+                return template.format(**kwargs)
+    except Exception:  # pragma: no cover
+        shared_schemas = None
+        shared_topics = None
+
+        def build_topic(template: str, **kwargs) -> str:
+            return template.format(**kwargs)
 
 
 def handle_message(
@@ -30,8 +65,84 @@ def handle_message(
     """
     try:
         topic = msg.topic
+        protocol_version = getattr(client, "protocol_version", 1)
+
+        def _publish_shared_ack(command_name, command_id, status, message=None):
+            """Publish versioned ACK using shared schema when available."""
+            if not (shared_topics and shared_schemas and command_id):
+                return
+            try:
+                ack_topic = build_topic(
+                    shared_topics.ACK_GENERIC,
+                    hub_id=client.client_id,
+                    version=protocol_version,
+                    command_name=command_name,
+                    command_id=command_id,
+                )
+                ack_payload = shared_schemas.CommandAck(
+                    command_id=command_id,
+                    status=status,
+                    message=message,
+                    timestamp=time.time(),
+                ).model_dump_json()
+                client._publish(ack_topic, ack_payload, qos=1)
+            except Exception:
+                pass  # pragma: no cover - do not break handling on ack failure
+
+        def _sensor_topics():
+            """Return all sensor telemetry topics (versioned + legacy) without duplicates."""
+            topics = []
+            for cand in (
+                getattr(client, "preferred_sensors_topic", None),
+                getattr(client, "preferred_sensors_topic_legacy", None),
+            ):
+                if cand and cand not in topics:
+                    topics.append(cand)
+            if shared_topics:
+                try:
+                    versioned = build_topic(
+                        shared_topics.TELEMETRY_SENSORS,
+                        hub_id=client.client_id,
+                        version=protocol_version,
+                    )
+                    if versioned not in topics:
+                        topics.append(versioned)
+                except Exception:
+                    pass
+            legacy_default = f"hubs/{client.client_id}/telemetry/sensors"
+            if legacy_default not in topics:
+                topics.append(legacy_default)
+            return topics
+
+        cmd_name_poll = (
+            shared_schemas.CommandName.SENSORS_POLL.value
+            if shared_schemas
+            else "sensors.poll"
+        )
+        cmd_name_set = (
+            shared_schemas.CommandName.SENSORS_SET.value
+            if shared_schemas
+            else "sensors.set"
+        )
+        ack_success = (
+            shared_schemas.AckStatus.SUCCESS.value if shared_schemas else "success"
+        )
+        ack_error = shared_schemas.AckStatus.ERROR.value if shared_schemas else "error"
+
         expected_cmd_topic = f"hubs/{client.client_id}/cmd/sensors/poll"
-        if topic == expected_cmd_topic:
+        expected_cmd_topic_v = (
+            build_topic(
+                shared_topics.CMD_SENSORS_POLL,
+                hub_id=client.client_id,
+                version=protocol_version,
+            )
+            if shared_topics
+            else None
+        )
+        if topic in (
+            expected_cmd_topic,
+            expected_cmd_topic_v,
+        ):
             try:
                 cmd = (
                     json.loads(payload_str)
@@ -54,6 +165,7 @@ def handle_message(
                     client._publish(ack_topic, json.dumps(ack_payload), qos=1)
                 except Exception:
                     pass  # pragma: no cover
+                _publish_shared_ack(cmd_name_poll, command_id, ack_success, "acknowledged")
 
             sensors_requested = None
             try:
@@ -119,9 +231,8 @@ def handle_message(
                 "timestamp": now_iso,
             }
             try:
-                client._publish(
-                    client.preferred_sensors_topic, json.dumps(telemetry_payload), qos=0
-                )
+                for t in _sensor_topics():
+                    client._publish(t, json.dumps(telemetry_payload), qos=0)
             except Exception:
                 pass  # pragma: no cover
 
@@ -158,10 +269,20 @@ def handle_message(
                     client._publish(comp_topic, json.dumps(comp_payload), qos=1)
                 except Exception:
                     pass  # pragma: no cover
+                _publish_shared_ack(cmd_name_poll, command_id, ack_success, "completed")
             return
 
         expected_set_topic = f"hubs/{client.client_id}/cmd/sensors/set"
-        if topic == expected_set_topic:
+        expected_set_topic_v = (
+            build_topic(
+                shared_topics.CMD_SENSORS_SET,
+                hub_id=client.client_id,
+                version=protocol_version,
+            )
+            if shared_topics
+            else None
+        )
+        if topic in (expected_set_topic, expected_set_topic_v):
             try:
                 cmd = (
                     json.loads(payload_str)
@@ -184,6 +305,7 @@ def handle_message(
                     client._publish(ack_topic, json.dumps(ack_payload), qos=1)
                 except Exception:
                     pass  # pragma: no cover
+                _publish_shared_ack(cmd_name_set, command_id, ack_success, "acknowledged")
 
             sensors_to_set = []
             try:
@@ -257,6 +379,7 @@ def handle_message(
                     client._publish(comp_topic, json.dumps(comp_payload), qos=1)
                 except Exception:
                     pass  # pragma: no cover
+                _publish_shared_ack(cmd_name_set, command_id, ack_success, "completed")
 
             try:
                 data_map = {}
@@ -303,11 +426,8 @@ def handle_message(
                         "timestamp": now_iso,
                     }
                     try:
-                        client._publish(
-                            client.preferred_sensors_topic,
-                            json.dumps(telemetry_payload),
-                            qos=0,
-                        )
+                        for t in _sensor_topics():
+                            client._publish(t, json.dumps(telemetry_payload), qos=0)
                     except Exception:
                         pass  # pragma: no cover
                     # Remind Vault of the sensors that were set/readback.
