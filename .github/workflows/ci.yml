@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies (prefer PyPI)
+        run: |
+          python -m pip install --upgrade pip
+          # Try installing the released package first; fall back to the
+          # requirements file if PyPI package isn't available yet.
+          pip install central-core-mqtt-shared || pip install -r requirements.txt
+          pip install -r requirements.txt
+      - name: Run linters and type checks
+        run: |
+          pip install pyright flake8
+          pyright
+          flake8 --max-line-length=120 --exclude=.venv
+      - name: Run tests with coverage
+        run: |
+          pip install pytest-cov
+          pytest -q --cov=central-core-hub --cov-report=xml:coverage.xml --cov-report=term-missing
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false

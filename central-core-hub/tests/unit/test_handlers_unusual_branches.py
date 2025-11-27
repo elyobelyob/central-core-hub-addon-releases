@@ -1,5 +1,6 @@
 import json
 import importlib.util
+import os
 from pathlib import Path
 
 
@@ -14,6 +15,31 @@ def _load_handlers():
     assert loader is not None
     loader.exec_module(mod)
     return mod
+
+
+# Load mqtt_client module once for test helpers so tests can compute the
+# canonical ACK topic via `CentralCoreClient.build_ack_topic` rather than
+# reconstructing the format string. This avoids duplicating the topic
+# formatting logic in tests.
+
+# Load mqtt_client module once for test helpers so tests can compute the
+# canonical ACK topic via `CentralCoreClient.build_ack_topic` rather than
+# reconstructing the format string. Use the existing `importlib.util` import
+# from the top of the file.
+_mqtt_path = os.path.join(os.path.dirname(__file__), "../../mqtt_client.py")
+_spec = importlib.util.spec_from_file_location("mqtt_client_for_tests", _mqtt_path)
+if _spec is None or getattr(_spec, "loader", None) is None:
+    raise ImportError("could not load mqtt_client spec for tests")
+
+mqtt_mod = importlib.util.module_from_spec(_spec)
+loader = getattr(_spec, "loader", None)
+assert loader is not None
+loader.exec_module(mqtt_mod)
+
+
+def build_ack_for_client_id(client_id, action, command_id):
+    tmp = mqtt_mod.CentralCoreClient({"client_id": client_id})
+    return tmp.build_ack_topic(action, command_id)
 
 
 class RecordingClient:
@@ -46,9 +72,11 @@ def test_ack_publish_raises_but_processing_continues(monkeypatch):
     handlers = _load_handlers()
     c = RecordingClient()
     # make _publish raise for ack_topic only
-    # ack topic will be hubs/<id>/cmd/<command_id>/response
+    # ack topic will be the v1 ack topic
     cmd = {"command_id": "ack1", "action": "sensors/poll", "payload": {}}
-    ack_topic = f"hubs/{c.client_id}/cmd/{cmd['command_id']}/response"
+    # ack topic will be the v1 ack topic; compute via shared helper
+    cmd = {"command_id": "ack1", "action": "sensors/poll", "payload": {}}
+    ack_topic = build_ack_for_client_id(c.client_id, cmd["action"], cmd["command_id"])
     c.raise_on = [ack_topic]
 
     # fetch_sensors returns one sensor so telemetry publish occurs
@@ -61,12 +89,20 @@ def test_ack_publish_raises_but_processing_continues(monkeypatch):
 
     # Should not raise despite _publish raising for ack
     handlers.handle_message(
-        c, msg, msg.payload.decode("utf-8"), fetch_sensors, None, None, None
+        c,
+        msg,
+        msg.payload.decode("utf-8"),
+        fetch_sensors,
+        None,
+        None,
+        None,
     )
 
     # telemetry publish still recorded
-    assert any(p["topic"] == c.preferred_sensors_topic for p in c.published)
-    # completion attempt may have been attempted (comp topic may or may not be published depending on where exception occurred)
+    assert any(
+        p["topic"] == c.preferred_sensors_topic for p in c.published
+    )
+    # completion may or may not have been published depending on where the exception occurred
 
 
 def test_set_no_ha_config_reports_failed(monkeypatch):
@@ -86,11 +122,17 @@ def test_set_no_ha_config_reports_failed(monkeypatch):
     )
 
     handlers.handle_message(
-        c, msg, msg.payload.decode("utf-8"), lambda u, t: [], None, None, None
+        c,
+        msg,
+        msg.payload.decode("utf-8"),
+        lambda u, t: [],
+        None,
+        None,
+        None,
     )
 
     # completion response should include failed result for no_ha_config
-    resp_topic = f"hubs/{c.client_id}/cmd/{cmd['command_id']}/response"
+    resp_topic = build_ack_for_client_id(c.client_id, cmd["action"], cmd["command_id"])
     matches = [p for p in c.published if p["topic"] == resp_topic]
     assert matches, "expected completion response"
     comp = json.loads(matches[-1]["payload"])
@@ -135,7 +177,7 @@ def test_set_requests_post_raises_results_failed(monkeypatch):
     )
 
     # completion should indicate failure for post error
-    resp_topic = f"hubs/{c.client_id}/cmd/{cmd['command_id']}/response"
+    resp_topic = build_ack_for_client_id(c.client_id, cmd["action"], cmd["command_id"])
     matches = [p for p in c.published if p["topic"] == resp_topic]
     assert matches
     comp = json.loads(matches[-1]["payload"])

@@ -37,8 +37,10 @@ except Exception:
 
 try:
     import central_core_mqtt_shared as shared_topics
-except Exception:
-    shared_topics = None
+except Exception as e:
+    raise ImportError(
+        "`central_core_mqtt_shared` is required and must be installed; install it in the add-on/runtime environment"
+    ) from e
 
 try:
     import paho.mqtt.client as mqtt
@@ -389,47 +391,27 @@ class CentralCoreClient:
         self.vault_topic = options.get("vault_topic") or ""
         self.telemetry_interval = int(options.get("telemetry_interval", 30))
         # Use the authoritative `central_core_mqtt_shared` package for topic
-        # templates when available. If it's not installed, log a warning and
-        # fall back to the previous hard-coded defaults so tests/dev remain
-        # usable — but aim to ensure the shared package is installed in
-        # production environments so topics are consistent across services.
-        if shared_topics is not None:
-            try:
-                self.telemetry_topic = shared_topics.TELEMETRY_TOPIC_TMPL.format(
-                    client_id=self.client_id
+        # templates. The shared package is required in production; fail fast
+        # if expected templates are missing so deployments do not run with
+        # inconsistent or legacy topic formats.
+        try:
+            tmpl = getattr(shared_topics, "TELEMETRY_TOPIC_TMPL")
+            self.telemetry_topic = tmpl.format(client_id=self.client_id)
+            tmpl = getattr(shared_topics, "CMD_BASE_TMPL")
+            self.commands_topic = tmpl.format(client_id=self.client_id)
+            tmpl = getattr(shared_topics, "PREFERRED_SENSORS_TOPIC_TMPL")
+            self.preferred_sensors_topic = tmpl.format(client_id=self.client_id)
+            tmpl = getattr(shared_topics, "CMD_SUB_TMPL")
+            self.cmd_sub_topic = tmpl.format(client_id=self.client_id)
+            # expose sensors_topic for compatibility; prefer preferred_sensors_topic
+            self.sensors_topic = self.preferred_sensors_topic
+        except Exception as e:
+            raise RuntimeError(
+                (
+                    "central_core_mqtt_shared is missing required topic templates; "
+                    "ensure the package is installed and up-to-date"
                 )
-            except Exception:
-                self.telemetry_topic = f"telemetry/{self.client_id}"
-            try:
-                self.commands_topic = shared_topics.CMD_BASE_TMPL.format(
-                    client_id=self.client_id
-                )
-            except Exception:
-                self.commands_topic = f"hubs/{self.client_id}/cmd"
-            try:
-                self.preferred_sensors_topic = shared_topics.PREFERRED_SENSORS_TOPIC_TMPL.format(
-                    client_id=self.client_id
-                )
-            except Exception:
-                self.preferred_sensors_topic = f"hubs/{self.client_id}/telemetry/sensors"
-            try:
-                self.cmd_sub_topic = shared_topics.CMD_SUB_TMPL.format(client_id=self.client_id)
-            except Exception:
-                self.cmd_sub_topic = f"hubs/{self.client_id}/cmd/+"
-            # keep a sensors_topic attr for legacy tests, but publishers should
-            # prefer the `preferred_sensors_topic`.
-            self.sensors_topic = f"telemetry/{self.client_id}/sensors"
-        else:
-            # Warn at runtime that the shared package isn't available; keep
-            # fallbacks so the add-on remains runnable in dev/test contexts.
-            _log(
-                "Warning: `central_core_mqtt_shared` not available; using local topic defaults"
-            )
-            self.telemetry_topic = f"telemetry/{self.client_id}"
-            self.commands_topic = f"hubs/{self.client_id}/cmd"
-            self.preferred_sensors_topic = f"hubs/{self.client_id}/telemetry/sensors"
-            self.sensors_topic = f"telemetry/{self.client_id}/sensors"
-            self.cmd_sub_topic = f"hubs/{self.client_id}/cmd/+"
+            ) from e
         # Delegate client creation and TLS setup to mqtt_runtime so it can
         # be unit-tested separately and to keep this class focused on
         # higher-level behavior.
@@ -498,6 +480,24 @@ class CentralCoreClient:
         self.selected_sensors = []
         # cache of last published selected sensor values for change detection
         self._selected_sensor_cache = {}
+
+    def build_ack_topic(self, action, command_id):
+        """Build a versioned ACK topic for the given action and command_id.
+
+        Prefer an ACK template from the optional `central_core_mqtt_shared`
+        package (attribute name `ACK_TMPL`) if available; otherwise fall
+        back to the canonical f-string used previously.
+        """
+        key = action.replace("/", ".") if isinstance(action, str) else str(action)
+        tmpl = getattr(shared_topics, "ACK_TMPL", None) if shared_topics is not None else None
+        if tmpl:
+            try:
+                # attempt to format the shared template; allow missing
+                # formatting keys to fall back below.
+                return tmpl.format(client_id=self.client_id, action=key, command_id=command_id)
+            except Exception:
+                pass
+        return f"hubs/{self.client_id}/v1/ack/{key}/{command_id}"
 
     def _setup_cert_files(self):
         """Handle certificate content vs file paths, and parse bundle if provided."""

@@ -1,6 +1,5 @@
 # Copyright ...
 import json
-import traceback
 from datetime import datetime, timezone
 
 
