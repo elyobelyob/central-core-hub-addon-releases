@@ -856,11 +856,10 @@ class CentralCoreClient:
         """Publish telemetry for selected sensors when their state changes."""
         if not self.selected_sensors:
             return
-        # Only require HA configuration; allow tests to monkeypatch
-        # `fetch_sensors` even when the `requests` dependency is not
-        # available in the test environment. The module-level
-        # `fetch_sensors` already guards against missing `requests`.
-        if not self.ha_api_url or not self.ha_api_token:
+        # Require HA configuration and a functioning `requests` runtime
+        # dependency. Tests should monkeypatch the module-level `requests`
+        # symbol when they intend to bypass network calls.
+        if not self.ha_api_url or not self.ha_api_token or requests is None:
             return
         sensors = fetch_sensors(self.ha_api_url, self.ha_api_token) or []
         selected_set = set(self.selected_sensors)

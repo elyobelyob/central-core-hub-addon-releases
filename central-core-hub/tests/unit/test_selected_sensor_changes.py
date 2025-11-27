@@ -21,6 +21,11 @@ def test_selected_sensor_changes_publish_on_change(monkeypatch):
     c = mc.CentralCoreClient(
         {"client_id": "hub1", "ha_api_url": "http://ha", "ha_api_token": "tok"}
     )
+    # Ensure the module-level `requests` symbol is present so the
+    # stricter runtime behavior in `publish_selected_sensor_changes`
+    # does not early-return during tests. Tests mock `fetch_sensors`
+    # directly; providing a dummy `requests` value is sufficient.
+    monkeypatch.setattr(mc, "requests", object(), raising=False)
     publishes = []
     monkeypatch.setattr(
         c,
