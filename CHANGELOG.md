@@ -1,6 +1,6 @@
 ## Unreleased
 
-- Bump version to `1.0.87` for next development cycle.
+- Bump version to `1.0.88` for next development cycle.
 
 ## v1.0.72 - 2025-11-21
 
