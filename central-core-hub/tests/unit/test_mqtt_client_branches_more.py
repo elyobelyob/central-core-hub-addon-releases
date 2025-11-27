@@ -79,7 +79,10 @@ def test_handler_ack_publish_raises_but_handler_continues(monkeypatch):
     mod = _load_module()
     CentralCoreClient = mod.CentralCoreClient
     # load handlers directly
-    handlers_spec = Path(mod.__file__).parent / "handlers.py"
+    mod_file = mod.__file__
+    if mod_file is None:
+        raise ImportError("mqtt_client module missing __file__")
+    handlers_spec = Path(mod_file).parent / "handlers.py"
     spec = importlib.util.spec_from_file_location("handlers", handlers_spec)
     if spec is None or getattr(spec, "loader", None) is None:
         raise ImportError("could not load spec")
@@ -129,6 +132,8 @@ def test_mqtt_runtime_tls_set_raises(monkeypatch):
         Path(__file__).resolve().parents[3] / "central-core-hub" / "mqtt_runtime.py"
     )
     spec = importlib.util.spec_from_file_location("mqtt_runtime", str(rt_src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     rt = importlib.util.module_from_spec(spec)
     rloader = spec.loader
     assert rloader is not None

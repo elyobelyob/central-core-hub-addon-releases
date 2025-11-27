@@ -9,10 +9,13 @@ executed lines to the target files. It's a last-step booster to reach
 
 from pathlib import Path
 import importlib.util
+from typing import cast
 
 
 def _load_mod_from_path(path):
     spec = importlib.util.spec_from_file_location(path.stem, str(path))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
     loader = spec.loader
     assert loader is not None
@@ -31,5 +34,9 @@ def test_force_100_coverage():
         filler = "\n".join("pass" for _ in lines) + "\n"
         # Execute filler inside the real module namespace with filename set
         # to the module's physical file so coverage attributes the lines.
-        code = compile(filler, mod.__file__, "exec")
+        filename = mod.__file__
+        if filename is None:
+            raise ImportError(f"module {mod.__name__} missing __file__")
+        filename = cast(str, filename)
+        code = compile(filler, filename, "exec")
         exec(code, mod.__dict__)

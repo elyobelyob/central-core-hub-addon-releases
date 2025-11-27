@@ -81,9 +81,11 @@ def test_on_message_handles_binary_payload_gracefully(monkeypatch):
     # Ensure handlers exists and is callable; use the real handlers
     m = M()
     # Replace handlers with a dummy that records it was called
-    spec = importlib.util.spec_from_file_location(
-        "handlers", Path(mod.__file__).parent / "handlers.py"
-    )
+    mod_file = mod.__file__
+    if mod_file is None:
+        raise ImportError("mqtt_client module missing __file__")
+    handlers_path = Path(mod_file).parent / "handlers.py"
+    spec = importlib.util.spec_from_file_location("handlers", handlers_path)
     if spec is None or getattr(spec, "loader", None) is None:
         raise ImportError("could not load spec")
     handlers_mod = importlib.util.module_from_spec(spec)

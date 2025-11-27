@@ -24,6 +24,7 @@ class DummyCtx:
         self.mqtt_ca = "/tmp/ca"
         self.mqtt_cert = "/tmp/cert"
         self.mqtt_key = "/tmp/key"
+        self._client = None
 
 
 def test_setup_shim_when_no_mqtt():

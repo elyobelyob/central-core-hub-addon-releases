@@ -1,12 +1,15 @@
 import importlib.util
 from pathlib import Path
 import types
+from typing import Any, cast
 
 
 def _load_module():
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "mqtt_client.py"
     spec = importlib.util.spec_from_file_location("mqtt_client", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     module = importlib.util.module_from_spec(spec)
     loader = spec.loader
     assert loader is not None
@@ -17,6 +20,8 @@ def _load_module():
 def test_init_falls_back_to_shim_when_runtime_and_file_fail(monkeypatch):
     mcpath = Path(__file__).resolve().parents[3] / "central-core-hub" / "mqtt_client.py"
     spec = importlib.util.spec_from_file_location("fresh_mqtt_client", str(mcpath))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mc = importlib.util.module_from_spec(spec)
     loader = spec.loader
     assert loader is not None
@@ -28,7 +33,7 @@ def test_init_falls_back_to_shim_when_runtime_and_file_fail(monkeypatch):
     def bad_setup(ctx, mqtt_mod):
         raise RuntimeError("setup fail")
 
-    fake_rt.setup_mqtt_client = bad_setup
+    cast(Any, fake_rt).setup_mqtt_client = bad_setup
 
     import sys
 
@@ -94,6 +99,8 @@ def test_telemetry_get_cpu_uses_m2_module(monkeypatch):
     repo_root = Path(__file__).resolve().parents[3]
     tele_path = repo_root / "central-core-hub" / "telemetry.py"
     spec = importlib.util.spec_from_file_location("telemetry_test", str(tele_path))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     tele = importlib.util.module_from_spec(spec)
     tloader = spec.loader
     assert tloader is not None
@@ -101,9 +108,9 @@ def test_telemetry_get_cpu_uses_m2_module(monkeypatch):
 
     # use the telemetry module's external override path to exercise that branch
     fake = types.ModuleType("m2")
-    fake.get_cpu_percent = lambda: 9.9
-    tele._external_get_cpu_percent = fake.get_cpu_percent
+    cast(Any, fake).get_cpu_percent = lambda: 9.9
+    cast(Any, tele)._external_get_cpu_percent = cast(Any, fake).get_cpu_percent
     try:
         assert tele._get_cpu_percent() == 9.9
     finally:
-        delattr(tele, "_external_get_cpu_percent")
+        delattr(cast(Any, tele), "_external_get_cpu_percent")

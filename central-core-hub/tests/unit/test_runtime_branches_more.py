@@ -15,6 +15,8 @@ def _load_module_with_import_hook(hook):
     src = repo_root / "central-core-hub" / "mqtt_client.py"
     name = f"mqtt_client_hook_{id(hook)}"
     spec = importlib.util.spec_from_file_location(name, str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
     loader = spec.loader
     assert loader is not None
@@ -65,6 +67,8 @@ def test_on_connect_subscription_failure_and_publish_sensors_exception(monkeypat
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "mqtt_client.py"
     spec = importlib.util.spec_from_file_location("mqtt_client_normal", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
     loader = spec.loader
     assert loader is not None
@@ -93,6 +97,8 @@ def test_connect_retry_path(monkeypatch):
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "mqtt_client.py"
     spec = importlib.util.spec_from_file_location("mqtt_client_conn", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
     loader = spec.loader
     assert loader is not None
