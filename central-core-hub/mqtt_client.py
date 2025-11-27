@@ -37,7 +37,6 @@ except Exception:
 
 try:
     import central_core_mqtt_shared as mqtt_shared
-    from typing import Any
     # topics is provided by the shared package; treat it as Any so static
     # checkers don't try to infer optional members from a dynamic import.
     topics: Any = getattr(mqtt_shared, "topics")
