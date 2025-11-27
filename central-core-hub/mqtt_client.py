@@ -60,6 +60,7 @@ except Exception:
     mqtt = None
 
 OPTIONS_PATH = "/data/options.json"
+MQTT_OPTIONS_ENV = "MQTT_OPTIONS_PATH"
 
 
 def get_addon_version():
@@ -84,10 +85,16 @@ def get_addon_version():
         return None
 
 
+def _resolve_options_path():
+    """Return the options file path, respecting the environment override."""
+    return os.environ.get(MQTT_OPTIONS_ENV, OPTIONS_PATH)
+
+
 def load_options():
-    if not os.path.exists(OPTIONS_PATH):
+    path = _resolve_options_path()
+    if not os.path.exists(path):
         return {}
-    with open(OPTIONS_PATH, "r") as f:
+    with open(path, "r") as f:
         try:
             return json.load(f)
         except Exception:
@@ -411,7 +418,11 @@ class CentralCoreClient:
             # Subscribe to hub command space using the generic command template
             # with single-level wildcards for domain/action.
             self.cmd_sub_topic = topics.build_topic(
-                topics.CMD_GENERIC, hub_id=self.client_id, version=ver, domain="+", action="+"
+                topics.CMD_GENERIC,
+                hub_id=self.client_id,
+                version=ver,
+                domain="+",
+                action="+",
             )
             # Commands topic (logical base) - alias for subscription pattern
             self.commands_topic = self.cmd_sub_topic
@@ -823,7 +834,9 @@ class CentralCoreClient:
         }
         # Publish to preferred Vault topic (development-only; legacy dropped)
         try:
-            self._publish(self.preferred_sensors_topic, json.dumps(payload), qos=0)
+            self._publish(
+                self.preferred_sensors_topic, json.dumps(payload), qos=0
+            )
             _log(
                 f"Published sensors list to {self.preferred_sensors_topic} (count={len(payload['sensors'])})"
             )

@@ -1,6 +1,7 @@
 import json as _json
 import sys
 import types
+import typing
 
 
 class _TopicsModule(types.ModuleType):
@@ -9,6 +10,7 @@ class _TopicsModule(types.ModuleType):
     CMD_CONFIG_UPDATE: str
     CMD_GENERIC: str
     ACK_GENERIC: str
+    build_topic: typing.Callable[..., str]
 
 
 # Provide a test shim for the external `central_core_mqtt_shared` package.
@@ -51,13 +53,24 @@ class SensorsTelemetry(_BaseModelShim):
     pass
 
 
-schemas_mod = types.ModuleType("central_core_mqtt_shared.schemas")
+# Typed schemas module shim
+class _SchemasModule(types.ModuleType):
+    SystemTelemetry: typing.Type[_BaseModelShim]
+    SensorsTelemetry: typing.Type[_BaseModelShim]
+
+
+schemas_mod = _SchemasModule("central_core_mqtt_shared.schemas")
 schemas_mod.SystemTelemetry = SystemTelemetry
 schemas_mod.SensorsTelemetry = SensorsTelemetry
 
 
 # Create the package module and attach submodules to match the real package
-central_mod = types.ModuleType("central_core_mqtt_shared")
+class _CentralCoreMqttShared(types.ModuleType):
+    topics: _TopicsModule
+    schemas: _SchemasModule
+
+
+central_mod = _CentralCoreMqttShared("central_core_mqtt_shared")
 central_mod.topics = topics_mod
 central_mod.schemas = schemas_mod
 

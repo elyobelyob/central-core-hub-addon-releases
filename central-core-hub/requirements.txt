@@ -1,0 +1,5 @@
+paho-mqtt>=1.6.1
+requests>=2.25.1
+
+# Shared MQTT topics/schemas package
+central-core-mqtt-shared @ git+https://github.com/elyobelyob/central-core-mqtt-shared.git@main
