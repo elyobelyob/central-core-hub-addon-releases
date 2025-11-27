@@ -6,7 +6,7 @@ Responsibilities:
 - Read options from `/data/options.json` (Home Assistant add-on options)
 - Maintain a single persistent MQTT connection
 - Publish telemetry every 30s to `telemetry/{client_id}`
-- Subscribe to `hubs/{client_id}/commands` and print received commands
+- Subscribe to Vault-style command topics `hubs/{client_id}/cmd/...` and handle commands
 - Reconnect automatically and log connection lifecycle to stdout
 """
 import importlib.util
@@ -383,7 +383,12 @@ class CentralCoreClient:
         self.vault_topic = options.get("vault_topic") or ""
         self.telemetry_interval = int(options.get("telemetry_interval", 30))
         self.telemetry_topic = f"telemetry/{self.client_id}"
-        self.commands_topic = f"hubs/{self.client_id}/commands"
+        # Use the Vault-style `cmd` namespace for command topics to match
+        # mqtt-shared conventions (e.g. `hubs/<client_id>/cmd/...`). The
+        # `cmd_sub_topic` below subscribes to the wildcard pattern for
+        # commands; this attribute is a convenience base topic for publishes
+        # (if needed elsewhere).
+        self.commands_topic = f"hubs/{self.client_id}/cmd"
         # Preferred sensors telemetry topic for Vault
         self.preferred_sensors_topic = f"hubs/{self.client_id}/telemetry/sensors"
         # Legacy sensors topic (kept for backward compatibility)
