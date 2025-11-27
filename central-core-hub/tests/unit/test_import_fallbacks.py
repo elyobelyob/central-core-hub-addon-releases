@@ -42,7 +42,9 @@ def test_mqtt_client_import_uses_file_fallback_when_helpers_missing(monkeypatch)
         src = repo_root / "central-core-hub" / "mqtt_client.py"
         spec = importlib.util.spec_from_file_location("fresh_mqtt_client", str(src))
         mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
+        loader = spec.loader
+        assert loader is not None
+        loader.exec_module(mod)
 
         # After import, the fallback should have installed build_telemetry
         assert hasattr(mod, "build_telemetry")

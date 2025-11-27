@@ -7,8 +7,12 @@ def load_handlers():
     spec = importlib.util.spec_from_file_location(
         "handlers", "./central-core-hub/handlers.py"
     )
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(mod)
     return mod
 
 
@@ -59,12 +63,10 @@ def test_set_readback_exception_falls_back():
 
     requests = SimpleNamespace(post=post, get=get)
 
-    payload = json.dumps(
-        {"command_id": "c1", "payload": {"sensors": {"sensor.one": "123"}}}
-    )
+    payload = json.dumps({"command_id": "c1", "payload": {"sensors": {"sensor.one": "123"}}})
     handlers.handle_message(
         client,
-        make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/set"),
+        make_msg(f"hubs/{client.client_id}/cmd/sensors/set"),
         payload,
         None,
         None,
@@ -73,14 +75,7 @@ def test_set_readback_exception_falls_back():
     )
 
     # ensure POST was attempted and the set was recorded
-    assert (
-        any(
-            "sensor.one" in str(p[1])
-            or (isinstance(p[1], dict) and "sensor.one" in json.dumps(p[1]))
-            for p in client.publishes
-        )
-        or True
-    )
+    assert any("sensor.one" in str(p[1]) or (isinstance(p[1], dict) and "sensor.one" in json.dumps(p[1])) for p in client.publishes) or True
 
 
 def test_set_post_raises_records_failure():
@@ -92,12 +87,10 @@ def test_set_post_raises_records_failure():
 
     requests = SimpleNamespace(post=post, get=lambda *a, **k: None)
 
-    payload = json.dumps(
-        {"command_id": "c2", "payload": {"sensors": {"sensor.two": "on"}}}
-    )
+    payload = json.dumps({"command_id": "c2", "payload": {"sensors": {"sensor.two": "on"}}})
     handlers.handle_message(
         client,
-        make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/set"),
+        make_msg(f"hubs/{client.client_id}/cmd/sensors/set"),
         payload,
         None,
         None,
@@ -116,12 +109,10 @@ def test_set_item_without_entity_skipped_and_no_ha_config():
     client.ha_api_url = None
     client.ha_api_token = None
 
-    payload = json.dumps(
-        {"command_id": "c3", "payload": {"sensors": [{"state": "on"}]}}
-    )
+    payload = json.dumps({"command_id": "c3", "payload": {"sensors": [{"state": "on"}]}})
     handlers.handle_message(
         client,
-        make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/set"),
+        make_msg(f"hubs/{client.client_id}/cmd/sensors/set"),
         payload,
         None,
         None,
@@ -148,7 +139,7 @@ def test_poll_prefers_client_selected_sensors_for_reminder():
     payload = json.dumps({"command_id": "c4", "payload": {}})
     handlers.handle_message(
         client,
-        make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/poll"),
+        make_msg(f"hubs/{client.client_id}/cmd/sensors/poll"),
         payload,
         fetch_sensors,
         None,

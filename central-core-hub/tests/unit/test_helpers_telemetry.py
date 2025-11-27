@@ -7,8 +7,12 @@ def _load_helpers_module():
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "helpers.py"
     spec = importlib.util.spec_from_file_location("helpers_mod", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(module)
     return module
 
 
@@ -16,8 +20,12 @@ def _load_telemetry_module():
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "telemetry.py"
     spec = importlib.util.spec_from_file_location("tele_mod", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(module)
     return module
 
 

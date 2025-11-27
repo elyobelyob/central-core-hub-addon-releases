@@ -27,8 +27,12 @@ def _load_fresh_module_with_no_deps():
     sys.meta_path.insert(0, Blocker())
     try:
         spec = importlib.util.spec_from_file_location("fresh_mqtt_client", str(src))
+        if spec is None or getattr(spec, "loader", None) is None:
+            raise ImportError("could not load spec")
         module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        loader = spec.loader
+        assert loader is not None
+        loader.exec_module(module)
         return module
     finally:
         # restore meta_path and sys.modules
@@ -52,7 +56,9 @@ def test_publish_telemetry_vault_fallback(monkeypatch):
         ),
     )
     m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(m)
     CentralCoreClient = m.CentralCoreClient
 
     calls = []
@@ -78,7 +84,9 @@ def test_on_message_malformed_and_binary(monkeypatch):
         "m2", str(repo_root / "central-core-hub" / "mqtt_client.py")
     )
     m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(m)
     CentralCoreClient = m.CentralCoreClient
 
     c = CentralCoreClient({"client_id": "u3"})
@@ -125,7 +133,9 @@ def test_on_connect_calls_publish_sensors(monkeypatch):
         "m3", str(repo_root / "central-core-hub" / "mqtt_client.py")
     )
     m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(m)
     CentralCoreClient = m.CentralCoreClient
 
     called = {"publish_sensors": 0}
@@ -148,7 +158,9 @@ def test_fetch_sensors_happy_path(monkeypatch):
         ),
     )
     m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(m)
 
     # fake requests.get to return a list of entities
     class FakeResp:
@@ -194,7 +206,9 @@ def test_sensors_poll_with_requested_subset(monkeypatch):
         ),
     )
     m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(m)
     CentralCoreClient = m.CentralCoreClient
 
     # stub fetch_sensors with varied states
@@ -242,7 +256,9 @@ def test_sensors_set_mapping_and_no_ha_config(monkeypatch):
         ),
     )
     m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(m)
     CentralCoreClient = m.CentralCoreClient
 
     # Instantiate without HA config
@@ -279,7 +295,9 @@ def test_publish_telemetry_vault_exception(monkeypatch):
         ),
     )
     m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(m)
     CentralCoreClient = m.CentralCoreClient
 
     # monkeypatch build_vault_payload to raise

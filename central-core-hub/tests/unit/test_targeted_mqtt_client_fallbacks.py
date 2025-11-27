@@ -8,7 +8,9 @@ def _load_module():
     src = repo_root / "central-core-hub" / "mqtt_client.py"
     spec = importlib.util.spec_from_file_location("mqtt_client", str(src))
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(module)
     return module
 
 
@@ -16,7 +18,9 @@ def test_init_falls_back_to_shim_when_runtime_and_file_fail(monkeypatch):
     mcpath = Path(__file__).resolve().parents[3] / "central-core-hub" / "mqtt_client.py"
     spec = importlib.util.spec_from_file_location("fresh_mqtt_client", str(mcpath))
     mc = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mc)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(mc)
 
     # Create a fake mqtt_runtime module whose setup raises
     fake_rt = types.ModuleType("mqtt_runtime")
@@ -91,7 +95,9 @@ def test_telemetry_get_cpu_uses_m2_module(monkeypatch):
     tele_path = repo_root / "central-core-hub" / "telemetry.py"
     spec = importlib.util.spec_from_file_location("telemetry_test", str(tele_path))
     tele = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(tele)
+    tloader = spec.loader
+    assert tloader is not None
+    tloader.exec_module(tele)
 
     # use the telemetry module's external override path to exercise that branch
     fake = types.ModuleType("m2")

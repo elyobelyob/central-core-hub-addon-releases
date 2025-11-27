@@ -16,6 +16,8 @@ def _load_module_with_import_hook(hook):
     name = f"mqtt_client_hook_{id(hook)}"
     spec = importlib.util.spec_from_file_location(name, str(src))
     mod = importlib.util.module_from_spec(spec)
+    loader = spec.loader
+    assert loader is not None
     orig_import = builtins.__import__
 
     def wrapper(*args, **kwargs):
@@ -23,7 +25,7 @@ def _load_module_with_import_hook(hook):
 
     try:
         builtins.__import__ = wrapper
-        spec.loader.exec_module(mod)
+        loader.exec_module(mod)
     finally:
         builtins.__import__ = orig_import
     return mod
@@ -64,7 +66,9 @@ def test_on_connect_subscription_failure_and_publish_sensors_exception(monkeypat
     src = repo_root / "central-core-hub" / "mqtt_client.py"
     spec = importlib.util.spec_from_file_location("mqtt_client_normal", str(src))
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(mod)
     CentralCoreClient = mod.CentralCoreClient
 
     c = CentralCoreClient({"client_id": "unit-y"})
@@ -90,7 +94,9 @@ def test_connect_retry_path(monkeypatch):
     src = repo_root / "central-core-hub" / "mqtt_client.py"
     spec = importlib.util.spec_from_file_location("mqtt_client_conn", str(src))
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(mod)
     CentralCoreClient = mod.CentralCoreClient
 
     c = CentralCoreClient({"client_id": "unit-z"})

@@ -10,8 +10,12 @@ def _load_module(path_name):
     spec = importlib.util.spec_from_file_location(
         path_name.replace(".py", ""), str(src)
     )
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(module)
     return module
 
 
@@ -19,7 +23,7 @@ def test__get_cpu_percent_prefers_external_override(monkeypatch):
     tele = _load_module("telemetry.py")
 
     # set external override
-    tele._external_get_cpu_percent = lambda: 12.3
+    setattr(tele, "_external_get_cpu_percent", lambda: 12.3)
     try:
         assert tele._get_cpu_percent() == 12.3
     finally:
@@ -31,7 +35,7 @@ def test__get_cpu_percent_uses_helpers_if_present(monkeypatch):
 
     # create fake helpers module
     fake_helpers = types.ModuleType("helpers")
-    fake_helpers.get_cpu_percent = lambda: 7.7
+    setattr(fake_helpers, "get_cpu_percent", lambda: 7.7)
     import sys
 
     sys.modules["helpers"] = fake_helpers

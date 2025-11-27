@@ -1,14 +1,19 @@
 import json
 import importlib.util
 from types import SimpleNamespace
+from pathlib import Path
 
 
 def load_handlers():
-    spec = importlib.util.spec_from_file_location(
-        "handlers", "./central-core-hub/handlers.py"
-    )
+    repo_root = Path(__file__).resolve().parents[3]
+    src = repo_root / "central-core-hub" / "handlers.py"
+    spec = importlib.util.spec_from_file_location("handlers", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(mod)
     return mod
 
 
@@ -82,7 +87,7 @@ def test_poll_with_non_dict_cmd_triggers_sensors_requested_except():
     # payload is a JSON array -> cmd is list, cmd.get will raise and be caught
     handlers.handle_message(
         client,
-        make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/poll"),
+        make_msg(f"hubs/{client.client_id}/cmd/sensors/poll"),
         "[]",
         lambda a, b: [],
         None,
@@ -103,7 +108,7 @@ def test_poll_selected_sensors_setter_failure_is_ignored():
     payload = json.dumps({"payload": {"sensors": ["s1"]}})
     handlers.handle_message(
         client,
-        make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/poll"),
+        make_msg(f"hubs/{client.client_id}/cmd/sensors/poll"),
         payload,
         fetch_sensors,
         None,
@@ -122,7 +127,7 @@ def test_poll_vault_publish_exception_is_handled():
     # fetch_sensors returns empty so data_map empty but vault publish attempted
     handlers.handle_message(
         client,
-        make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/poll"),
+        make_msg(f"hubs/{client.client_id}/cmd/sensors/poll"),
         json.dumps({}),
         lambda a, b: [],
         None,
@@ -153,7 +158,7 @@ def test_set_payload_parsing_exception_leads_to_empty_sensors_to_set():
     # payload is a JSON array -> cmd is list, parsing sensors_to_set will raise and be caught
     handlers.handle_message(
         client,
-        make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/set"),
+        make_msg(f"hubs/{client.client_id}/cmd/sensors/set"),
         "[]",
         None,
         None,
@@ -183,7 +188,7 @@ def test_poll_with_scalar_cmd_triggers_sensors_requested_except():
     # payload is a JSON number -> cmd is scalar, cmd.get will raise and be caught
     handlers.handle_message(
         client,
-        make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/poll"),
+        make_msg(f"hubs/{client.client_id}/cmd/sensors/poll"),
         "123",
         lambda a, b: [],
         None,
@@ -213,7 +218,7 @@ def test_set_with_scalar_cmd_triggers_sensors_to_set_exception():
     # payload is a JSON number -> cmd is scalar and parsing sensors_to_set will hit except
     handlers.handle_message(
         client,
-        make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/set"),
+        make_msg(f"hubs/{client.client_id}/cmd/sensors/set"),
         "123",
         None,
         None,
@@ -263,7 +268,7 @@ def test_set_readback_off_converts_to_false_and_publishes():
     payload = json.dumps({"payload": {"sensors": {"sensor.off": "off"}}})
     handlers.handle_message(
         client,
-        make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/set"),
+        make_msg(f"hubs/{client.client_id}/cmd/sensors/set"),
         payload,
         None,
         None,

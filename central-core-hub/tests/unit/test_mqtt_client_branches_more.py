@@ -8,8 +8,12 @@ def _load_module():
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "mqtt_client.py"
     spec = importlib.util.spec_from_file_location("mqtt_client", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(module)
     return module
 
 
@@ -77,8 +81,12 @@ def test_handler_ack_publish_raises_but_handler_continues(monkeypatch):
     # load handlers directly
     handlers_spec = Path(mod.__file__).parent / "handlers.py"
     spec = importlib.util.spec_from_file_location("handlers", handlers_spec)
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     handlers = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(handlers)
+    hloader = spec.loader
+    assert hloader is not None
+    hloader.exec_module(handlers)
 
     c = CentralCoreClient(
         {"client_id": "ackerr", "ha_api_url": "http://ha", "ha_api_token": "t"}
@@ -122,7 +130,9 @@ def test_mqtt_runtime_tls_set_raises(monkeypatch):
     )
     spec = importlib.util.spec_from_file_location("mqtt_runtime", str(rt_src))
     rt = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(rt)
+    rloader = spec.loader
+    assert rloader is not None
+    rloader.exec_module(rt)
 
     class Ctx:
         def __init__(self):
@@ -166,12 +176,12 @@ def test_publish_telemetry_vault_transform_raises(monkeypatch):
 
     dummy.publish = pub
     c._client = dummy
-    mod.build_telemetry = lambda cid, **kwargs: "raw"
+    setattr(mod, "build_telemetry", lambda cid, **kwargs: "raw")
 
     def bad_vault(raw):
         raise RuntimeError("vault-err")
 
-    mod.build_vault_payload = bad_vault
+    setattr(mod, "build_vault_payload", bad_vault)
     # should not raise; primary telemetry should be published
     c.publish_telemetry()
     assert any(t[0] == c.telemetry_topic for t in published)
