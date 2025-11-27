@@ -36,9 +36,9 @@ except Exception:
 
 
 try:
-    import mqtt_topics as topics
+    import central_core_mqtt_shared as shared_topics
 except Exception:
-    topics = None
+    shared_topics = None
 
 try:
     import paho.mqtt.client as mqtt
@@ -388,31 +388,47 @@ class CentralCoreClient:
         # payloads will be published to both topics.
         self.vault_topic = options.get("vault_topic") or ""
         self.telemetry_interval = int(options.get("telemetry_interval", 30))
-        # Use shared templates where possible; otherwise keep hard-coded
-        # defaults to preserve current behavior in tests and development.
-        if topics is not None:
-            self.telemetry_topic = topics.TELEMETRY_TOPIC_TMPL.format(
-                client_id=self.client_id
-            )
-            self.commands_topic = topics.CMD_BASE_TMPL.format(client_id=self.client_id)
-            self.preferred_sensors_topic = (
-                topics.PREFERRED_SENSORS_TOPIC_TMPL.format(client_id=self.client_id)
-            )
+        # Use the authoritative `central_core_mqtt_shared` package for topic
+        # templates when available. If it's not installed, log a warning and
+        # fall back to the previous hard-coded defaults so tests/dev remain
+        # usable — but aim to ensure the shared package is installed in
+        # production environments so topics are consistent across services.
+        if shared_topics is not None:
+            try:
+                self.telemetry_topic = shared_topics.TELEMETRY_TOPIC_TMPL.format(
+                    client_id=self.client_id
+                )
+            except Exception:
+                self.telemetry_topic = f"telemetry/{self.client_id}"
+            try:
+                self.commands_topic = shared_topics.CMD_BASE_TMPL.format(
+                    client_id=self.client_id
+                )
+            except Exception:
+                self.commands_topic = f"hubs/{self.client_id}/cmd"
+            try:
+                self.preferred_sensors_topic = shared_topics.PREFERRED_SENSORS_TOPIC_TMPL.format(
+                    client_id=self.client_id
+                )
+            except Exception:
+                self.preferred_sensors_topic = f"hubs/{self.client_id}/telemetry/sensors"
+            try:
+                self.cmd_sub_topic = shared_topics.CMD_SUB_TMPL.format(client_id=self.client_id)
+            except Exception:
+                self.cmd_sub_topic = f"hubs/{self.client_id}/cmd/+"
+            # keep a sensors_topic attr for legacy tests, but publishers should
+            # prefer the `preferred_sensors_topic`.
             self.sensors_topic = f"telemetry/{self.client_id}/sensors"
-            self.cmd_sub_topic = topics.CMD_SUB_TMPL.format(client_id=self.client_id)
         else:
+            # Warn at runtime that the shared package isn't available; keep
+            # fallbacks so the add-on remains runnable in dev/test contexts.
+            _log(
+                "Warning: `central_core_mqtt_shared` not available; using local topic defaults"
+            )
             self.telemetry_topic = f"telemetry/{self.client_id}"
-            # Use the Vault-style `cmd` namespace for command topics to match
-            # mqtt-shared conventions (e.g. `hubs/<client_id>/cmd/...`). The
-            # `cmd_sub_topic` below subscribes to the wildcard pattern for
-            # commands; this attribute is a convenience base topic for publishes
-            # (if needed elsewhere).
             self.commands_topic = f"hubs/{self.client_id}/cmd"
-            # Preferred sensors telemetry topic for Vault
             self.preferred_sensors_topic = f"hubs/{self.client_id}/telemetry/sensors"
-            # Legacy sensors topic (kept for backward compatibility)
             self.sensors_topic = f"telemetry/{self.client_id}/sensors"
-            # Subscribe pattern for Vault commands (e.g. hubs/<hub_id>/cmd/sensors/poll)
             self.cmd_sub_topic = f"hubs/{self.client_id}/cmd/+"
         # Delegate client creation and TLS setup to mqtt_runtime so it can
         # be unit-tested separately and to keep this class focused on
