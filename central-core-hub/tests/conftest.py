@@ -1,6 +1,7 @@
+import json as _json
 import sys
 import types
-import json as _json
+
 
 # Provide a test shim for the external `central_core_mqtt_shared` package.
 # Tests should import the package and use `topics.build_topic(...)` and

@@ -10,7 +10,6 @@ Responsibilities:
 - Reconnect automatically and log connection lifecycle to stdout
 """
 import importlib.util
-from typing import Any, cast
 import json
 import os
 import pathlib
@@ -20,7 +19,9 @@ import sys
 import tempfile
 import time
 import traceback
+import typing
 from datetime import datetime, timezone
+from typing import cast
 
 
 def _log(msg, file=sys.stdout):
@@ -37,9 +38,9 @@ except Exception:
 
 try:
     import central_core_mqtt_shared as mqtt_shared
-    # topics is provided by the shared package; treat it as Any so static
+    # topics is provided by the shared package; treat it as typing.Any so static
     # checkers don't try to infer optional members from a dynamic import.
-    topics: Any = getattr(mqtt_shared, "topics")
+    topics: typing.Any = getattr(mqtt_shared, "topics")
 except Exception as e:
     raise ImportError(
         "`central_core_mqtt_shared` is required and must be installed; install it in the add-on/runtime environment"
@@ -254,7 +255,7 @@ try:
             old = getattr(tele_mod, "_external_get_cpu_percent", None)
             try:
                 # cast to Any so static analyzers allow assigning a dynamic attribute
-                setattr(cast(Any, tele_mod), "_external_get_cpu_percent", get_cpu_percent)
+                setattr(cast(typing.Any, tele_mod), "_external_get_cpu_percent", get_cpu_percent)
             except Exception:
                 pass
         try:
@@ -289,9 +290,9 @@ try:
             if tele_mod is not None:
                 try:
                     if old is None:
-                        delattr(cast(Any, tele_mod), "_external_get_cpu_percent")
+                        delattr(cast(typing.Any, tele_mod), "_external_get_cpu_percent")
                     else:
-                        setattr(cast(Any, tele_mod), "_external_get_cpu_percent", old)
+                        setattr(cast(typing.Any, tele_mod), "_external_get_cpu_percent", old)
                 except Exception:
                     pass
 
