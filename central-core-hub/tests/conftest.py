@@ -3,12 +3,20 @@ import sys
 import types
 
 
+class _TopicsModule(types.ModuleType):
+    TELEMETRY_SYSTEM: str
+    TELEMETRY_SENSORS: str
+    CMD_CONFIG_UPDATE: str
+    CMD_GENERIC: str
+    ACK_GENERIC: str
+
+
 # Provide a test shim for the external `central_core_mqtt_shared` package.
 # Tests should import the package and use `topics.build_topic(...)` and
 # the `schemas` models; do not expose legacy top-level constants here.
 
 # Minimal `topics` helper expected by runtime code
-topics_mod = types.ModuleType("central_core_mqtt_shared.topics")
+topics_mod = _TopicsModule("central_core_mqtt_shared.topics")
 
 
 def _build_topic(template, **kwargs):
