@@ -44,10 +44,9 @@ def handle_message(
                 cmd = {}
 
             command_id = cmd.get("command_id")
-            action = cmd.get("action") or "sensors/poll"
+                action = cmd.get("action") or "sensors/poll"
             if command_id:
-                # ACK topic: publish both legacy command-response and versioned ack
-                legacy_ack = f"hubs/{client.client_id}/cmd/{command_id}/response"
+                # ACK topic: publish versioned ack only (remove legacy response)
                 v1_ack = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
                 ack_payload = {
                     "status": "acknowledged",
@@ -56,8 +55,6 @@ def handle_message(
                     .replace("+00:00", "Z"),
                 }
                 try:
-                    # publish both for compatibility
-                    client._publish(legacy_ack, json.dumps(ack_payload), qos=1)
                     client._publish(v1_ack, json.dumps(ack_payload), qos=1)
                 except Exception:
                     pass  # pragma: no cover
@@ -153,7 +150,7 @@ def handle_message(
                 pass  # pragma: no cover
 
             if command_id:
-                legacy_comp = f"hubs/{client.client_id}/cmd/{command_id}/response"
+                # Publish versioned completion response only; remove legacy response
                 v1_comp = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
                 comp_payload = {
                     "status": "completed",
@@ -164,7 +161,6 @@ def handle_message(
                     "timestamp": now_iso,
                 }
                 try:
-                    client._publish(legacy_comp, json.dumps(comp_payload), qos=1)
                     client._publish(v1_comp, json.dumps(comp_payload), qos=1)
                 except Exception:
                     pass  # pragma: no cover
@@ -185,19 +181,18 @@ def handle_message(
             command_id = cmd.get("command_id")
             action = cmd.get("action") or "sensors/set"
             if command_id:
-                legacy_ack = f"hubs/{client.client_id}/cmd/{command_id}/response"
-                v1_ack = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
-                ack_payload = {
-                    "status": "acknowledged",
-                    "timestamp": datetime.now(timezone.utc)
-                    .isoformat()
-                    .replace("+00:00", "Z"),
-                }
-                try:
-                    client._publish(legacy_ack, json.dumps(ack_payload), qos=1)
-                    client._publish(v1_ack, json.dumps(ack_payload), qos=1)
-                except Exception:
-                    pass
+                    # Publish versioned ack only
+                    v1_ack = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
+                    ack_payload = {
+                        "status": "acknowledged",
+                        "timestamp": datetime.now(timezone.utc)
+                        .isoformat()
+                        .replace("+00:00", "Z"),
+                    }
+                    try:
+                        client._publish(v1_ack, json.dumps(ack_payload), qos=1)
+                    except Exception:
+                        pass
 
             sensors_to_set = []
             try:
@@ -261,18 +256,17 @@ def handle_message(
 
             now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             if command_id:
-                legacy_comp = f"hubs/{client.client_id}/cmd/{command_id}/response"
-                v1_comp = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
-                comp_payload = {
-                    "status": "completed",
-                    "result": results,
-                    "timestamp": now_iso,
-                }
-                try:
-                    client._publish(legacy_comp, json.dumps(comp_payload), qos=1)
-                    client._publish(v1_comp, json.dumps(comp_payload), qos=1)
-                except Exception:
-                    pass
+                    # Publish versioned completion only
+                    v1_comp = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
+                    comp_payload = {
+                        "status": "completed",
+                        "result": results,
+                        "timestamp": now_iso,
+                    }
+                    try:
+                        client._publish(v1_comp, json.dumps(comp_payload), qos=1)
+                    except Exception:
+                        pass
 
             try:
                 data_map = {}

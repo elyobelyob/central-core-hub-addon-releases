@@ -61,7 +61,7 @@ The add-on subscribes to Vault-style command topics and supports the following c
 
 - `hubs/<client_id>/cmd/sensors/poll` (QoS 1)
 	- Request: optional JSON payload with `command_id` and an optional `payload.sensors` list to request a subset.
-	- Behavior: publishes an immediate ACK to `hubs/<client_id>/cmd/<command_id>/response` (if `command_id` present), then publishes sensor telemetry to `hubs/<client_id>/telemetry/sensors`, and finally publishes a completion response with a result summary to the response topic.
+	- Behavior: publishes an immediate ACK to the versioned ACK topic `hubs/<client_id>/v1/ack/<action.replace('/', '.')>/<command_id>` (if `command_id` present), then publishes sensor telemetry to `hubs/<client_id>/telemetry/sensors`, and finally publishes a completion response with a result summary to the same versioned ACK topic.
 
 - `hubs/<client_id>/cmd/sensors/set` (QoS 1)
 	- Request payload examples:
@@ -94,10 +94,10 @@ The add-on subscribes to Vault-style command topics and supports the following c
 		```
 
 	- Behavior:
-		- Immediately ACKs the command to `hubs/<client_id>/cmd/<command_id>/response` (QoS 1) if `command_id` present.
+		- Immediately ACKs the command to the versioned ACK topic `hubs/<client_id>/v1/ack/<action.replace('/', '.')>/<command_id>` (QoS 1) if `command_id` present.
 		- For each requested sensor, attempts to set the state via the Home Assistant REST API (`POST /api/states/<entity_id>`). Requires `ha_api_url` and `ha_api_token` to be configured in add-on options.
 		- After a successful POST, the add-on performs a GET on the same entity (`GET /api/states/<entity_id>`) to read back the authoritative `state` and `attributes`.
-		- Publishes a completion response to `hubs/<client_id>/cmd/<command_id>/response` with a `result` containing `set` and `failed` lists.
+		- Publishes a completion response to the versioned ACK topic `hubs/<client_id>/v1/ack/<action.replace('/', '.')>/<command_id>` with a `result` containing `set` and `failed` lists.
 		- Publishes telemetry to `hubs/<client_id>/telemetry/sensors` using the authoritative readback values and attributes (if available).
 
 	- Notes:
