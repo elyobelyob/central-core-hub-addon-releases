@@ -2,7 +2,6 @@ import json
 import platform
 import socket
 import sys
-import traceback
 from datetime import datetime, timezone
 
 
@@ -19,10 +18,8 @@ def _get_cpu_percent():
     if ext:
         try:
             return ext()
-        except (
-            Exception
-        ):  # pragma: no cover - external override error is environment-specific
-            traceback.print_exc()
+        except Exception:  # pragma: no cover - external override error is environment-specific
+            pass
 
     # First, check the caller module (useful when mqtt_client monkeypatches get_cpu_percent)
     try:
@@ -36,12 +33,10 @@ def _get_cpu_percent():
                 if m and hasattr(m, "get_cpu_percent"):
                     try:
                         return m.get_cpu_percent()
-                    except (
-                        Exception
-                    ):  # pragma: no cover - defensive fallback when caller module misbehaves
+                    except Exception:  # pragma: no cover - defensive fallback when caller module misbehaves
                         return None
     except Exception:
-        traceback.print_exc()
+        pass
 
     try:
         import helpers
@@ -50,16 +45,14 @@ def _get_cpu_percent():
         if cpu_val is not None:
             return cpu_val
     except Exception:  # pragma: no cover - helpers module not available in test harness
-        traceback.print_exc()
+        pass
     # Try common mqtt_client module names for tests that import in different ways
     for cand in ("mqtt_client", "fresh_mqtt_client", "m", "m2"):
         mod = sys.modules.get(cand)
         if mod and hasattr(mod, "get_cpu_percent"):
             try:
                 return mod.get_cpu_percent()
-            except (
-                Exception
-            ):  # pragma: no cover - defensive fallback for misbehaving modules
+            except Exception:  # pragma: no cover - defensive fallback for misbehaving modules
                 return None
     return None
 
@@ -82,7 +75,7 @@ def build_telemetry(
         ip = s.getsockname()[0]
         s.close()
     except Exception:
-        traceback.print_exc()
+        pass
     # Resolve helpers: prefer injected functions, otherwise try helpers module
     up = None
     la = []
@@ -92,38 +85,53 @@ def build_telemetry(
     disk_free = None
     try:  # pragma: no cover
         if callable(uptime_fn):
-            up = uptime_fn()
+            up_val = uptime_fn()
         else:
             import helpers as _h
 
-            up = _h.uptime_seconds()
+            up_val = _h.uptime_seconds()
+        # accept numeric or None
+        up = int(up_val) if isinstance(up_val, (int, float)) else None
     except Exception:
         up = None  # pragma: no cover
     try:  # pragma: no cover
         if callable(loadavg_fn):
-            la = loadavg_fn()
+            la_val = loadavg_fn()
         else:
             import helpers as _h
 
-            la = _h.loadavg()
+            la_val = _h.loadavg()
+        # ensure loadavg is a sequence of up to 3 items
+        if isinstance(la_val, (list, tuple)):
+            la = list(la_val)
+        else:
+            la = []
     except Exception:
         la = []  # pragma: no cover
     try:  # pragma: no cover
         if callable(mem_info_fn):
-            mem_total, mem_free = mem_info_fn()
+            mem_val = mem_info_fn()
         else:
             import helpers as _h
 
-            mem_total, mem_free = _h.mem_info_kb()
+            mem_val = _h.mem_info_kb()
+        if isinstance(mem_val, (list, tuple)) and len(mem_val) >= 2:
+            mem_total, mem_free = mem_val[0], mem_val[1]
+        else:
+            mem_total, mem_free = None, None
     except Exception:
         mem_total, mem_free = None, None  # pragma: no cover
     try:  # pragma: no cover
         if callable(disk_info_fn):
-            disk_total, disk_free = disk_info_fn()
+            disk_val = disk_info_fn()
         else:
             import helpers as _h
 
-            disk_total, disk_free = _h.disk_info_kb("/")
+            disk_val = _h.disk_info_kb("/")
+        if isinstance(disk_val, (list, tuple)) and len(disk_val) >= 2:
+            disk_total, disk_free = disk_val[0], disk_val[1]
+        else:
+            disk_total, disk_free = None, None
     except Exception:
         disk_total, disk_free = None, None  # pragma: no cover
     cpu_count = 1

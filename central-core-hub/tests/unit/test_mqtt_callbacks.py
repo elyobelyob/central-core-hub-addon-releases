@@ -6,8 +6,12 @@ def _load_module():
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "mqtt_client.py"
     spec = importlib.util.spec_from_file_location("mqtt_client", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(module)
     return module
 
 
@@ -80,8 +84,12 @@ def test_on_message_handles_binary_payload_gracefully(monkeypatch):
     spec = importlib.util.spec_from_file_location(
         "handlers", Path(mod.__file__).parent / "handlers.py"
     )
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     handlers_mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(handlers_mod)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(handlers_mod)
     # call on_message; it should not raise
     c._client = DummyPub()
     c.on_message(None, None, m)

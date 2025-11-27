@@ -6,8 +6,12 @@ def load_runtime():
     spec = importlib.util.spec_from_file_location(
         "mqtt_runtime", "./central-core-hub/mqtt_runtime.py"
     )
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(mod)
     return mod
 
 
@@ -26,9 +30,7 @@ def test_shim_client_exists_and_methods_work():
     assert hasattr(r, "rc")
     assert client.subscribe("t") == (0, 1)
     assert client.connect() == 0
-    client.loop_start()
-    client.loop_stop()
-    client.disconnect()
+    client.loop_start(); client.loop_stop(); client.disconnect()
 
 
 def test_shim_tls_and_callback_assignment_no_errors(capsys):

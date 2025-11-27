@@ -1,5 +1,6 @@
 import importlib.util
 import sys
+import types
 import json
 
 
@@ -7,15 +8,19 @@ def load_telemetry():
     spec = importlib.util.spec_from_file_location(
         "telemetry", "./central-core-hub/telemetry.py"
     )
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(mod)
     return mod
 
 
 def test_external_get_cpu_percent_override_success():
     t = load_telemetry()
     # attach external override
-    t._external_get_cpu_percent = lambda: 42
+    setattr(t, "_external_get_cpu_percent", lambda: 42)
     try:
         assert t._get_cpu_percent() == 42
     finally:
@@ -28,10 +33,10 @@ def test_external_get_cpu_percent_exception_and_sys_module_fallback():
     def bad():
         raise RuntimeError("bad ext")
 
-    t._external_get_cpu_percent = bad
+    setattr(t, "_external_get_cpu_percent", bad)
     # add dummy mqtt_client module to sys.modules
-    mod = type("M", (), {})()
-    mod.get_cpu_percent = lambda: 7
+    mod = types.ModuleType("mqtt_client")
+    setattr(mod, "get_cpu_percent", lambda: 7)
     sys.modules.setdefault("mqtt_client", mod)
     try:
         # external raises, so fallback to mqtt_client.get_cpu_percent should return 7
@@ -53,11 +58,10 @@ def test_build_telemetry_get_cpu_callable_raises_uses_fallback():
         delattr(t, "_external_get_cpu_percent")
 
     # add dummy module for fallback
-    mod = type("M", (), {})()
-    mod.get_cpu_percent = lambda: 5
+    mod = types.ModuleType("mqtt_client")
+    setattr(mod, "get_cpu_percent", lambda: 5)
     sys.modules.setdefault("mqtt_client", mod)
     try:
-
         def raiseer():
             raise ValueError("boom")
 

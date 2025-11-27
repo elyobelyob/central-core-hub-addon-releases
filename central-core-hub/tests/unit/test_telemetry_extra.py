@@ -8,7 +8,9 @@ def _load_telemetry():
     src = repo_root / "central-core-hub" / "telemetry.py"
     spec = importlib.util.spec_from_file_location("telemetry", str(src))
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(mod)
     return mod
 
 

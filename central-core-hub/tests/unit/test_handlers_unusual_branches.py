@@ -7,8 +7,12 @@ def _load_handlers():
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "handlers.py"
     spec = importlib.util.spec_from_file_location("handlers", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(mod)
     return mod
 
 
@@ -17,7 +21,7 @@ class RecordingClient:
         self.client_id = "unit-hub"
         self.ha_api_url = "http://ha"
         self.ha_api_token = "tok"
-        self.preferred_sensors_topic = f"hubs/{self.client_id}/v1/telemetry/sensors"
+        self.preferred_sensors_topic = f"hubs/{self.client_id}/telemetry/sensors"
         self.vault_topic = "vault/unit"
         self.ha_readback_after_set = True
         self.selected_sensors = None
@@ -41,9 +45,9 @@ def test_ack_publish_raises_but_processing_continues(monkeypatch):
     handlers = _load_handlers()
     c = RecordingClient()
     # make _publish raise for ack_topic only
-    # ack topic will be hubs/<id>/v1/ack/sensors.poll/<command_id>
+    # ack topic will be hubs/<id>/cmd/<command_id>/response
     cmd = {"command_id": "ack1", "action": "sensors/poll", "payload": {}}
-    ack_topic = f"hubs/{c.client_id}/v1/ack/sensors.poll/{cmd['command_id']}"
+    ack_topic = f"hubs/{c.client_id}/cmd/{cmd['command_id']}/response"
     c.raise_on = [ack_topic]
 
     # fetch_sensors returns one sensor so telemetry publish occurs
@@ -51,7 +55,7 @@ def test_ack_publish_raises_but_processing_continues(monkeypatch):
         return [{"entity_id": "sensor.a", "state": "1", "attributes": {}}]
 
     msg = DummyMsg(
-        f"hubs/{c.client_id}/v1/cmd/sensors/poll", json.dumps(cmd).encode("utf-8")
+        f"hubs/{c.client_id}/cmd/sensors/poll", json.dumps(cmd).encode("utf-8")
     )
 
     # Should not raise despite _publish raising for ack
@@ -77,17 +81,19 @@ def test_set_no_ha_config_reports_failed(monkeypatch):
         "payload": {"sensors": [{"entity_id": "sensor.x", "state": "2"}]},
     }
     msg = DummyMsg(
-        f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(cmd).encode("utf-8")
+        f"hubs/{c.client_id}/cmd/sensors/set", json.dumps(cmd).encode("utf-8")
     )
 
     handlers.handle_message(
         c, msg, msg.payload.decode("utf-8"), lambda u, t: [], None, None, None
     )
 
-    # should at least ACK the command on versioned ack topic
-    ack_topic = f"hubs/{c.client_id}/v1/ack/sensors.set/{cmd['command_id']}"
-    matches = [p for p in c.published if p["topic"] == ack_topic]
-    assert matches, "expected ack response"
+    # completion response should include failed result for no_ha_config
+    resp_topic = f"hubs/{c.client_id}/cmd/{cmd['command_id']}/response"
+    matches = [p for p in c.published if p["topic"] == resp_topic]
+    assert matches, "expected completion response"
+    comp = json.loads(matches[-1]["payload"])
+    assert "result" in comp and comp["result"]["failed"], comp
 
 
 def test_set_requests_post_raises_results_failed(monkeypatch):
@@ -120,17 +126,19 @@ def test_set_requests_post_raises_results_failed(monkeypatch):
         "payload": {"sensors": [{"entity_id": "sensor.y", "state": "3"}]},
     }
     msg = DummyMsg(
-        f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(cmd).encode("utf-8")
+        f"hubs/{c.client_id}/cmd/sensors/set", json.dumps(cmd).encode("utf-8")
     )
 
     handlers.handle_message(
         c, msg, msg.payload.decode("utf-8"), lambda u, t: [], None, None, requests
     )
 
-    # should ack even if post fails
-    ack_topic = f"hubs/{c.client_id}/v1/ack/sensors.set/{cmd['command_id']}"
-    matches = [p for p in c.published if p["topic"] == ack_topic]
+    # completion should indicate failure for post error
+    resp_topic = f"hubs/{c.client_id}/cmd/{cmd['command_id']}/response"
+    matches = [p for p in c.published if p["topic"] == resp_topic]
     assert matches
+    comp = json.loads(matches[-1]["payload"])
+    assert comp["result"]["failed"], comp
 
 
 def test_fetch_sensors_raises_is_caught(monkeypatch):
@@ -142,7 +150,7 @@ def test_fetch_sensors_raises_is_caught(monkeypatch):
 
     cmd = {"action": "sensors/poll"}
     msg = DummyMsg(
-        f"hubs/{c.client_id}/v1/cmd/sensors/poll", json.dumps(cmd).encode("utf-8")
+        f"hubs/{c.client_id}/cmd/sensors/poll", json.dumps(cmd).encode("utf-8")
     )
 
     # Should not raise; handler catches top-level exceptions

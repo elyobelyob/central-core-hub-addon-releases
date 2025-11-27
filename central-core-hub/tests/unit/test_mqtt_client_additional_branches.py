@@ -7,9 +7,13 @@ from pathlib import Path
 def _load_client_module():
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "mqtt_client.py"
-    spec = importlib.util.spec_from_file_location("mqtt_client_add", str(src))
+    spec = importlib.util.spec_from_file_location("mqtt_client", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(mod)
     return mod
 
 
@@ -142,8 +146,12 @@ def test_build_telemetry_wrapper_cleans_up(monkeypatch):
     spec = importlib.util.spec_from_file_location(
         "telemetry", str(repo_root / "central-core-hub" / "telemetry.py")
     )
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     tele = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(tele)
+    tloader = spec.loader
+    assert tloader is not None
+    tloader.exec_module(tele)
     # ensure no external override exists before call
     if hasattr(tele, "_external_get_cpu_percent"):
         delattr(tele, "_external_get_cpu_percent")
@@ -163,7 +171,9 @@ def test_init_prefers_local_mqtt_runtime_import(monkeypatch):
     src = repo_root / "central-core-hub" / "mqtt_runtime.py"
     spec = importlib.util.spec_from_file_location("mqtt_runtime", str(src))
     rt = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(rt)
+    rloader = spec.loader
+    assert rloader is not None
+    rloader.exec_module(rt)
     sys.modules["mqtt_runtime"] = rt
 
     # Now instantiate CentralCoreClient; it should import mqtt_runtime directly

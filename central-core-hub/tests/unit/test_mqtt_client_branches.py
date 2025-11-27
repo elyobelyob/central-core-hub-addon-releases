@@ -7,8 +7,12 @@ def _load_module():
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "mqtt_client.py"
     spec = importlib.util.spec_from_file_location("mqtt_client", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(module)
     return module
 
 
@@ -28,7 +32,7 @@ class DummyPub:
 def test_build_telemetry_wrapper_respects_monkeypatched_get_cpu():
     mod = _load_module()
     # monkeypatch mqtt_client.get_cpu_percent
-    mod.get_cpu_percent = lambda: 9.9
+    setattr(mod, "get_cpu_percent", lambda: 9.9)
     payload = mod.build_telemetry("cid-test")
     j = json.loads(payload)
     assert j.get("cpu_percent") == 9.9
@@ -56,8 +60,8 @@ def test_publish_telemetry_with_vault_transform():
     dummy = DummyPub()
     c._client = dummy
     # stub telemetry builders
-    mod.build_telemetry = lambda cid, **kwargs: "raw-payload"
-    mod.build_vault_payload = lambda raw: "vault-payload"
+    setattr(mod, "build_telemetry", lambda cid, **kwargs: "raw-payload")
+    setattr(mod, "build_vault_payload", lambda raw: "vault-payload")
     c.publish_telemetry()
     topics = [p["topic"] for p in dummy.published]
     assert c.telemetry_topic in topics
@@ -74,8 +78,8 @@ def test_publish_telemetry_with_vault_fallback():
     c = CentralCoreClient(options)
     dummy = DummyPub()
     c._client = dummy
-    mod.build_telemetry = lambda cid, **kwargs: "raw-payload-2"
-    mod.build_vault_payload = lambda raw: None
+    setattr(mod, "build_telemetry", lambda cid, **kwargs: "raw-payload-2")
+    setattr(mod, "build_vault_payload", lambda raw: None)
     c.publish_telemetry()
     vault_msgs = [p for p in dummy.published if p["topic"] == c.vault_topic]
     assert vault_msgs and vault_msgs[0]["payload"] == "raw-payload-2"

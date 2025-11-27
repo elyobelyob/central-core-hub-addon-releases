@@ -29,8 +29,17 @@ def setup_mqtt_client(ctx, mqtt_mod):
     if mqtt_mod is None:
 
         class _ClientShim:
+            # declare callback attributes so assignment is allowed by type
+            # checkers and editors (e.g., on_connect/on_disconnect/on_message)
+            on_connect = None
+            on_disconnect = None
+            on_message = None
+
             def __init__(self, *a, **k):
-                pass
+                # initialize instance-level attributes
+                self.on_connect = None
+                self.on_disconnect = None
+                self.on_message = None
 
             def username_pw_set(self, u, p=None):
                 return None
@@ -43,9 +52,6 @@ def setup_mqtt_client(ctx, mqtt_mod):
                     rc = 0
 
                 return R()
-
-            def will_set(self, topic, payload=None, qos=0, retain=False):
-                return None
 
             def subscribe(self, topic, qos=0):
                 return (0, 1)
@@ -100,15 +106,11 @@ def setup_mqtt_client(ctx, mqtt_mod):
         try:
             # Some clients (shim) may not implement tls_set; ignore failures
             ctx._client.tls_set(**tls_kwargs)
-        except (
-            Exception
-        ):  # pragma: no cover - TLS setup failures are environment specific
+        except Exception:  # pragma: no cover - TLS setup failures are environment specific
             try:
                 _log("Failed to configure TLS for MQTT", sys.stderr)
-            except (
-                Exception
-            ):  # pragma: no cover - logging to stderr may not be available in tests
-                traceback.print_exc()
+            except Exception:  # pragma: no cover - logging to stderr may not be available in tests
+                pass
 
     # Attach callbacks if present on the context
     try:

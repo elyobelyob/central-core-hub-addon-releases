@@ -169,6 +169,9 @@ class HAWebSocketListener:
             if not ws_url:
                 return
             self._log(f"HA WS connecting to {ws_url}")
+            if websocket is None or getattr(websocket, "create_connection", None) is None:
+                self._log("websocket client not available")
+                return
             self._ws = websocket.create_connection(ws_url, timeout=15)
             # Expect auth_required, then send auth
             hello_raw = self._ws.recv()

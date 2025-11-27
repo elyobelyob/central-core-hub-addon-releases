@@ -14,7 +14,9 @@ import importlib.util
 def _load_mod_from_path(path):
     spec = importlib.util.spec_from_file_location(path.stem, str(path))
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(mod)
     return mod
 
 

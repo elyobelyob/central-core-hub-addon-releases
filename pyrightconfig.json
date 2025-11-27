@@ -1,0 +1,12 @@
+{
+  "include": ["central-core-hub"],
+  "exclude": [
+    "central-core-hub/tests",
+    "central-core-hub/tests/**",
+    ".venv",
+    "**/.venv",
+    "**/site-packages",
+    "venv",
+    "build"
+  ]
+}
