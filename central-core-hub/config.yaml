@@ -1,6 +1,6 @@
 name: "Central Core Hub"
 description: "Central Core Hub Add-on"
-version: "1.0.94"
+version: "1.0.95"
 slug: "central-core-hub"
 init: false
 arch:
