@@ -1,7 +1,11 @@
-central-core-mqtt-shared @ git+https://github.com/elyobelyob/central-core-mqtt-shared.git
 paho-mqtt>=1.6.1
 requests>=2.25.1
 pydantic>=2.0.0
 pytest>=7.0.0
 pytest-cov>=4.0.0
 websocket-client>=1.8.0
+
+# Prefer the released PyPI package if available. Keep the VCS fallback
+# for environments where the package hasn't been published yet.
+central-core-mqtt-shared
+# central-core-mqtt-shared @ git+https://github.com/elyobelyob/central-core-mqtt-shared.git

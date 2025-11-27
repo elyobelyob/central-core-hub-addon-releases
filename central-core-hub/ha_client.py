@@ -10,7 +10,7 @@ import json
 import threading
 import time
 import traceback
-from datetime import datetime, timezone
+# datetime/timezone not used in this module
 
 try:
     import requests
@@ -118,9 +118,9 @@ class HAWebSocketListener:
         if not base:
             return None
         if base.startswith("https://"):
-            base = "wss://" + base[len("https://") :]
+            base = "wss://" + base[len("https://"):]
         elif base.startswith("http://"):
-            base = "ws://" + base[len("http://") :]
+            base = "ws://" + base[len("http://"):]
         return f"{base}/api/websocket"
 
     def start(self):

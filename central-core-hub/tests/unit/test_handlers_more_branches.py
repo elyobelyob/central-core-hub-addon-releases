@@ -111,8 +111,8 @@ def test_on_message_binary_payload_and_set_no_ha_config(monkeypatch):
     )
     c.on_message(None, None, msg2)
 
-    # find completion response
-    resp_topic = f"hubs/{c.client_id}/cmd/{cmd['command_id']}/response"
+    # find completion response using client's build_ack_topic
+    resp_topic = c.build_ack_topic(cmd["action"], cmd["command_id"])
     comps = [p for p in dummy.published if p["topic"] == resp_topic]
     assert comps, "completion response not published"
     comp_payload = json.loads(comps[-1]["payload"])
