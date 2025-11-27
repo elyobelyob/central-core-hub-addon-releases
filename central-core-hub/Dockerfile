@@ -7,7 +7,11 @@ ENV LANG=C.UTF-8
 
 # Install runtime deps: shell tools, python3 and paho-mqtt from apk
 # Using the distro package avoids pip and PEP 668/system package conflicts
-RUN apk add --no-cache bash curl ca-certificates mosquitto-clients jq python3 py3-paho-mqtt py3-requests
+RUN apk add --no-cache bash curl ca-certificates mosquitto-clients jq python3 py3-paho-mqtt py3-requests py3-pip git
+
+# Install Python dependencies (including central-core-mqtt-shared)
+COPY requirements.txt /requirements.txt
+RUN pip3 install --no-cache-dir -r /requirements.txt
 
 COPY run.sh /run.sh
 COPY *.py /
