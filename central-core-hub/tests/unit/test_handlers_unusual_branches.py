@@ -19,13 +19,14 @@ def _load_handlers():
 class RecordingClient:
     def __init__(self):
         self.client_id = "unit-hub"
-        self.ha_api_url = "http://ha"
-        self.ha_api_token = "tok"
+        self.ha_api_url: str | None = "http://ha"
+        self.ha_api_token: str | None = "tok"
         self.preferred_sensors_topic = f"hubs/{self.client_id}/telemetry/sensors"
         self.vault_topic = "vault/unit"
         self.ha_readback_after_set = True
-        self.selected_sensors = None
+        self.selected_sensors: list[str] | None = None
         self.published = []
+        self.raise_on: list[str] | None = None
 
     def _publish(self, topic, payload, qos=0):
         # allow tests to simulate failure by setting attributes

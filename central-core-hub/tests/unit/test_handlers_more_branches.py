@@ -25,7 +25,7 @@ class DummyClient:
 
 
 class DummyMsg:
-    def __init__(self, topic, payload_bytes=b""):
+    def __init__(self, topic, payload_bytes: object = b""):
         self.topic = topic
         self.payload = payload_bytes
 

@@ -62,6 +62,7 @@ def test_build_telemetry_get_cpu_callable_raises_uses_fallback():
     setattr(mod, "get_cpu_percent", lambda: 5)
     sys.modules.setdefault("mqtt_client", mod)
     try:
+
         def raiseer():
             raise ValueError("boom")
 

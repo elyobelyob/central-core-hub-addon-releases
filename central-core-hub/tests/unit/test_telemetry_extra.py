@@ -7,6 +7,8 @@ def _load_telemetry():
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "telemetry.py"
     spec = importlib.util.spec_from_file_location("telemetry", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
     loader = spec.loader
     assert loader is not None

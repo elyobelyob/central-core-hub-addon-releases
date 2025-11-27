@@ -2,6 +2,7 @@ import importlib.util
 from pathlib import Path
 import types
 import json
+from typing import Any, cast
 
 
 def _load_module(path_name):
@@ -23,11 +24,11 @@ def test__get_cpu_percent_prefers_external_override(monkeypatch):
     tele = _load_module("telemetry.py")
 
     # set external override
-    setattr(tele, "_external_get_cpu_percent", lambda: 12.3)
+    cast(Any, tele)._external_get_cpu_percent = lambda: 12.3
     try:
         assert tele._get_cpu_percent() == 12.3
     finally:
-        del tele._external_get_cpu_percent
+        delattr(cast(Any, tele), "_external_get_cpu_percent")
 
 
 def test__get_cpu_percent_uses_helpers_if_present(monkeypatch):
@@ -35,7 +36,7 @@ def test__get_cpu_percent_uses_helpers_if_present(monkeypatch):
 
     # create fake helpers module
     fake_helpers = types.ModuleType("helpers")
-    setattr(fake_helpers, "get_cpu_percent", lambda: 7.7)
+    cast(Any, fake_helpers).get_cpu_percent = lambda: 7.7
     import sys
 
     sys.modules["helpers"] = fake_helpers

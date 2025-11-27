@@ -1,6 +1,5 @@
 import importlib.util
 from types import SimpleNamespace
-import sys
 from pathlib import Path
 
 

@@ -1,6 +1,7 @@
 import importlib.util
 from pathlib import Path
 import types
+from typing import Any, cast
 
 
 def _load_module(name):
@@ -23,7 +24,7 @@ def test_fetch_sensors_handles_requests_get_exception(monkeypatch):
         def get(self, *a, **k):
             raise RuntimeError("net")
 
-    mc.requests = BadResp()
+    cast(Any, mc).requests = BadResp()
     assert mc.fetch_sensors("http://ha", "tok") is None
 
 
@@ -51,7 +52,7 @@ def test_fetch_sensors_parses_entities(monkeypatch):
         def get(self, url, headers=None, timeout=None):
             return Resp()
 
-    mc.requests = RClient()
+    cast(Any, mc).requests = RClient()
     sensors = mc.fetch_sensors("http://ha", "tok")
     assert isinstance(sensors, list)
     # only sensor.* should be included

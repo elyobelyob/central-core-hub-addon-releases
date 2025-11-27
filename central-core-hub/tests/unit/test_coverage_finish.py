@@ -3,6 +3,7 @@ import time
 import types
 import importlib.util
 from pathlib import Path
+from typing import Any, cast
 
 
 def _load_module():
@@ -126,7 +127,7 @@ def test_exercise_mqtt_client_branches(monkeypatch):
     def fake_handle_message(*a, **k):
         raise RuntimeError("handler boom")
 
-    fake_handlers.handle_message = fake_handle_message
+    cast(Any, fake_handlers).handle_message = fake_handle_message
     sys.modules["handlers"] = fake_handlers
 
     # Should not raise despite handler raising (on_message guards exceptions)

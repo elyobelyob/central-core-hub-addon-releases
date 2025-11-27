@@ -1,3 +1,4 @@
+import importlib
 import importlib.util
 import sys
 from pathlib import Path
@@ -7,6 +8,8 @@ def _load_client_module():
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "mqtt_client.py"
     spec = importlib.util.spec_from_file_location("mqtt_client", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
     loader = spec.loader
     assert loader is not None
@@ -72,8 +75,6 @@ def test_on_message_handles_missing_handlers_import(monkeypatch):
             self.payload = b"{}"
 
     # Force importlib.util.spec_from_file_location to raise so fallback fails
-    import importlib
-
     monkeypatch.setattr(
         importlib.util,
         "spec_from_file_location",
