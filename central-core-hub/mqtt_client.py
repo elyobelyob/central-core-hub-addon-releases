@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
-Resilient MQTT client for the Central Core Hub add-on using the versioned
-Hub ↔ Vault topic namespace.
+Simple resilient MQTT client using paho-mqtt for the Central Core Hub add-on.
 
 Responsibilities:
 - Read options from `/data/options.json` (Home Assistant add-on options)
 - Maintain a single persistent MQTT connection
-- Publish system telemetry/status heartbeats on the versioned Hub → Vault topics
-- Handle versioned command topics (including broadcast) with ACKs
+- Publish telemetry every 30s to `telemetry/{client_id}`
+- Subscribe to `hubs/{client_id}/commands` and print received commands
 - Reconnect automatically and log connection lifecycle to stdout
 """
 import importlib.util
@@ -21,144 +20,6 @@ import tempfile
 import time
 import traceback
 from datetime import datetime, timezone
-# HA integration helpers (websocket + REST fetch). Load sibling file when direct
-# import isn't on sys.path (e.g. tests using spec_from_file_location).
-try:
-    import ha_client
-except Exception:
-    try:
-        _ha_base = pathlib.Path(__file__).resolve().parent
-        _ha_spec = importlib.util.spec_from_file_location(
-            "ha_client", str(_ha_base / "ha_client.py")
-        )
-        ha_client = importlib.util.module_from_spec(_ha_spec)
-        sys.modules["ha_client"] = ha_client
-        _ha_spec.loader.exec_module(ha_client)
-    except Exception:
-        raise
-try:
-    import telemetry_helpers
-except Exception:
-    try:
-        _tele_base = pathlib.Path(__file__).resolve().parent
-        _tele_spec = importlib.util.spec_from_file_location(
-            "telemetry_helpers", str(_tele_base / "telemetry_helpers.py")
-        )
-        telemetry_helpers = importlib.util.module_from_spec(_tele_spec)
-        sys.modules["telemetry_helpers"] = telemetry_helpers
-        _tele_spec.loader.exec_module(telemetry_helpers)
-    except Exception:
-        raise
-
-from ha_client import HAWebSocketListener, fetch_sensors, fetch_sensors_by_ids
-from telemetry_helpers import (
-    attach_ha_timestamps,
-    build_sensor_event_payload,
-    build_sensor_maps,
-    normalize_sensor_value,
-)
-
-# Shared MQTT protocol (topics/schemas)
-try:
-    from central_core_mqtt_shared import schemas as shared_schemas
-    from central_core_mqtt_shared import topics as shared_topics
-    from central_core_mqtt_shared.topics import build_topic
-except Exception:
-    # Allow development without an installed package by falling back to a sibling checkout
-    try:
-        _bases = [
-            pathlib.Path(__file__).resolve().parent.parent / "central-core-mqtt-shared",
-            pathlib.Path(__file__).resolve().parent.parent.parent
-            / "central-core-mqtt-shared",
-        ]
-        _base = next((b for b in _bases if b.exists()), None)
-        if _base:
-            sys.path.insert(0, str(_base))
-            from central_core_mqtt_shared import schemas as shared_schemas
-            from central_core_mqtt_shared import topics as shared_topics
-            from central_core_mqtt_shared.topics import build_topic
-        else:  # pragma: no cover - defensive fallback
-            raise ImportError("shared package not found locally")
-
-    except (
-        Exception
-    ):  # pragma: no cover - defensive fallback if even sibling import fails
-
-        class _FallbackTopics:
-            TELEMETRY_SYSTEM = "hubs/{hub_id}/v{version}/telemetry/system"
-            TELEMETRY_SENSORS = "hubs/{hub_id}/v{version}/telemetry/sensors"
-            TELEMETRY_EVENTS = "hubs/{hub_id}/v{version}/telemetry/events"
-            TELEMETRY_GENERAL = "hubs/{hub_id}/v{version}/telemetry/general"
-            STATUS_ONLINE = "hubs/{hub_id}/v{version}/status/online"
-            STATUS_OFFLINE = "hubs/{hub_id}/v{version}/status/offline"
-            CMD_SENSORS_POLL = "hubs/{hub_id}/v{version}/cmd/sensors/poll"
-            CMD_SENSORS_SET = "hubs/{hub_id}/v{version}/cmd/sensors/set"
-            CMD_CONFIG_UPDATE = "hubs/{hub_id}/v{version}/cmd/config/update"
-            CMD_FIRMWARE_UPDATE = "hubs/{hub_id}/v{version}/cmd/firmware/update"
-            CMD_TUNNEL_START = "hubs/{hub_id}/v{version}/cmd/tunnel/start"
-            CMD_TUNNEL_STOP = "hubs/{hub_id}/v{version}/cmd/tunnel/stop"
-            CMD_GENERIC = "hubs/{hub_id}/v{version}/cmd/{domain}/{action}"
-            BROADCAST_CMD = "hubs/broadcast/v{version}/cmd/{command}"
-            ACK_GENERIC = "hubs/{hub_id}/v{version}/ack/{command_name}/{command_id}"
-            ADDON_HA_TELEMETRY = "hubs/{hub_id}/v{version}/addon/ha/telemetry"
-            ADDON_HA_STATUS = "hubs/{hub_id}/v{version}/addon/ha/status"
-            ADDON_HA_CMD = "hubs/{hub_id}/v{version}/addon/ha/cmd/{command}"
-
-        class _FallbackSchemas:
-            class AckStatus:
-                SUCCESS = "success"
-                ERROR = "error"
-
-            class CommandName:
-                SENSORS_POLL = "sensors.poll"
-                SENSORS_SET = "sensors.set"
-                CONFIG_UPDATE = "config.update"
-                FIRMWARE_UPDATE = "firmware.update"
-                TUNNEL_START = "tunnel.start"
-                TUNNEL_STOP = "tunnel.stop"
-
-            class CommandAck:
-                def __init__(self, command_id, status, message=None, timestamp=None):
-                    self.command_id = command_id
-                    self.status = status
-                    self.message = message
-                    self.timestamp = timestamp
-
-                def model_dump_json(self):
-                    return json.dumps(
-                        {
-                            "command_id": self.command_id,
-                            "status": self.status,
-                            "message": self.message,
-                            "timestamp": self.timestamp,
-                        }
-                    )
-
-            class StatusOnline:
-                def __init__(self, timestamp=None):
-                    self.status = "online"
-                    self.timestamp = timestamp
-
-                def model_dump_json(self):
-                    return json.dumps(
-                        {"status": self.status, "timestamp": self.timestamp}
-                    )
-
-            class StatusOffline:
-                def __init__(self, timestamp=None):
-                    self.status = "offline"
-                    self.timestamp = timestamp
-
-                def model_dump_json(self):
-                    return json.dumps(
-                        {"status": self.status, "timestamp": self.timestamp}
-                    )
-
-        shared_schemas = _FallbackSchemas()
-        shared_topics = _FallbackTopics()
-
-        def build_topic(template: str, **kwargs) -> str:
-            return template.format(**kwargs)
 
 
 def _log(msg, file=sys.stdout):
@@ -198,7 +59,7 @@ def get_addon_version():
             if version:
                 return version
     except Exception:
-        _log("Failed to read /config.json for add-on version", sys.stderr)
+        pass
 
     # Fallback to development location
     try:
@@ -234,9 +95,9 @@ try:
     get_cpu_percent = _helpers_mod.get_cpu_percent
 
     # wrap telemetry.build_telemetry to inject this module's get_cpu_percent at call time
-    def build_telemetry(
+    def _bt_from_mod(
         client_id,
-        get_cpu_percent=None,
+        cpu_percent_fn=None,
         uptime_fn=None,
         loadavg_fn=None,
         mem_info_fn=None,
@@ -246,7 +107,7 @@ try:
     ):
         return _tele_mod.build_telemetry(
             client_id,
-            get_cpu_percent=get_cpu_percent or get_cpu_percent,
+            get_cpu_percent=cpu_percent_fn or get_cpu_percent,
             uptime_fn=uptime_fn,
             loadavg_fn=loadavg_fn,
             mem_info_fn=mem_info_fn,
@@ -254,8 +115,9 @@ try:
             version=version or get_addon_version(),
             telemetry_interval=telemetry_interval or 30,
         )
-
     build_vault_payload = _tele_mod.build_vault_payload
+    # expose a single name for analyzers: assign the implementation
+    build_telemetry = _bt_from_mod
 except Exception:
     # Fallback: load modules relative to this file using importlib
     _base = pathlib.Path(__file__).parent
@@ -319,9 +181,9 @@ except Exception:
         spec_t.loader.exec_module(_tele)
 
         # build_telemetry wrapper injects this module's get_cpu_percent
-        def build_telemetry(
+        def _bt_from_file(
             client_id,
-            get_cpu_percent=None,
+            cpu_percent_fn=None,
             uptime_fn=None,
             loadavg_fn=None,
             mem_info_fn=None,
@@ -331,7 +193,7 @@ except Exception:
         ):
             return _tele.build_telemetry(
                 client_id,
-                get_cpu_percent=get_cpu_percent or get_cpu_percent,
+                get_cpu_percent=cpu_percent_fn or get_cpu_percent,
                 uptime_fn=uptime_fn,
                 loadavg_fn=loadavg_fn,
                 mem_info_fn=mem_info_fn,
@@ -341,13 +203,19 @@ except Exception:
             )
 
         build_vault_payload = _tele.build_vault_payload
+        # expose a single name for analyzers: assign the implementation
+        build_telemetry = _bt_from_file
     except Exception:
 
-        def build_telemetry(client_id):
+        def _bt_simple(client_id):
             return json.dumps({"client_id": client_id})
 
-        def build_vault_payload(raw):
+        def _bv_simple(raw):
             return None
+
+        # expose a single name for analyzers: assign the simple implementations
+        build_telemetry = _bt_simple
+        build_vault_payload = _bv_simple
 
 
 # Wrap whichever `build_telemetry` we have so tests that monkeypatch
@@ -368,11 +236,11 @@ try:
             try:
                 tele_mod._external_get_cpu_percent = get_cpu_percent
             except Exception:
-                traceback.print_exc()
+                pass
         try:
             return _orig_bt(
                 client_id,
-                get_cpu_percent=get_cpu_percent,
+                cpu_percent_fn=get_cpu_percent,
                 version=version,
                 telemetry_interval=telemetry_interval,
                 **kwargs,
@@ -385,11 +253,11 @@ try:
                     else:
                         tele_mod._external_get_cpu_percent = old
                 except Exception:
-                    traceback.print_exc()
+                    pass
 
     build_telemetry = _wrapped_build_telemetry
 except Exception:
-    traceback.print_exc()
+    pass
 
 
 def _read_proc_stat():  # noqa: F811
@@ -426,20 +294,37 @@ def get_cpu_percent():  # noqa: F811
 
 
 def fetch_sensors(ha_api_url, ha_api_token):
-    """Delegate to ha_client but allow tests to override requests module."""
-    return ha_client.fetch_sensors(
-        ha_api_url, ha_api_token, requests_mod=requests
-    )
+    if not ha_api_url or not ha_api_token or requests is None:
+        return None
+    try:
+        url = ha_api_url.rstrip("/") + "/api/states"
+        headers = {
+            "Authorization": f"Bearer {ha_api_token}",
+            "Content-Type": "application/json",
+        }
+        r = requests.get(url, headers=headers, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        sensors = []
+        for ent in data:
+            ent_id = ent.get("entity_id")
+            if ent_id and ent_id.startswith("sensor."):
+                sensors.append(
+                    {
+                        "entity_id": ent_id,
+                        "state": ent.get("state"),
+                        "name": ent.get("attributes", {}).get("friendly_name")
+                        or ent_id,
+                        "attributes": ent.get("attributes", {}) or {},
+                        "last_changed": ent.get("last_changed"),
+                        "last_updated": ent.get("last_updated"),
+                    }
+                )
+        return sensors
+    except Exception:
+        return None
 
 
-def fetch_sensors_by_ids(ha_api_url, ha_api_token, entity_ids, requests_mod=None):
-    """Delegate to ha_client when extra TTL data is needed."""
-    return ha_client.fetch_sensors_by_ids(
-        ha_api_url,
-        ha_api_token,
-        entity_ids,
-        requests_mod=requests_mod or requests,
-    )
 class CentralCoreClient:
     def __init__(self, options):
         self.options = options
@@ -470,75 +355,14 @@ class CentralCoreClient:
         # payloads will be published to both topics.
         self.vault_topic = options.get("vault_topic") or ""
         self.telemetry_interval = int(options.get("telemetry_interval", 30))
-        # MQTT protocol version for versioned topics (default v1)
-        self.protocol_version = int(options.get("protocol_version", 1))
-
-        def _topic(attr, **kwargs):
-            try:
-                template = getattr(shared_topics, attr)
-            except Exception:
-                return None
-            try:
-                return build_topic(template, **kwargs)
-            except Exception:
-                return None
-
-        # Versioned telemetry topics (Hub -> Vault)
-        self.telemetry_topic = _topic(
-            "TELEMETRY_SYSTEM", hub_id=self.client_id, version=self.protocol_version
-        )
-        self.telemetry_system_topic = self.telemetry_topic
-        self.telemetry_general_topic = _topic(
-            "TELEMETRY_GENERAL", hub_id=self.client_id, version=self.protocol_version
-        )
-        self.telemetry_events_topic = _topic(
-            "TELEMETRY_EVENTS", hub_id=self.client_id, version=self.protocol_version
-        )
-        # Preferred sensors telemetry topic for Vault (versioned)
-        self.preferred_sensors_topic = _topic(
-            "TELEMETRY_SENSORS", hub_id=self.client_id, version=self.protocol_version
-        )
-        # Status / presence
-        self.status_online_topic = _topic(
-            "STATUS_ONLINE", hub_id=self.client_id, version=self.protocol_version
-        )
-        self.status_offline_topic = _topic(
-            "STATUS_OFFLINE", hub_id=self.client_id, version=self.protocol_version
-        )
-        # Add-on (Home Assistant) namespace
-        self.addon_telemetry_topic = _topic(
-            "ADDON_HA_TELEMETRY", hub_id=self.client_id, version=self.protocol_version
-        )
-        self.addon_status_topic = _topic(
-            "ADDON_HA_STATUS", hub_id=self.client_id, version=self.protocol_version
-        )
-        self.addon_cmd_sub_topic = _topic(
-            "ADDON_HA_CMD",
-            hub_id=self.client_id,
-            version=self.protocol_version,
-            command="+",
-        )
-        # Subscribe patterns for commands (versioned only)
-        self.cmd_sub_topic = _topic(
-            "CMD_GENERIC",
-            hub_id=self.client_id,
-            version=self.protocol_version,
-            domain="+",
-            action="+",
-        )
-        self.broadcast_cmd_topic = _topic(
-            "BROADCAST_CMD", version=self.protocol_version, command="+"
-        )
-        # Consolidated list of command subscriptions (hub-specific + broadcast + add-on)
-        self.command_subscription_topics = [
-            t
-            for t in (
-                self.cmd_sub_topic,
-                self.broadcast_cmd_topic,
-                self.addon_cmd_sub_topic,
-            )
-            if t
-        ]
+        self.telemetry_topic = f"telemetry/{self.client_id}"
+        self.commands_topic = f"hubs/{self.client_id}/commands"
+        # Preferred sensors telemetry topic for Vault
+        self.preferred_sensors_topic = f"hubs/{self.client_id}/telemetry/sensors"
+        # Legacy sensors topic (kept for backward compatibility)
+        self.sensors_topic = f"telemetry/{self.client_id}/sensors"
+        # Subscribe pattern for Vault commands (e.g. hubs/<hub_id>/cmd/sensors/poll)
+        self.cmd_sub_topic = f"hubs/{self.client_id}/cmd/+"
         # Delegate client creation and TLS setup to mqtt_runtime so it can
         # be unit-tested separately and to keep this class focused on
         # higher-level behavior.
@@ -578,9 +402,6 @@ class CentralCoreClient:
 
                         return R()
 
-                    def will_set(self, topic, payload=None, qos=0, retain=False):
-                        return None
-
                     def subscribe(self, topic, qos=0):
                         return (0, 1)
 
@@ -598,14 +419,7 @@ class CentralCoreClient:
 
                 self._client = _ClientShim()
 
-        # Configure MQTT LWT for offline status if supported
-        self._configure_will()
-
         self._connected = False
-        # optional HA websocket listener for state_changed events
-        self._ha_ws_listener = None
-        # track last status heartbeat publish
-        self._last_status_sent = 0
         # track last sensors publish time (epoch seconds)
         self._last_sensors_sent = 0
         # the list of sensor entity_ids that Vault has indicated are selected
@@ -709,20 +523,6 @@ class CentralCoreClient:
         if not self.mqtt_key and keys:
             self.mqtt_key = keys[0]
 
-    def _configure_will(self):
-        """Configure MQTT LWT to publish offline status when disconnected."""
-        try:
-            client = getattr(self, "_client", None)
-            if client is None or not hasattr(client, "will_set"):
-                return
-            if not self.status_offline_topic:
-                return
-            payload = self._build_status_payload(online=False)
-            client.will_set(self.status_offline_topic, payload, qos=1, retain=False)
-        except Exception:
-            # Do not raise if LWT configuration fails
-            traceback.print_exc()
-
     def _publish(self, topic, payload, qos=0):
         """Publish and log the MQTT publish action and result."""
         try:
@@ -742,63 +542,15 @@ class CentralCoreClient:
             traceback.print_exc()
             return None
 
-    def _build_status_payload(self, online=True):
-        """Build a status payload using shared schemas when available."""
-        status_str = "online" if online else "offline"
-        now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        try:
-            schema_cls = getattr(
-                shared_schemas, "StatusOnline" if online else "StatusOffline", None
-            )
-            if schema_cls:
-                try:
-                    obj = schema_cls(timestamp=time.time())
-                    if hasattr(obj, "model_dump_json"):
-                        return obj.model_dump_json()
-                    if hasattr(obj, "json"):
-                        return obj.json()
-                except Exception:
-                    traceback.print_exc()
-        except Exception:
-            traceback.print_exc()
-        return json.dumps(
-            {
-                "schema_version": 1,
-                "client_id": self.client_id,
-                "status": status_str,
-                "timestamp": now_iso,
-            }
-        )
-
-    def publish_status_online(self):
-        """Publish an online heartbeat to the hub and add-on status topics."""
-        payload = self._build_status_payload(online=True)
-        try:
-            if self.status_online_topic:
-                self._publish(self.status_online_topic, payload, qos=1)
-                _log(f"Published status to {self.status_online_topic}")
-            if self.addon_status_topic:
-                self._publish(self.addon_status_topic, payload, qos=1)
-                _log(f"Published add-on status to {self.addon_status_topic}")
-            self._last_status_sent = int(time.time())
-        except Exception:
-            _log("Failed to publish status heartbeat", sys.stderr)
-
     def on_connect(self, client, userdata, flags, rc):
         _log(f"Connected to MQTT broker with rc={rc}")
         try:
-            # Subscribe to versioned command patterns (hub + broadcast/add-on) with QoS=1
-            for topic in self.command_subscription_topics or []:
-                client.subscribe(topic, qos=1)
-                _log(f"Subscribed to {topic} (command pattern)")
+            # Subscribe to Vault command pattern with QoS=1
+            client.subscribe(self.cmd_sub_topic, qos=1)
+            _log(f"Subscribed to {self.cmd_sub_topic} (Vault command pattern)")
         except Exception:
             _log("Subscription failed", sys.stderr)
         self._connected = True
-        # Publish status heartbeat immediately on connect
-        try:
-            self.publish_status_online()
-        except Exception:
-            _log("Failed to publish status on connect", sys.stderr)
         # Publish sensors list immediately on startup/connection
         try:
             self.publish_sensors()
@@ -867,18 +619,15 @@ class CentralCoreClient:
                     _hm = None
 
             if _hm is not None:
-                kwargs = {
-                    "fetch_sensors": fetch_sensors,
-                    "fetch_sensors_by_ids": fetch_sensors_by_ids,
-                    "build_telemetry": build_telemetry,
-                    "build_vault_payload": build_vault_payload,
-                    "requests": requests,
-                }
-                try:
-                    _hm(self, msg, payload, **kwargs)
-                except TypeError:
-                    kwargs.pop("fetch_sensors_by_ids", None)
-                    _hm(self, msg, payload, **kwargs)
+                _hm(
+                    self,
+                    msg,
+                    payload,
+                    fetch_sensors,
+                    build_telemetry,
+                    build_vault_payload,
+                    requests,
+                )
                 return
         except Exception:
             traceback.print_exc()
@@ -896,16 +645,16 @@ class CentralCoreClient:
                 try:
                     _log("Connection timed out, retrying in 5s")
                 except Exception:
-                    traceback.print_exc()
+                    pass
                 try:
                     self._client.loop_stop()
                 except Exception:
-                    traceback.print_exc()
+                    pass
             else:
                 try:
                     _log("MQTT connect failed, retrying in 5s")
                 except Exception:
-                    traceback.print_exc()
+                    pass
             time.sleep(5)
 
     def connect_once(self):
@@ -941,18 +690,10 @@ class CentralCoreClient:
             telemetry_interval=self.telemetry_interval,
         )
         try:
-            if self.telemetry_topic:
-                self._publish(self.telemetry_topic, payload)
-                _log(f"Published telemetry to {self.telemetry_topic}")
+            self._publish(self.telemetry_topic, payload)
+            _log(f"Published telemetry to {self.telemetry_topic}")
         except Exception:
             _log("Failed to publish telemetry")
-        # Also publish to add-on telemetry namespace if present
-        try:
-            if self.addon_telemetry_topic:
-                self._publish(self.addon_telemetry_topic, payload)
-                _log(f"Published add-on telemetry to {self.addon_telemetry_topic}")
-        except Exception:
-            _log("Failed to publish add-on telemetry", sys.stderr)
         # Also publish to an optional vault-specific topic if configured.
         if self.vault_topic:
             try:
@@ -1025,21 +766,26 @@ class CentralCoreClient:
         """Publish telemetry for selected sensors when their state changes."""
         if not self.selected_sensors:
             return
-        if not self.ha_api_url or not self.ha_api_token:
+        if not self.ha_api_url or not self.ha_api_token or requests is None:
             return
-        self._ensure_ha_ws_listener()
         sensors = fetch_sensors(self.ha_api_url, self.ha_api_token) or []
-        # If nothing returned from full-state API, try more detailed per-entity fetch.
-        if not sensors and self.selected_sensors:
-            sensors = (
-                fetch_sensors_by_ids(
-                    self.ha_api_url, self.ha_api_token, self.selected_sensors
-                )
-                or []
-            )
         selected_set = set(self.selected_sensors)
         filtered = [s for s in sensors if s.get("entity_id") in selected_set]
-        data_map, names_map, enabled_map, attrs_map = build_sensor_maps(filtered)
+
+        data_map = {}
+        names_map = {}
+        enabled_map = {}
+        attrs_map = {}
+        for s in filtered:
+            ent = s.get("entity_id")
+            if not ent:
+                continue
+            raw_state = s.get("state")
+            attrs = s.get("attributes", {}) or {}
+            data_map[ent] = self._normalize_sensor_value(raw_state)
+            names_map[ent] = attrs.get("friendly_name") or s.get("name") or ent
+            enabled_map[ent] = not bool(attrs.get("disabled_by"))
+            attrs_map[ent] = attrs
 
         if not data_map:
             return
@@ -1064,43 +810,6 @@ class CentralCoreClient:
         except Exception:
             _log("Failed to publish selected sensor changes", sys.stderr)
 
-    def _handle_ha_state_event(self, entity_id, new_state):
-        """Handle HA websocket state_changed event for selected sensors."""
-        try:
-            if not entity_id or entity_id not in set(self.selected_sensors or []):
-                return
-            attrs = new_state.get("attributes", {}) or {}
-            attach_ha_timestamps(attrs, new_state)
-            telemetry_payload = build_sensor_event_payload(
-                entity_id,
-                attrs,
-                normalize_sensor_value(new_state.get("state")),
-            )
-            self._publish(
-                self.preferred_sensors_topic, telemetry_payload, qos=0
-            )
-        except Exception:
-            traceback.print_exc()
-
-    def _ensure_ha_ws_listener(self):
-        """Start HA websocket listener for state changes when possible."""
-        if not self.ha_api_url or not self.ha_api_token or not self.selected_sensors:
-            return
-        try:
-            if self._ha_ws_listener is None:
-                self._ha_ws_listener = HAWebSocketListener(
-                    self.ha_api_url,
-                    self.ha_api_token,
-                    self._handle_ha_state_event,
-                    _log,
-                    self.selected_sensors,
-                )
-            else:
-                self._ha_ws_listener.update_selectors(self.selected_sensors)
-            self._ha_ws_listener.start()
-        except Exception:
-            traceback.print_exc()
-
     def run(self):
         # connect first
         self.connect()
@@ -1113,12 +822,7 @@ class CentralCoreClient:
                 self._client.loop_stop()
                 self._client.disconnect()
             except Exception:
-                traceback.print_exc()
-            try:
-                if self._ha_ws_listener:
-                    self._ha_ws_listener.stop()
-            except Exception:
-                traceback.print_exc()
+                pass
 
     def run_iteration(self):
         """Single run loop iteration: reconnect if needed, publish telemetry
@@ -1128,7 +832,7 @@ class CentralCoreClient:
             try:
                 _log("Not connected, attempting reconnect")
             except Exception:
-                traceback.print_exc()
+                pass
             self.connect()
         try:
             self.publish_telemetry()
@@ -1140,11 +844,6 @@ class CentralCoreClient:
             _log("Selected sensor change publish exception", sys.stderr)
         # send telemetry every 30s; send sensors every hour
         now = int(time.time())
-        try:
-            if now - self._last_status_sent >= self.telemetry_interval:
-                self.publish_status_online()
-        except Exception:
-            _log("Status publish exception", sys.stderr)
         try:
             if now - self._last_sensors_sent >= 3600:
                 self.publish_sensors()

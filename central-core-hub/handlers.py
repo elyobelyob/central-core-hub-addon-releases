@@ -3,126 +3,9 @@
 Message dispatch handlers extracted from `mqtt_client` to make the
 command lifecycles testable independently.
 """
-import importlib
 import json
 import traceback
 from datetime import datetime, timezone
-import sys
-import pathlib
-import time
-try:
-    import telemetry_helpers
-except Exception:
-    try:
-        _th_base = pathlib.Path(__file__).resolve().parent
-        _th_spec = importlib.util.spec_from_file_location(
-            "telemetry_helpers", str(_th_base / "telemetry_helpers.py")
-        )
-        telemetry_helpers = importlib.util.module_from_spec(_th_spec)
-        sys.modules["telemetry_helpers"] = telemetry_helpers
-        _th_spec.loader.exec_module(telemetry_helpers)
-    except Exception:
-        raise
-
-build_sensor_maps = telemetry_helpers.build_sensor_maps
-
-# Shared MQTT protocol (topics/schemas)
-try:
-    from central_core_mqtt_shared import schemas as shared_schemas
-    from central_core_mqtt_shared import topics as shared_topics
-    from central_core_mqtt_shared.topics import build_topic
-except Exception:
-    try:
-        _bases = [
-            pathlib.Path(__file__).resolve().parent.parent / "central-core-mqtt-shared",
-            pathlib.Path(__file__).resolve().parent.parent.parent
-            / "central-core-mqtt-shared",
-        ]
-        _base = next((b for b in _bases if b.exists()), None)
-        if _base:
-            sys.path.insert(0, str(_base))
-            from central_core_mqtt_shared import schemas as shared_schemas
-            from central_core_mqtt_shared import topics as shared_topics
-            from central_core_mqtt_shared.topics import build_topic
-        else:  # pragma: no cover - fallback to templated format
-            raise ImportError("shared package not found locally")
-
-    except Exception:  # pragma: no cover
-
-        class _FallbackTopics:
-            TELEMETRY_SYSTEM = "hubs/{hub_id}/v{version}/telemetry/system"
-            TELEMETRY_SENSORS = "hubs/{hub_id}/v{version}/telemetry/sensors"
-            TELEMETRY_EVENTS = "hubs/{hub_id}/v{version}/telemetry/events"
-            TELEMETRY_GENERAL = "hubs/{hub_id}/v{version}/telemetry/general"
-            STATUS_ONLINE = "hubs/{hub_id}/v{version}/status/online"
-            STATUS_OFFLINE = "hubs/{hub_id}/v{version}/status/offline"
-            CMD_SENSORS_POLL = "hubs/{hub_id}/v{version}/cmd/sensors/poll"
-            CMD_SENSORS_SET = "hubs/{hub_id}/v{version}/cmd/sensors/set"
-            CMD_CONFIG_UPDATE = "hubs/{hub_id}/v{version}/cmd/config/update"
-            CMD_FIRMWARE_UPDATE = "hubs/{hub_id}/v{version}/cmd/firmware/update"
-            CMD_TUNNEL_START = "hubs/{hub_id}/v{version}/cmd/tunnel/start"
-            CMD_TUNNEL_STOP = "hubs/{hub_id}/v{version}/cmd/tunnel/stop"
-            ACK_GENERIC = "hubs/{hub_id}/v{version}/ack/{command_name}/{command_id}"
-            BROADCAST_CMD = "hubs/broadcast/v{version}/cmd/{command}"
-            ADDON_HA_TELEMETRY = "hubs/{hub_id}/v{version}/addon/ha/telemetry"
-            ADDON_HA_STATUS = "hubs/{hub_id}/v{version}/addon/ha/status"
-            ADDON_HA_CMD = "hubs/{hub_id}/v{version}/addon/ha/cmd/{command}"
-
-        class _FallbackSchemas:
-            class AckStatus:
-                SUCCESS = "success"
-                ERROR = "error"
-
-            class CommandName:
-                SENSORS_POLL = "sensors.poll"
-                SENSORS_SET = "sensors.set"
-                CONFIG_UPDATE = "config.update"
-                FIRMWARE_UPDATE = "firmware.update"
-                TUNNEL_START = "tunnel.start"
-                TUNNEL_STOP = "tunnel.stop"
-
-            class CommandAck:
-                def __init__(self, command_id, status, message=None, timestamp=None):
-                    self.command_id = command_id
-                    self.status = status
-                    self.message = message
-                    self.timestamp = timestamp
-
-                def model_dump_json(self):
-                    return json.dumps(
-                        {
-                            "command_id": self.command_id,
-                            "status": self.status,
-                            "message": self.message,
-                            "timestamp": self.timestamp,
-                        }
-                    )
-
-            class StatusOnline:
-                def __init__(self, timestamp=None):
-                    self.status = "online"
-                    self.timestamp = timestamp
-
-                def model_dump_json(self):
-                    return json.dumps(
-                        {"status": self.status, "timestamp": self.timestamp}
-                    )
-
-            class StatusOffline:
-                def __init__(self, timestamp=None):
-                    self.status = "offline"
-                    self.timestamp = timestamp
-
-                def model_dump_json(self):
-                    return json.dumps(
-                        {"status": self.status, "timestamp": self.timestamp}
-                    )
-
-        shared_schemas = _FallbackSchemas()
-        shared_topics = _FallbackTopics()
-
-        def build_topic(template: str, **kwargs) -> str:
-            return template.format(**kwargs)
 
 
 def handle_message(
@@ -130,10 +13,9 @@ def handle_message(
     msg,
     payload_str,
     fetch_sensors,
-    fetch_sensors_by_ids=None,
-    build_telemetry=None,
-    requests=None,
-    build_vault_payload=None,
+    build_telemetry,
+    build_vault_payload,
+    requests,
 ):
     """Handle an incoming MQTT message for Vault-style commands.
 
@@ -148,124 +30,10 @@ def handle_message(
     """
     try:
         topic = msg.topic
-        protocol_version = getattr(client, "protocol_version", 1)
-
-        def _publish_shared_ack(command_name, command_id, status, message=None):
-            """Publish versioned ACK using shared schema when available."""
-            if not (shared_topics and shared_schemas and command_id):
-                return
-            try:
-                ack_topic = build_topic(
-                    shared_topics.ACK_GENERIC,
-                    hub_id=client.client_id,
-                    version=protocol_version,
-                    command_name=command_name,
-                    command_id=command_id,
-                )
-                # Log explicitly that we are publishing an ack (use client logger if available)
-                log_fn = getattr(client, "_log", None)
-                try:
-                    now_ts = (
-                        datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-                    )
-                    msg_txt = (
-                        f"Publishing ack to {ack_topic} status={status} "
-                        f"command_id={command_id} at {now_ts}"
-                    )
-                    if callable(log_fn):
-                        log_fn(msg_txt)
-                    else:
-                        print(f"[{now_ts}] {msg_txt}", file=sys.stdout)
-                except Exception:
-                    traceback.print_exc()
-                if hasattr(shared_schemas, "CommandAck"):
-                    ack_payload = shared_schemas.CommandAck(
-                        command_id=command_id,
-                        status=status,
-                        message=message,
-                        timestamp=time.time(),
-                    ).model_dump_json()
-                else:
-                    ack_payload = json.dumps(
-                        {
-                            "command_id": command_id,
-                            "status": status,
-                            "message": message,
-                            "timestamp": time.time(),
-                        }
-                    )
-                client._publish(ack_topic, ack_payload, qos=1)
-            except Exception:
-                traceback.print_exc()  # pragma: no cover - do not break handling on ack failure
-
-        def _sensor_topics():
-            """Return versioned sensor telemetry topic."""
-            topics = []
-            for cand in (getattr(client, "preferred_sensors_topic", None),):
-                if cand and cand not in topics:
-                    topics.append(cand)
-            try:
-                versioned = build_topic(
-                    shared_topics.TELEMETRY_SENSORS,
-                    hub_id=client.client_id,
-                    version=protocol_version,
-                )
-                if versioned not in topics:
-                    topics.append(versioned)
-            except Exception:
-                traceback.print_exc()
-            return topics
-
-        def _val(obj, fallback):
-            try:
-                return obj.value
-            except Exception:
-                return obj if obj is not None else fallback
-
-        cmd_name_poll = (
-            _val(shared_schemas.CommandName.SENSORS_POLL, "sensors.poll")
-            if shared_schemas
-            else "sensors.poll"
-        )
-        cmd_name_set = (
-            _val(shared_schemas.CommandName.SENSORS_SET, "sensors.set")
-            if shared_schemas
-            else "sensors.set"
-        )
-        ack_success = (
-            _val(shared_schemas.AckStatus.SUCCESS, "success")
-            if shared_schemas
-            else "success"
-        )
-
-        expected_cmd_topics = []
-        try:
-            expected_cmd_topic_v = (
-                build_topic(
-                    shared_topics.CMD_SENSORS_POLL,
-                    hub_id=client.client_id,
-                    version=protocol_version,
-                )
-                if shared_topics
-                else None
-            )
-            if expected_cmd_topic_v:
-                expected_cmd_topics.append(expected_cmd_topic_v)
-        except Exception:
-            expected_cmd_topics = []
-        try:
-            bcast_template = getattr(shared_topics, "BROADCAST_CMD", None)
-            if bcast_template:
-                expected_cmd_topics.append(
-                    build_topic(
-                        bcast_template,
-                        version=protocol_version,
-                        command="sensors/poll",
-                    )
-                )
-        except Exception:
-            traceback.print_exc()
-        if topic in expected_cmd_topics:
+        # Accept both legacy and versioned command topics (with or without /v1/)
+        expected_cmd_topic = f"hubs/{client.client_id}/cmd/sensors/poll"
+        expected_cmd_topic_v1 = f"hubs/{client.client_id}/v1/cmd/sensors/poll"
+        if topic == expected_cmd_topic or topic == expected_cmd_topic_v1:
             try:
                 cmd = (
                     json.loads(payload_str)
@@ -276,34 +44,34 @@ def handle_message(
                 cmd = {}
 
             command_id = cmd.get("command_id")
+            action = cmd.get("action") or "sensors/poll"
             if command_id:
-                _publish_shared_ack(
-                    cmd_name_poll, command_id, ack_success, "acknowledged"
-                )
+                # ACK topic: publish both legacy command-response and versioned ack
+                legacy_ack = f"hubs/{client.client_id}/cmd/{command_id}/response"
+                v1_ack = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
+                ack_payload = {
+                    "status": "acknowledged",
+                    "timestamp": datetime.now(timezone.utc)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                }
+                try:
+                    # publish both for compatibility
+                    client._publish(legacy_ack, json.dumps(ack_payload), qos=1)
+                    client._publish(v1_ack, json.dumps(ack_payload), qos=1)
+                except Exception:
+                    pass  # pragma: no cover
 
             sensors_requested = None
             try:
-                if isinstance(cmd.get("payload"), dict):
-                    srv = cmd.get("payload").get("sensors")
+                payload_obj = cmd.get("payload") if isinstance(cmd, dict) else None
+                if isinstance(payload_obj, dict):
+                    srv = payload_obj.get("sensors")
                     if isinstance(srv, list):
                         sensors_requested = srv
-            except (
-                Exception
-            ):
+            except Exception:  # pragma: no cover - defensive branch hard to reproduce in tests
                 sensors_requested = None
-            if sensors_requested and fetch_sensors_by_ids:
-                sensors = (
-                    fetch_sensors_by_ids(
-                        client.ha_api_url, client.ha_api_token, sensors_requested
-                    )
-                    or []
-                )
-                if not sensors:
-                    sensors = fetch_sensors(
-                        client.ha_api_url, client.ha_api_token
-                    ) or []
-            else:
-                sensors = fetch_sensors(client.ha_api_url, client.ha_api_token) or []
+            sensors = fetch_sensors(client.ha_api_url, client.ha_api_token) or []
             # If the Vault requested a specific set of sensors, treat that
             # list as authoritative and remember it on the client for future
             # reminder publications.
@@ -313,26 +81,57 @@ def handle_message(
                     client.selected_sensors = list(sensors_requested)
             except Exception:
                 # don't let selection storage failure stop command handling
-                traceback.print_exc()
+                pass
             if sensors_requested:
                 sensors = [
                     s for s in sensors if s.get("entity_id") in sensors_requested
                 ]
 
-            data_map, names_map, enabled_map, attrs_map = build_sensor_maps(sensors)
+            data_map = {}
+            for s in sensors:  # pragma: no cover
+                ent = s.get("entity_id")  # pragma: no cover
+                st = s.get("state")  # pragma: no cover
+                val = st
+                try:
+                    if isinstance(st, str):
+                        low = st.lower()
+                        if low in ("on", "true"):
+                            val = True
+                        elif low in ("off", "false"):
+                            val = False
+                        else:
+                            if "." in st:
+                                val = float(st)
+                            else:
+                                val = int(st)
+                except Exception:
+                    val = st
+                data_map[ent] = val
+            # also include friendly names and enabled status if available
+            names_map = {}
+            enabled_map = {}
+            for s in sensors:
+                ent = s.get("entity_id")
+                if not ent:
+                    continue
+                attrs = s.get("attributes", {}) or {}
+                names_map[ent] = attrs.get("friendly_name") or s.get("name") or ent
+                # consider entity disabled if 'disabled_by' attribute is set
+                enabled_map[ent] = not bool(attrs.get("disabled_by"))
+
             now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             telemetry_payload = {
                 "data": data_map,
                 "names": names_map,
                 "enabled": enabled_map,
-                "attributes": attrs_map,
                 "timestamp": now_iso,
             }
             try:
-                for t in _sensor_topics():
-                    client._publish(t, json.dumps(telemetry_payload), qos=0)
+                client._publish(
+                    client.preferred_sensors_topic, json.dumps(telemetry_payload), qos=0
+                )
             except Exception:
-                traceback.print_exc()  # pragma: no cover
+                pass  # pragma: no cover
 
             # If a vault topic is configured, remind the Vault server which
             # sensors were selected/reported by publishing a short payload
@@ -351,41 +150,29 @@ def handle_message(
                     }
                     client._publish(client.vault_topic, json.dumps(reminder), qos=0)
             except Exception:
-                traceback.print_exc()  # pragma: no cover
+                pass  # pragma: no cover
 
             if command_id:
-                _publish_shared_ack(cmd_name_poll, command_id, ack_success, "completed")
+                legacy_comp = f"hubs/{client.client_id}/cmd/{command_id}/response"
+                v1_comp = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
+                comp_payload = {
+                    "status": "completed",
+                    "result": {
+                        "sensors_reported": list(data_map.keys()),
+                        "count": len(data_map),
+                    },
+                    "timestamp": now_iso,
+                }
+                try:
+                    client._publish(legacy_comp, json.dumps(comp_payload), qos=1)
+                    client._publish(v1_comp, json.dumps(comp_payload), qos=1)
+                except Exception:
+                    pass  # pragma: no cover
             return
 
-        expected_set_topics = []
-        try:
-            expected_set_topic_v = (
-                build_topic(
-                    shared_topics.CMD_SENSORS_SET,
-                    hub_id=client.client_id,
-                    version=protocol_version,
-                )
-                if shared_topics
-                else None
-            )
-            if expected_set_topic_v:
-                expected_set_topics.append(expected_set_topic_v)
-        except Exception:
-            expected_set_topics = []
-        try:
-            bcast_template = getattr(shared_topics, "BROADCAST_CMD", None)
-            if bcast_template:
-                expected_set_topics.append(
-                    build_topic(
-                        bcast_template,
-                        version=protocol_version,
-                        command="sensors/set",
-                    )
-                )
-        except Exception:
-            traceback.print_exc()
-
-        if topic in expected_set_topics:
+        expected_set_topic = f"hubs/{client.client_id}/cmd/sensors/set"
+        expected_set_topic_v1 = f"hubs/{client.client_id}/v1/cmd/sensors/set"
+        if topic == expected_set_topic or topic == expected_set_topic_v1:
             try:
                 cmd = (
                     json.loads(payload_str)
@@ -396,10 +183,21 @@ def handle_message(
                 cmd = {}
 
             command_id = cmd.get("command_id")
+            action = cmd.get("action") or "sensors/set"
             if command_id:
-                _publish_shared_ack(
-                    cmd_name_set, command_id, ack_success, "acknowledged"
-                )
+                legacy_ack = f"hubs/{client.client_id}/cmd/{command_id}/response"
+                v1_ack = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
+                ack_payload = {
+                    "status": "acknowledged",
+                    "timestamp": datetime.now(timezone.utc)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                }
+                try:
+                    client._publish(legacy_ack, json.dumps(ack_payload), qos=1)
+                    client._publish(v1_ack, json.dumps(ack_payload), qos=1)
+                except Exception:
+                    pass
 
             sensors_to_set = []
             try:
@@ -413,9 +211,7 @@ def handle_message(
                         for item in s:
                             if isinstance(item, dict) and item.get("entity_id"):
                                 sensors_to_set.append(item)
-            except (
-                Exception
-            ):  # pragma: no cover - defensive branch hard to reproduce in tests
+            except Exception:  # pragma: no cover - defensive branch hard to reproduce in tests
                 sensors_to_set = []
 
             results = {"set": [], "failed": []}
@@ -465,7 +261,18 @@ def handle_message(
 
             now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             if command_id:
-                _publish_shared_ack(cmd_name_set, command_id, ack_success, "completed")
+                legacy_comp = f"hubs/{client.client_id}/cmd/{command_id}/response"
+                v1_comp = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
+                comp_payload = {
+                    "status": "completed",
+                    "result": results,
+                    "timestamp": now_iso,
+                }
+                try:
+                    client._publish(legacy_comp, json.dumps(comp_payload), qos=1)
+                    client._publish(v1_comp, json.dumps(comp_payload), qos=1)
+                except Exception:
+                    pass
 
             try:
                 data_map = {}
@@ -512,10 +319,13 @@ def handle_message(
                         "timestamp": now_iso,
                     }
                     try:
-                        for t in _sensor_topics():
-                            client._publish(t, json.dumps(telemetry_payload), qos=0)
+                        client._publish(
+                            client.preferred_sensors_topic,
+                            json.dumps(telemetry_payload),
+                            qos=0,
+                        )
                     except Exception:
-                        traceback.print_exc()  # pragma: no cover
+                        pass  # pragma: no cover
                     # Remind Vault of the sensors that were set/readback.
                     # If the client has a Vault-authoritative selection, prefer
                     # that list; otherwise fall back to the data_map keys.
@@ -534,10 +344,8 @@ def handle_message(
                                 client.vault_topic, json.dumps(reminder), qos=0
                             )
                     except Exception:
-                        traceback.print_exc()  # pragma: no cover
-            except (
-                Exception
-            ):  # pragma: no cover - defensive branch hard to reproduce in tests
+                        pass  # pragma: no cover
+            except Exception:  # pragma: no cover - defensive branch hard to reproduce in tests
                 traceback.print_exc()  # pragma: no cover
             return
     except Exception:
