@@ -34,6 +34,12 @@ try:
 except Exception:
     requests = None
 
+
+try:
+    import mqtt_topics as topics
+except Exception:
+    topics = None
+
 try:
     import paho.mqtt.client as mqtt
 except Exception:
@@ -382,19 +388,32 @@ class CentralCoreClient:
         # payloads will be published to both topics.
         self.vault_topic = options.get("vault_topic") or ""
         self.telemetry_interval = int(options.get("telemetry_interval", 30))
-        self.telemetry_topic = f"telemetry/{self.client_id}"
-        # Use the Vault-style `cmd` namespace for command topics to match
-        # mqtt-shared conventions (e.g. `hubs/<client_id>/cmd/...`). The
-        # `cmd_sub_topic` below subscribes to the wildcard pattern for
-        # commands; this attribute is a convenience base topic for publishes
-        # (if needed elsewhere).
-        self.commands_topic = f"hubs/{self.client_id}/cmd"
-        # Preferred sensors telemetry topic for Vault
-        self.preferred_sensors_topic = f"hubs/{self.client_id}/telemetry/sensors"
-        # Legacy sensors topic (kept for backward compatibility)
-        self.sensors_topic = f"telemetry/{self.client_id}/sensors"
-        # Subscribe pattern for Vault commands (e.g. hubs/<hub_id>/cmd/sensors/poll)
-        self.cmd_sub_topic = f"hubs/{self.client_id}/cmd/+"
+        # Use shared templates where possible; otherwise keep hard-coded
+        # defaults to preserve current behavior in tests and development.
+        if topics is not None:
+            self.telemetry_topic = topics.TELEMETRY_TOPIC_TMPL.format(
+                client_id=self.client_id
+            )
+            self.commands_topic = topics.CMD_BASE_TMPL.format(client_id=self.client_id)
+            self.preferred_sensors_topic = (
+                topics.PREFERRED_SENSORS_TOPIC_TMPL.format(client_id=self.client_id)
+            )
+            self.sensors_topic = f"telemetry/{self.client_id}/sensors"
+            self.cmd_sub_topic = topics.CMD_SUB_TMPL.format(client_id=self.client_id)
+        else:
+            self.telemetry_topic = f"telemetry/{self.client_id}"
+            # Use the Vault-style `cmd` namespace for command topics to match
+            # mqtt-shared conventions (e.g. `hubs/<client_id>/cmd/...`). The
+            # `cmd_sub_topic` below subscribes to the wildcard pattern for
+            # commands; this attribute is a convenience base topic for publishes
+            # (if needed elsewhere).
+            self.commands_topic = f"hubs/{self.client_id}/cmd"
+            # Preferred sensors telemetry topic for Vault
+            self.preferred_sensors_topic = f"hubs/{self.client_id}/telemetry/sensors"
+            # Legacy sensors topic (kept for backward compatibility)
+            self.sensors_topic = f"telemetry/{self.client_id}/sensors"
+            # Subscribe pattern for Vault commands (e.g. hubs/<hub_id>/cmd/sensors/poll)
+            self.cmd_sub_topic = f"hubs/{self.client_id}/cmd/+"
         # Delegate client creation and TLS setup to mqtt_runtime so it can
         # be unit-tested separately and to keep this class focused on
         # higher-level behavior.
