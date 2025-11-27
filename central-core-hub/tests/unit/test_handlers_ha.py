@@ -8,13 +8,21 @@ def _load_modules():
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "mqtt_client.py"
     spec = importlib.util.spec_from_file_location("mqtt_client", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mqtt_mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mqtt_mod)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(mqtt_mod)
 
     src2 = repo_root / "central-core-hub" / "handlers.py"
     spec2 = importlib.util.spec_from_file_location("handlers", str(src2))
+    if spec2 is None or getattr(spec2, "loader", None) is None:
+        raise ImportError("could not load spec")
     handlers_mod = importlib.util.module_from_spec(spec2)
-    spec2.loader.exec_module(handlers_mod)
+    hloader = spec2.loader
+    assert hloader is not None
+    hloader.exec_module(handlers_mod)
     return mqtt_mod, handlers_mod
 
 
@@ -50,8 +58,9 @@ def test_set_with_ha_readback():
     msg_payload = json.dumps(cmd)
 
     # requests stub that returns expected responses
-    def post(url, headers=None, json=None, timeout=10):
-        return Resp({"state": json.get("state")})
+    def post(url, headers=None, json_body=None, timeout=10):
+        payload = json_body or {}
+        return Resp({"state": payload.get("state")})
 
     def get(url, headers=None, timeout=10):
         return Resp({"state": "42", "attributes": {"friendly_name": "X"}})
@@ -83,8 +92,9 @@ def test_set_with_readback_disabled():
     cmd = {"command_id": "cmd2", "payload": {"sensors": {"sensor.y": "on"}}}
     msg_payload = json.dumps(cmd)
 
-    def post(url, headers=None, json=None, timeout=10):
-        return Resp({"state": json.get("state")})
+    def post(url, headers=None, json_body=None, timeout=10):
+        payload = json_body or {}
+        return Resp({"state": payload.get("state")})
 
     # get should not be called when readback disabled; provide one anyway
     def get(url, headers=None, timeout=10):

@@ -6,8 +6,12 @@ def _load_telemetry():
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "telemetry.py"
     spec = importlib.util.spec_from_file_location("telemetry", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(mod)
     return mod
 
 
@@ -74,7 +78,7 @@ def test__get_cpu_percent_external_override_and_fallback(monkeypatch):
     def bad():
         raise RuntimeError("boom")
 
-    tele._external_get_cpu_percent = bad
+    setattr(tele, "_external_get_cpu_percent", bad)
     # ensure no exception when building telemetry
     p = tele.build_telemetry("hub-y")
     obj = __import__("json").loads(p)

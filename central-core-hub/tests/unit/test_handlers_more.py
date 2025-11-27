@@ -7,8 +7,12 @@ def _load_handlers():
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "handlers.py"
     spec = importlib.util.spec_from_file_location("handlers", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     handlers_mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(handlers_mod)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(handlers_mod)
     return handlers_mod
 
 

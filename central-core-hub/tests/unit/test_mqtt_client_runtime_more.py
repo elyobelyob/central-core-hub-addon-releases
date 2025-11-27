@@ -8,7 +8,11 @@ def _load_module_with_import_hook(hook):
     src = repo_root / "central-core-hub" / "mqtt_client.py"
     name = f"mqtt_client_hook_runtime_{id(hook)}"
     spec = importlib.util.spec_from_file_location(name, str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
+    loader = spec.loader
+    assert loader is not None
     orig_import = builtins.__import__
 
     def wrapper(*args, **kwargs):
@@ -16,7 +20,7 @@ def _load_module_with_import_hook(hook):
 
     try:
         builtins.__import__ = wrapper
-        spec.loader.exec_module(mod)
+        loader.exec_module(mod)
     finally:
         builtins.__import__ = orig_import
     return mod
@@ -44,8 +48,12 @@ def test_mqtt_runtime_tls_and_callback_attach_exceptions(monkeypatch):
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "mqtt_runtime.py"
     spec = importlib.util.spec_from_file_location("mqtt_runtime_test", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     rt = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(rt)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(rt)
 
     class Ctx:
         def __init__(self):
@@ -110,8 +118,12 @@ def test_connect_retry_path(monkeypatch):
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "mqtt_client.py"
     spec = importlib.util.spec_from_file_location("mqtt_client_conn1", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(mod)
     CentralCoreClient = mod.CentralCoreClient
 
     c = CentralCoreClient({"client_id": "unit-retry"})
@@ -125,8 +137,12 @@ def test_connect_loop_handles_connect_failed_and_retries(monkeypatch):
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "mqtt_client.py"
     spec = importlib.util.spec_from_file_location("mqtt_client_conn2", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(mod)
     CentralCoreClient = mod.CentralCoreClient
 
     c = CentralCoreClient({"client_id": "unit-loop1"})
@@ -149,8 +165,12 @@ def test_connect_loop_handles_timed_out_wait(monkeypatch):
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "mqtt_client.py"
     spec = importlib.util.spec_from_file_location("mqtt_client_conn3", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(mod)
     CentralCoreClient = mod.CentralCoreClient
 
     c = CentralCoreClient({"client_id": "unit-loop2"})
@@ -190,6 +210,8 @@ def test_paho_import_absent_sets_mqtt_none():
     src = repo_root / "central-core-hub" / "mqtt_client.py"
     name = "mqtt_client_no_paho"
     spec = importlib.util.spec_from_file_location(name, str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
     orig_import = (
         __builtins__["__import__"]
@@ -198,7 +220,9 @@ def test_paho_import_absent_sets_mqtt_none():
     )
     try:
         __builtins__["__import__"] = lambda *a, **k: hook(orig_import, *a, **k)
-        spec.loader.exec_module(mod)
+        loader = spec.loader
+        assert loader is not None
+        loader.exec_module(mod)
     finally:
         try:
             __builtins__["__import__"] = orig_import
@@ -217,8 +241,12 @@ def test_import_with_helpers_present(monkeypatch, tmp_path):
     spec = importlib.util.spec_from_file_location(
         "mqtt_client_with_helpers", str(src_dir / "mqtt_client.py")
     )
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(mod)
     # build_telemetry should be available and callable
     assert hasattr(mod, "build_telemetry")
     raw = mod.build_telemetry("h1")
@@ -230,8 +258,12 @@ def test_run_iteration_handles_publish_and_sensors_exceptions(monkeypatch):
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "mqtt_client.py"
     spec = importlib.util.spec_from_file_location("mqtt_client_runit", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(mod)
     CentralCoreClient = mod.CentralCoreClient
 
     c = CentralCoreClient({"client_id": "runit"})
@@ -265,8 +297,12 @@ def test_cert_content_handling():
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "mqtt_client.py"
     spec = importlib.util.spec_from_file_location("mqtt_client_cert_test", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(mod)
     CentralCoreClient = mod.CentralCoreClient
 
     # Mock options with cert content
@@ -324,8 +360,12 @@ def test_cert_path_handling():
     spec = importlib.util.spec_from_file_location(
         "mqtt_client_cert_path_test", str(src)
     )
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(mod)
     CentralCoreClient = mod.CentralCoreClient
 
     options = {
@@ -360,8 +400,12 @@ def test_cert_bundle_parsing():
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "mqtt_client.py"
     spec = importlib.util.spec_from_file_location("mqtt_client_bundle_test", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(mod)
     CentralCoreClient = mod.CentralCoreClient
 
     bundle_content = """-----BEGIN CERTIFICATE-----

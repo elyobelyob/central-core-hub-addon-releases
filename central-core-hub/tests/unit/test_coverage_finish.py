@@ -3,14 +3,19 @@ import time
 import types
 import importlib.util
 from pathlib import Path
+from typing import Any, cast
 
 
 def _load_module():
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "mqtt_client.py"
     spec = importlib.util.spec_from_file_location("mqtt_client", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(module)  # type: ignore[attr-defined]
     return module
 
 
@@ -122,7 +127,7 @@ def test_exercise_mqtt_client_branches(monkeypatch):
     def fake_handle_message(*a, **k):
         raise RuntimeError("handler boom")
 
-    fake_handlers.handle_message = fake_handle_message
+    cast(Any, fake_handlers).handle_message = fake_handle_message
     sys.modules["handlers"] = fake_handlers
 
     # Should not raise despite handler raising (on_message guards exceptions)
