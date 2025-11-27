@@ -1,7 +1,6 @@
-home-assistant
 name: "Central Core Hub"
 description: "Central Core Hub Add-on"
-version: "1.0.86"
+version: "1.0.74"
 slug: "central-core-hub"
 init: false
 arch:
@@ -27,7 +26,6 @@ options:
   ha_api_url: ""
   ha_api_token: ""
   telemetry_interval: 30
-  protocol_version: 1
 schema:
   mqtt_host: str
   mqtt_port: int
@@ -39,4 +37,3 @@ schema:
   ha_api_url: str?
   ha_api_token: str?
   telemetry_interval: int
-  protocol_version: int

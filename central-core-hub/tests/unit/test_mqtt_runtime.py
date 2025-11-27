@@ -6,8 +6,12 @@ def _load_runtime_module():
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "mqtt_runtime.py"
     spec = importlib.util.spec_from_file_location("mqtt_runtime", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(module)
     return module
 
 
@@ -20,6 +24,7 @@ class DummyCtx:
         self.mqtt_ca = "/tmp/ca"
         self.mqtt_cert = "/tmp/cert"
         self.mqtt_key = "/tmp/key"
+        self._client = None
 
 
 def test_setup_shim_when_no_mqtt():

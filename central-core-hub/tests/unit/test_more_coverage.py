@@ -3,6 +3,7 @@ import sys
 import types
 import json
 from pathlib import Path
+from typing import Any, cast
 
 
 def _load_fresh_module_with_no_deps():
@@ -27,13 +28,28 @@ def _load_fresh_module_with_no_deps():
     sys.meta_path.insert(0, Blocker())
     try:
         spec = importlib.util.spec_from_file_location("fresh_mqtt_client", str(src))
+        if spec is None or getattr(spec, "loader", None) is None:
+            raise ImportError("could not load spec")
         module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        loader = spec.loader
+        assert loader is not None
+        loader.exec_module(module)
         return module
     finally:
         # restore meta_path and sys.modules
         sys.meta_path[:] = old_meta
         sys.modules.update(removed)
+
+
+def _load_named_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, str(path))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
+    module = importlib.util.module_from_spec(spec)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(module)
+    return module
 
 
 def test_import_time_missing_paho_and_requests():
@@ -45,14 +61,8 @@ def test_import_time_missing_paho_and_requests():
 
 
 def test_publish_telemetry_vault_fallback(monkeypatch):
-    spec = importlib.util.spec_from_file_location(
-        "m",
-        str(
-            Path(__file__).resolve().parents[3] / "central-core-hub" / "mqtt_client.py"
-        ),
-    )
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
+    path = Path(__file__).resolve().parents[3] / "central-core-hub" / "mqtt_client.py"
+    m = _load_named_module("m", path)
     CentralCoreClient = m.CentralCoreClient
 
     calls = []
@@ -74,11 +84,7 @@ def test_publish_telemetry_vault_fallback(monkeypatch):
 def test_on_message_malformed_and_binary(monkeypatch):
     # load module normally
     repo_root = Path(__file__).resolve().parents[3]
-    spec = importlib.util.spec_from_file_location(
-        "m2", str(repo_root / "central-core-hub" / "mqtt_client.py")
-    )
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
+    m = _load_named_module("m2", repo_root / "central-core-hub" / "mqtt_client.py")
     CentralCoreClient = m.CentralCoreClient
 
     c = CentralCoreClient({"client_id": "u3"})
@@ -121,11 +127,7 @@ def test_on_message_malformed_and_binary(monkeypatch):
 
 def test_on_connect_calls_publish_sensors(monkeypatch):
     repo_root = Path(__file__).resolve().parents[3]
-    spec = importlib.util.spec_from_file_location(
-        "m3", str(repo_root / "central-core-hub" / "mqtt_client.py")
-    )
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
+    m = _load_named_module("m3", repo_root / "central-core-hub" / "mqtt_client.py")
     CentralCoreClient = m.CentralCoreClient
 
     called = {"publish_sensors": 0}
@@ -141,14 +143,8 @@ def test_on_connect_calls_publish_sensors(monkeypatch):
 
 
 def test_fetch_sensors_happy_path(monkeypatch):
-    spec = importlib.util.spec_from_file_location(
-        "m4",
-        str(
-            Path(__file__).resolve().parents[3] / "central-core-hub" / "mqtt_client.py"
-        ),
-    )
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
+    path = Path(__file__).resolve().parents[3] / "central-core-hub" / "mqtt_client.py"
+    m = _load_named_module("m4", path)
 
     # fake requests.get to return a list of entities
     class FakeResp:
@@ -176,7 +172,7 @@ def test_fetch_sensors_happy_path(monkeypatch):
         )
 
     fake_requests = types.SimpleNamespace(get=fake_get)
-    m.requests = fake_requests
+    cast(Any, m).requests = fake_requests
     sensors = m.fetch_sensors("http://ha", "token")
     assert isinstance(sensors, list)
     assert any(s["entity_id"] == "sensor.a" for s in sensors)
@@ -187,14 +183,8 @@ def test_fetch_sensors_happy_path(monkeypatch):
 
 def test_sensors_poll_with_requested_subset(monkeypatch):
     # test sensors/poll honoring requested sensors list and coercions
-    spec = importlib.util.spec_from_file_location(
-        "m5",
-        str(
-            Path(__file__).resolve().parents[3] / "central-core-hub" / "mqtt_client.py"
-        ),
-    )
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
+    path = Path(__file__).resolve().parents[3] / "central-core-hub" / "mqtt_client.py"
+    m = _load_named_module("m5", path)
     CentralCoreClient = m.CentralCoreClient
 
     # stub fetch_sensors with varied states
@@ -235,14 +225,8 @@ def test_sensors_poll_with_requested_subset(monkeypatch):
 
 
 def test_sensors_set_mapping_and_no_ha_config(monkeypatch):
-    spec = importlib.util.spec_from_file_location(
-        "m6",
-        str(
-            Path(__file__).resolve().parents[3] / "central-core-hub" / "mqtt_client.py"
-        ),
-    )
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
+    path = Path(__file__).resolve().parents[3] / "central-core-hub" / "mqtt_client.py"
+    m = _load_named_module("m6", path)
     CentralCoreClient = m.CentralCoreClient
 
     # Instantiate without HA config
@@ -272,14 +256,8 @@ def test_sensors_set_mapping_and_no_ha_config(monkeypatch):
 
 def test_publish_telemetry_vault_exception(monkeypatch):
     # Ensure exception in build_vault_payload is handled
-    spec = importlib.util.spec_from_file_location(
-        "m7",
-        str(
-            Path(__file__).resolve().parents[3] / "central-core-hub" / "mqtt_client.py"
-        ),
-    )
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
+    path = Path(__file__).resolve().parents[3] / "central-core-hub" / "mqtt_client.py"
+    m = _load_named_module("m7", path)
     CentralCoreClient = m.CentralCoreClient
 
     # monkeypatch build_vault_payload to raise

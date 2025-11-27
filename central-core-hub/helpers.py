@@ -59,14 +59,15 @@ def _read_proc_stat():
 
 def get_cpu_percent():
     idle1, total1 = _read_proc_stat()
-    if idle1 is None:
+    if idle1 is None or total1 is None:
         return None
     time.sleep(0.1)
     idle2, total2 = _read_proc_stat()
-    if idle2 is None or total2 is None or total2 == total1:  # pragma: no cover
+    if idle2 is None or total2 is None or total1 is None or total2 == total1:  # pragma: no cover
         return None
-    idle_delta = idle2 - idle1
-    total_delta = total2 - total1
+    # At this point all values are non-None ints
+    idle_delta = int(idle2) - int(idle1)
+    total_delta = int(total2) - int(total1)
     try:  # pragma: no cover
         usage = (1.0 - (idle_delta / total_delta)) * 100.0
         return round(usage, 1)

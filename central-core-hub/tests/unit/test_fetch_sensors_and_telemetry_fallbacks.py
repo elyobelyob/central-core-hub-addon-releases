@@ -1,14 +1,19 @@
 import importlib.util
 from pathlib import Path
 import types
+from typing import Any, cast
 
 
 def _load_module(name):
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / name
     spec = importlib.util.spec_from_file_location(name.replace(".py", ""), str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(module)
     return module
 
 
@@ -19,7 +24,7 @@ def test_fetch_sensors_handles_requests_get_exception(monkeypatch):
         def get(self, *a, **k):
             raise RuntimeError("net")
 
-    mc.requests = BadResp()
+    cast(Any, mc).requests = BadResp()
     assert mc.fetch_sensors("http://ha", "tok") is None
 
 
@@ -47,7 +52,7 @@ def test_fetch_sensors_parses_entities(monkeypatch):
         def get(self, url, headers=None, timeout=None):
             return Resp()
 
-    mc.requests = RClient()
+    cast(Any, mc).requests = RClient()
     sensors = mc.fetch_sensors("http://ha", "tok")
     assert isinstance(sensors, list)
     # only sensor.* should be included
@@ -58,7 +63,7 @@ def test_telemetry_get_cpu_from_mqtt_client_module(monkeypatch):
     tele = _load_module("telemetry.py")
     # create fake mqtt_client module with get_cpu_percent
     fake = types.ModuleType("mqtt_client")
-    fake.get_cpu_percent = lambda: 4.4
+    setattr(fake, "get_cpu_percent", lambda: 4.4)
     import sys
 
     sys.modules["mqtt_client"] = fake

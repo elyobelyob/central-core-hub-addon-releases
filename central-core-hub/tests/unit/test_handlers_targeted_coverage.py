@@ -7,20 +7,24 @@ def load_handlers():
     spec = importlib.util.spec_from_file_location(
         "handlers", "./central-core-hub/handlers.py"
     )
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(mod)
     return mod
 
 
 class DummyClient:
     def __init__(self):
         self.client_id = "testhub"
-        self.ha_api_url = "http://ha"
-        self.ha_api_token = "token"
+        self.ha_api_url: str | None = "http://ha"
+        self.ha_api_token: str | None = "token"
         self.ha_readback_after_set = True
         self.preferred_sensors_topic = "pref/topic"
         self.vault_topic = "vault/topic"
-        self.selected_sensors = None
+        self.selected_sensors: list[str] | None = None
         self.publishes = []
 
     def _publish(self, topic, payload, qos=0):
@@ -64,7 +68,7 @@ def test_set_readback_exception_falls_back():
     )
     handlers.handle_message(
         client,
-        make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/set"),
+        make_msg(f"hubs/{client.client_id}/cmd/sensors/set"),
         payload,
         None,
         None,
@@ -97,7 +101,7 @@ def test_set_post_raises_records_failure():
     )
     handlers.handle_message(
         client,
-        make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/set"),
+        make_msg(f"hubs/{client.client_id}/cmd/sensors/set"),
         payload,
         None,
         None,
@@ -121,7 +125,7 @@ def test_set_item_without_entity_skipped_and_no_ha_config():
     )
     handlers.handle_message(
         client,
-        make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/set"),
+        make_msg(f"hubs/{client.client_id}/cmd/sensors/set"),
         payload,
         None,
         None,
@@ -148,7 +152,7 @@ def test_poll_prefers_client_selected_sensors_for_reminder():
     payload = json.dumps({"command_id": "c4", "payload": {}})
     handlers.handle_message(
         client,
-        make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/poll"),
+        make_msg(f"hubs/{client.client_id}/cmd/sensors/poll"),
         payload,
         fetch_sensors,
         None,
