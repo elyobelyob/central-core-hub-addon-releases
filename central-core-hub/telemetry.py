@@ -167,6 +167,25 @@ def build_telemetry(
         "addon_version": version,
         "telemetry_interval": telemetry_interval,
     }
+    # Prefer the authoritative schema from central_core_mqtt_shared when available.
+    try:
+        import central_core_mqtt_shared.schemas as _schemas  # type: ignore
+
+        Model = getattr(_schemas, "SystemTelemetry", None)
+        if Model is not None:
+            try:
+                m = Model(**payload)
+                # If model provides a json() method (pydantic), use it; otherwise
+                # fall back to serializing the original payload.
+                if hasattr(m, "json") and callable(getattr(m, "json")):
+                    return m.json()
+            except Exception:
+                # Fall back to naive payload if schema instantiation fails
+                pass
+    except Exception:
+        # shared package not installed or import failed; continue with fallback
+        pass
+
     return json.dumps(payload)
 
 

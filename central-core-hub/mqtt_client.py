@@ -36,7 +36,11 @@ except Exception:
 
 
 try:
-    import central_core_mqtt_shared as shared_topics
+    import central_core_mqtt_shared as mqtt_shared
+    from typing import Any
+    # topics is provided by the shared package; treat it as Any so static
+    # checkers don't try to infer optional members from a dynamic import.
+    topics: Any = getattr(mqtt_shared, "topics")
 except Exception as e:
     raise ImportError(
         "`central_core_mqtt_shared` is required and must be installed; install it in the add-on/runtime environment"
@@ -395,14 +399,22 @@ class CentralCoreClient:
         # if expected templates are missing so deployments do not run with
         # inconsistent or legacy topic formats.
         try:
-            tmpl = getattr(shared_topics, "TELEMETRY_TOPIC_TMPL")
-            self.telemetry_topic = tmpl.format(client_id=self.client_id)
-            tmpl = getattr(shared_topics, "CMD_BASE_TMPL")
-            self.commands_topic = tmpl.format(client_id=self.client_id)
-            tmpl = getattr(shared_topics, "PREFERRED_SENSORS_TOPIC_TMPL")
-            self.preferred_sensors_topic = tmpl.format(client_id=self.client_id)
-            tmpl = getattr(shared_topics, "CMD_SUB_TMPL")
-            self.cmd_sub_topic = tmpl.format(client_id=self.client_id)
+            # Build the authoritative topics using the shared package helper.
+            # Use protocol version 1 (current default in the shared package).
+            ver = 1
+            self.telemetry_topic = topics.build_topic(
+                topics.TELEMETRY_SYSTEM, hub_id=self.client_id, version=ver
+            )
+            self.preferred_sensors_topic = topics.build_topic(
+                topics.TELEMETRY_SENSORS, hub_id=self.client_id, version=ver
+            )
+            # Subscribe to hub command space using the generic command template
+            # with single-level wildcards for domain/action.
+            self.cmd_sub_topic = topics.build_topic(
+                topics.CMD_GENERIC, hub_id=self.client_id, version=ver, domain="+", action="+"
+            )
+            # Commands topic (logical base) - alias for subscription pattern
+            self.commands_topic = self.cmd_sub_topic
             # expose sensors_topic for compatibility; prefer preferred_sensors_topic
             self.sensors_topic = self.preferred_sensors_topic
         except Exception as e:
@@ -489,15 +501,18 @@ class CentralCoreClient:
         back to the canonical f-string used previously.
         """
         key = action.replace("/", ".") if isinstance(action, str) else str(action)
-        tmpl = getattr(shared_topics, "ACK_TMPL", None) if shared_topics is not None else None
-        if tmpl:
-            try:
-                # attempt to format the shared template; allow missing
-                # formatting keys to fall back below.
-                return tmpl.format(client_id=self.client_id, action=key, command_id=command_id)
-            except Exception:
-                pass
-        return f"hubs/{self.client_id}/v1/ack/{key}/{command_id}"
+        # Use the shared package ACK template (ACK_GENERIC) via topics.build_topic.
+        try:
+            return topics.build_topic(
+                topics.ACK_GENERIC,
+                hub_id=self.client_id,
+                version=1,
+                command_name=key,
+                command_id=command_id,
+            )
+        except Exception:
+            # If the shared package is present but ACK template missing, raise
+            raise RuntimeError("central_core_mqtt_shared missing ACK template")
 
     def _setup_cert_files(self):
         """Handle certificate content vs file paths, and parse bundle if provided."""
