@@ -58,8 +58,8 @@ def test_set_with_ha_readback():
     msg_payload = json.dumps(cmd)
 
     # requests stub that returns expected responses
-    def post(url, headers=None, json_body=None, timeout=10):
-        payload = json_body or {}
+    def post(url, headers=None, json=None, timeout=10, **kwargs):
+        payload = json or kwargs.get("json_body") or {}
         return Resp({"state": payload.get("state")})
 
     def get(url, headers=None, timeout=10):
@@ -92,8 +92,8 @@ def test_set_with_readback_disabled():
     cmd = {"command_id": "cmd2", "payload": {"sensors": {"sensor.y": "on"}}}
     msg_payload = json.dumps(cmd)
 
-    def post(url, headers=None, json_body=None, timeout=10):
-        payload = json_body or {}
+    def post(url, headers=None, json=None, timeout=10, **kwargs):
+        payload = json or kwargs.get("json_body") or {}
         return Resp({"state": payload.get("state")})
 
     # get should not be called when readback disabled; provide one anyway
