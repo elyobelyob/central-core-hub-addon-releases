@@ -38,9 +38,19 @@ except Exception:
 
 try:
     import central_core_mqtt_shared as mqtt_shared
-    # topics is provided by the shared package; treat it as typing.Any so static
-    # checkers don't try to infer optional members from a dynamic import.
-    topics: typing.Any = getattr(mqtt_shared, "topics")
+    # The shared package may expose helpers as top-level attributes
+    # (e.g. `central_core_mqtt_shared.topics`) or as submodules
+    # (`central_core_mqtt_shared.topics`). Prefer a top-level attribute
+    # but fall back to importing the submodule when needed.
+    try:
+        topics: typing.Any = getattr(mqtt_shared, "topics")
+    except Exception:
+        # Fallback to importing the `topics` submodule directly so that
+        # packages which provide `topics.py` but don't re-export it still
+        # work at runtime.
+        import importlib
+
+        topics = importlib.import_module("central_core_mqtt_shared.topics")
 except Exception as e:
     raise ImportError(
         "`central_core_mqtt_shared` is required and must be installed; install it in the add-on/runtime environment"
