@@ -15,12 +15,13 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-      - name: Install dependencies (prefer PyPI)
+      - name: Install dependencies (prefer PyPI, fall back to GitHub)
         run: |
           python -m pip install --upgrade pip
-          # Try installing the released package first; fall back to the
-          # requirements file if PyPI package isn't available yet.
-          pip install central-core-mqtt-shared || pip install -r requirements.txt
+          # Try installing the released package first from PyPI; if not
+          # available, fall back to installing the package directly from
+          # the GitHub repository. Finally install the repo's requirements.
+          pip install central-core-mqtt-shared || pip install git+https://github.com/elyobelyob/central-core-mqtt-shared.git@main
           pip install -r requirements.txt
       - name: Run linters and type checks
         run: |
