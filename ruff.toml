@@ -1,0 +1,8 @@
+[tool.ruff]
+line-length = 120
+exclude = [".venv", "build", "dist"]
+
+# Optional: select or ignore specific codes. Keep default rules but
+# allow an easily-editable file for project-specific exceptions.
+# For example, to ignore ambiguous-variable-name (E741):
+# ignore = ["E741"]
