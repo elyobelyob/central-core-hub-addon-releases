@@ -7,4 +7,4 @@ websocket-client>=1.8.0
 
 # Prefer the released PyPI package if available. Keep the VCS fallback
 # for environments where the package hasn't been published yet.
-central-core-mqtt-shared @ git+https://github.com/elyobelyob/central-core-mqtt-shared.git@main
+central-core-mqtt-shared @ git+https://github.com/elyobelyob/central-core-mqtt-shared.git@v1.0.0
