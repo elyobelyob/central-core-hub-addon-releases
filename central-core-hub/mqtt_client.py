@@ -551,6 +551,7 @@ class CentralCoreClient:
         # Try to start HA websocket listener if HA API config present
         try:
             if self.ha_api_url and self.ha_api_token:
+                _log("HA websocket config present; attempting to start listener")
                 try:
                     import ha_client as _ha
 
@@ -569,7 +570,11 @@ class CentralCoreClient:
                         self._ha_ws_listener = None
                 except Exception:
                     # ha_client not available or import failed
+                    _log("HA WS helper import failed", sys.stderr)
+                    traceback.print_exc()
                     self._ha_ws_listener = None
+            else:
+                _log("HA websocket config missing; listener disabled")
         except Exception:
             # Non-fatal
             self._ha_ws_listener = None
