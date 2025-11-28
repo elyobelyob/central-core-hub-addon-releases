@@ -534,6 +534,8 @@ class CentralCoreClient:
                 self._client = _ClientShim()
 
         self._connected = False
+        # Cache the last HA version we observed so telemetry can reuse it
+        self._ha_version_cache = None
         # track last sensors publish time (epoch seconds)
         self._last_sensors_sent = 0
         # the list of sensor entity_ids that Vault has indicated are selected
@@ -888,37 +890,59 @@ class CentralCoreClient:
             time.sleep(0.5)
         return False
 
+    def _resolve_ha_version(self):
+        """Return the cached HA version or read it from helpers/options."""
+        if self._ha_version_cache:
+            return self._ha_version_cache
+
+        version = None
+        opts_path = None
+        try:
+            import ha_client as _ha
+
+            getter = getattr(_ha, "get_ha_version", None)
+            if callable(getter):
+                try:
+                    version = getter()
+                except Exception:
+                    version = None
+            opts_path = getattr(_ha, "OPTIONS_PATH", None)
+        except Exception:
+            opts_path = None
+
+        if not version:
+            version = self._read_ha_version_from_options(opts_path)
+
+        if version:
+            try:
+                version = str(version)
+            except Exception:
+                pass
+
+        if version:
+            self._ha_version_cache = version
+        return version
+
+    @staticmethod
+    def _read_ha_version_from_options(opts_path):
+        path = opts_path or "/data/options.json"
+        try:
+            with open(path, "r") as f:
+                opts = json.load(f)
+            if isinstance(opts, dict):
+                hv = opts.get("ha_version")
+                if hv:
+                    return str(hv)
+        except Exception:
+            pass
+        return None
+
     def publish_telemetry(self):
         # Attempt to include Home Assistant core version learned via the
         # websocket listener. The websocket writes `ha_version` into the
         # add-on options file (path configurable via `ha_client.OPTIONS_PATH`).
-        ha_info = None
-        try:
-            import ha_client as _ha
-
-            # Prefer in-memory cached value when available
-            try:
-                hv = getattr(_ha, "get_ha_version", lambda: None)()
-            except Exception:
-                hv = None
-            if hv:
-                ha_info = {"core": str(hv)}
-            else:
-                # Fallback: try reading the options file path
-                opts_path = getattr(_ha, "OPTIONS_PATH", "/data/options.json")
-                try:
-                    with open(opts_path, "r") as f:
-                        opts = json.load(f)
-                    if isinstance(opts, dict):
-                        hv2 = opts.get("ha_version")
-                        if hv2:
-                            ha_info = {"core": str(hv2)}
-                except Exception:
-                    # Non-fatal: missing or unreadable options file
-                    pass
-        except Exception:
-            # Non-fatal: ha_client not available in this environment
-            ha_info = None
+        ha_version = self._resolve_ha_version()
+        ha_info = {"core": ha_version} if ha_version else None
 
         payload = build_telemetry(
             self.client_id,
