@@ -1385,28 +1385,9 @@ def main():
     options = load_options()
     # Sanitize options for logging (hide sensitive data)
     safe_options = {
-        k: v
+        k: ("[REDACTED]" if "token" in k or "password" in k or "cert" in k else v)
         for k, v in options.items()
-        if k
-        not in [
-            "mqtt_password",
-            "mqtt_cert_bundle",
-            "mqtt_ca_cert",
-            "mqtt_client_cert",
-            "mqtt_client_key",
-        ]
     }
-    # Redact sensitive certificate fields
-    sensitive_fields = [
-        "mqtt_password",
-        "mqtt_cert_bundle",
-        "mqtt_ca_cert",
-        "mqtt_client_cert",
-        "mqtt_client_key",
-    ]
-    for field in sensitive_fields:
-        if field in options and options[field]:
-            safe_options[field] = "[REDACTED]"
     _log(f"Loaded options: {safe_options}")
     c = CentralCoreClient(options)
     _log(f"Created client with mqtt_host={c.mqtt_host}, mqtt_port={c.mqtt_port}")
