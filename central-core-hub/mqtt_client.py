@@ -424,6 +424,13 @@ class CentralCoreClient:
         ) or socket.gethostname().lower().replace(" ", "-")
         self.ha_api_url = options.get("ha_api_url") or ""
         self.ha_api_token = options.get("ha_api_token") or ""
+        # Diagnostic: log whether HA options are present (do not print token)
+        try:
+            _log(
+                f"HA config: ha_api_url={'set' if self.ha_api_url else 'unset'}, ha_api_token={'set' if self.ha_api_token else 'unset'}"
+            )
+        except Exception:
+            pass
         # Whether to read back authoritative values from HA after a set operation.
         # Default True for backwards compatibility; can be disabled in options
         # to avoid an extra GET call when not desired.
