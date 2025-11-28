@@ -1,7 +1,14 @@
 line-length = 120
-exclude = [".venv", "build", "dist"]
+exclude = [".venv", "build", "dist", "venv", ".git", "__pycache__"]
 
-# Optional: select or ignore specific codes. Keep default rules but
-# allow an easily-editable file for project-specific exceptions.
-# For example, to ignore ambiguous-variable-name (E741):
-# ignore = ["E741"]
+# Black compatibility: Black's formatting can trigger some pycodestyle
+# warnings (notably E203). Ignore that so Ruff+Black behave consistently
+# and don't fight each other.
+extend-ignore = ["E203"]
+
+# Common per-file ignores (e.g. allow unused imports in package __init__ files)
+per-file-ignores = {"__init__.py" = ["F401"]}
+
+# Keep the default rule set (do not explicitly select). Projects can add
+# additional `select` or `ignore` entries here when they need to diverge
+# from the defaults used in CI.
