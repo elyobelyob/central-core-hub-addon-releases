@@ -27,7 +27,7 @@ from typing import cast
 def _log(msg, file=sys.stdout):
     """Log a message with UTC timestamp."""
     ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    print(f"[{ts}] {msg}", file=file)
+    print(f"[{ts}] {msg}", file=file, flush=True)
 
 
 try:
