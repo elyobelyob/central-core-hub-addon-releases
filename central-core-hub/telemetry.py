@@ -176,6 +176,19 @@ def build_telemetry(
             payload["home_assistant"] = dict(home_assistant)
         except Exception:
             payload["home_assistant"] = None
+        core_version = None
+        try:
+            if isinstance(home_assistant, dict):
+                core_version = home_assistant.get("core")
+            elif isinstance(home_assistant, str):
+                core_version = home_assistant
+        except Exception:
+            core_version = None
+        if core_version:
+            try:
+                payload["ha_version"] = str(core_version)
+            except Exception:
+                payload["ha_version"] = core_version
     # Prefer the authoritative schema from central_core_mqtt_shared when available.
     try:
         import central_core_mqtt_shared.schemas as _schemas  # type: ignore

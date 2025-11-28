@@ -635,51 +635,83 @@ class CentralCoreClient:
     def _setup_cert_files(self):
         """Handle certificate content vs file paths, and parse bundle if provided."""
 
+        def _sanitize_for_logging(text):
+            import re
+
+            safe = str(text) if text is not None else ""
+            stripped = safe.strip()
+            # Mask JSON blobs to avoid leaking certificates/keys
+            if stripped.startswith("{") or stripped.startswith("["):
+                return "[REDACTED JSON payload]"
+            safe = re.sub(
+                r"-----BEGIN CERTIFICATE-----[^-]*-----END CERTIFICATE-----",
+                "[CERTIFICATE REDACTED]",
+                safe,
+                flags=re.DOTALL,
+            )
+            safe = re.sub(
+                r"-----BEGIN PRIVATE KEY-----[^-]*-----END PRIVATE KEY-----",
+                "[PRIVATE KEY REDACTED]",
+                safe,
+                flags=re.DOTALL,
+            )
+            safe = re.sub(
+                r"-----BEGIN [^-]*-----[^-]*-----END [^-]*-----",
+                "[CERT DATA REDACTED]",
+                safe,
+                flags=re.DOTALL,
+            )
+            return safe
+
         def _read_content_or_file(value):
             if not value:
                 return ""
-            if value.startswith("-----BEGIN"):
+            if isinstance(value, str) and value.startswith("-----BEGIN"):
                 return value
             else:
-                # Assume it's a file path, try to read
                 try:
                     with open(value, "r") as f:
                         return f.read()
                 except Exception:
-                    # Sanitize value for logging to avoid exposing certificates
-                    def _sanitize_for_logging(text):
-                        import re
-
-                        # Redact certificate content
-                        text = re.sub(
-                            r"-----BEGIN CERTIFICATE-----[^-]*-----END CERTIFICATE-----",
-                            "[CERTIFICATE REDACTED]",
-                            text,
-                            flags=re.DOTALL,
-                        )
-                        text = re.sub(
-                            r"-----BEGIN PRIVATE KEY-----[^-]*-----END PRIVATE KEY-----",
-                            "[PRIVATE KEY REDACTED]",
-                            text,
-                            flags=re.DOTALL,
-                        )
-                        text = re.sub(
-                            r"-----BEGIN [^-]*-----[^-]*-----END [^-]*-----",
-                            "[CERT DATA REDACTED]",
-                            text,
-                            flags=re.DOTALL,
-                        )
-                        return text
-
-                    safe_value = _sanitize_for_logging(str(value))
+                    safe_value = _sanitize_for_logging(value)
                     _log(f"Warning: Could not read cert file {safe_value}")
                     return ""
 
-        # If bundle is provided, parse it
+        def _apply_bundle_from_json(value):
+            data = value
+            if isinstance(value, str):
+                try:
+                    data = json.loads(value)
+                except Exception:
+                    return False
+            if not isinstance(data, dict):
+                return False
+            candidates = data.get("certificates") or data.get("certs") or data.get(
+                "certificate_bundle"
+            )
+            if not isinstance(candidates, dict):
+                return False
+            applied = False
+            mapping = {
+                "ca_cert": "mqtt_ca",
+                "client_cert": "mqtt_cert",
+                "client_key": "mqtt_key",
+            }
+            for json_key, attr in mapping.items():
+                val = candidates.get(json_key)
+                if isinstance(val, str) and val.strip():
+                    if not getattr(self, attr):
+                        setattr(self, attr, val)
+                        applied = True
+            return applied
+
+        bundle_content = ""
         if self.mqtt_cert_bundle:
-            bundle_content = _read_content_or_file(self.mqtt_cert_bundle)
-            if bundle_content:
-                self._parse_cert_bundle(bundle_content)
+            applied = _apply_bundle_from_json(self.mqtt_cert_bundle)
+            if not applied:
+                bundle_content = _read_content_or_file(self.mqtt_cert_bundle)
+        if bundle_content:
+            self._parse_cert_bundle(bundle_content)
 
         # Now handle individual certs
         def _handle_cert(cert_str, suffix):
@@ -1066,6 +1098,9 @@ class CentralCoreClient:
         if not version:
             version = self._read_ha_version_from_options(opts_path)
 
+        if not version:
+            version = self._fetch_ha_version_from_api()
+
         if version:
             try:
                 version = str(version)
@@ -1086,6 +1121,24 @@ class CentralCoreClient:
                 hv = opts.get("ha_version")
                 if hv:
                     return str(hv)
+        except Exception:
+            pass
+        return None
+
+    def _fetch_ha_version_from_api(self):
+        if not self.ha_api_url or not self.ha_api_token or requests is None:
+            return None
+        try:
+            url = self.ha_api_url.rstrip("/") + "/api/config"
+            headers = {
+                "Authorization": f"Bearer {self.ha_api_token}",
+                "Content-Type": "application/json",
+            }
+            resp = requests.get(url, headers=headers, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            if isinstance(data, dict):
+                return data.get("version") or data.get("homeassistant_version")
         except Exception:
             pass
         return None
