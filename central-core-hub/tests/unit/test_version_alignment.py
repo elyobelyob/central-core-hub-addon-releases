@@ -2,17 +2,24 @@ import json
 import re
 from pathlib import Path
 
-import yaml
-
 
 def _read_json(path: Path):
     with path.open() as f:
         return json.load(f)
 
 
-def _read_yaml(path: Path):
+def _read_yaml_version(path: Path):
+    """Lightweight parser to extract the top-level `version` value from a
+    YAML manifest without requiring PyYAML. Looks for a line like
+    `version: "1.2.3"` or `version: 1.2.3` and returns the version string.
+    """
+    pattern = re.compile(r"^\s*version\s*:\s*[\"']?(?P<ver>[0-9]+\.[0-9]+\.[0-9]+)[\"']?\s*$")
     with path.open() as f:
-        return yaml.safe_load(f)
+        for line in f:
+            m = pattern.match(line)
+            if m:
+                return m.group("ver")
+    return None
 
 
 def test_versions_aligned_across_manifests():
@@ -31,11 +38,11 @@ def test_versions_aligned_across_manifests():
 
     r = _read_json(repo_json)
     cj = _read_json(addon_cfg_json)
-    cy = _read_yaml(addon_cfg_yaml)
+    cy_ver = _read_yaml_version(addon_cfg_yaml)
 
     v_repo = str(r.get("version") or "").strip()
     v_json = str(cj.get("version") or "").strip()
-    v_yaml = str(cy.get("version") or "").strip()
+    v_yaml = str(cy_ver or "").strip()
 
     assert v_repo, f"no version found in {repo_json}"
     assert v_json, f"no version found in {addon_cfg_json}"
