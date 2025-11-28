@@ -1,5 +1,4 @@
 import json
-import types
 from pathlib import Path
 import importlib.util
 
@@ -120,6 +119,7 @@ def test_publish_telemetry_includes_home_assistant(monkeypatch):
     def fake_publish(topic, payload, qos=0):
         captured["topic"] = topic
         captured["payload"] = payload
+
         class R:
             rc = 0
 

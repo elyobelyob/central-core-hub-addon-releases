@@ -140,12 +140,14 @@ def fetch_ha_info(ha_api_url, ha_api_token, requests_mod=None):
                     "supervisor"
                 )
             # operating system
-            info["operating_system"] = (
-                data.get("os_name")
-                or data.get("operating_system")
-                or (data.get("os_name") and data.get("os_version") and f"{data.get('os_name')} {data.get('os_version')}")
-                or None
-            )
+            # Build a readable operating system string from available fields.
+            os_name = data.get("os_name")
+            os_version = data.get("os_version")
+            if os_name and os_version:
+                os_combined = f"{os_name} {os_version}"
+            else:
+                os_combined = os_name or data.get("operating_system")
+            info["operating_system"] = os_combined or None
             # frontend / frontend version
             info["frontend"] = (
                 data.get("frontend")
