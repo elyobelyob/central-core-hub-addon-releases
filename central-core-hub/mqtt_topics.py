@@ -38,13 +38,13 @@ PREFERRED_SENSORS_TOPIC_TMPL = (
 CMD_BASE_TMPL = (
     getattr(_shared, "CMD_BASE", None)
     or getattr(_shared, "CMD_BASE_TMPL", None)
-    or "hubs/{client_id}/cmd"
+    or "hubs/{client_id}/v1/cmd"
 )
 
 CMD_SUB_TMPL = (
     getattr(_shared, "CMD_SUB", None)
     or getattr(_shared, "CMD_SUB_TMPL", None)
-    or "hubs/{client_id}/cmd/+"
+    or "hubs/{client_id}/v1/cmd/+"
 )
 
 

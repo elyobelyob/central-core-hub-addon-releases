@@ -206,7 +206,7 @@ All notable changes to this add-on will be documented in this file.
 - Test: add additional unit tests and increase coverage; add `.gitignore` to ignore virtualenv and test artifacts
 
 ## 1.0.44 - 2025-11-18
-- Feat: Add Vault-compatible sensors command handling (`hubs/<id>/cmd/sensors/poll`) with ACK and completion responses
+- Feat: Add Vault-compatible sensors command handling (`hubs/<id>/v1/cmd/sensors/poll`) with ACK and completion responses
 - Feat: Publish HA sensors on startup and hourly to preferred Vault topic
 - Test: add unit tests and CI test workflow; improve test coverage
 

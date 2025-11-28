@@ -6,7 +6,7 @@ Responsibilities:
 - Read options from `/data/options.json` (Home Assistant add-on options)
 - Maintain a single persistent MQTT connection
 - Publish telemetry every 30s to `telemetry/{client_id}`
-- Subscribe to Vault-style command topics `hubs/{client_id}/cmd/...` and handle commands
+- Subscribe to Vault-style command topics `hubs/{client_id}/v1/cmd/...` and handle commands
 - Reconnect automatically and log connection lifecycle to stdout
 """
 import importlib.util

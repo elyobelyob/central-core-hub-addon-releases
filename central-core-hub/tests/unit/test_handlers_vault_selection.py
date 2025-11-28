@@ -78,7 +78,7 @@ def test_poll_updates_selected_and_publishes_reminder(monkeypatch):
         "payload": {"sensors": ["sensor.temp", "sensor.hum"]},
     }
     msg = DummyMsg(
-        f"hubs/{c.client_id}/cmd/sensors/poll", json.dumps(cmd).encode("utf-8")
+        f"hubs/{c.client_id}/v1/cmd/sensors/poll", json.dumps(cmd).encode("utf-8")
     )
 
     # call through the client's on_message handler which loads handlers
@@ -144,7 +144,7 @@ def test_set_publishes_reminder_prefers_client_selected(monkeypatch):
         "payload": {"sensors": [{"entity_id": "sensor.temp", "state": "22.0"}]},
     }
     msg = DummyMsg(
-        f"hubs/{c.client_id}/cmd/sensors/set", json.dumps(command).encode("utf-8")
+        f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(command).encode("utf-8")
     )
 
     c.on_message(None, None, msg)

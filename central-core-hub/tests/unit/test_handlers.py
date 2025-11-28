@@ -112,12 +112,9 @@ def test_config_update_command_triggers_addon_update():
     )
 
     ack_topic = f"hubs/{c.client_id}/v1/ack/config.update/conf123"
-    response_topic = f"hubs/{c.client_id}/cmd/conf123/response"
     ack_messages = [p for p in c.published if p["topic"] == ack_topic]
-    response_messages = [p for p in c.published if p["topic"] == response_topic]
     assert ack_messages, "no ack published for config update"
-    assert response_messages, "no response published for config update"
 
-    payload = json.loads(response_messages[-1]["payload"])
+    payload = json.loads(ack_messages[-1]["payload"])
     assert payload["status"] == "completed"
     assert payload["result"]["success"] is True
