@@ -1,5 +1,6 @@
 paho-mqtt>=1.6.1
 requests>=2.25.1
+websocket-client>=1.8.0
 
 # Shared MQTT topics/schemas package
 central-core-mqtt-shared @ git+https://github.com/elyobelyob/central-core-mqtt-shared.git@v1.0.0
