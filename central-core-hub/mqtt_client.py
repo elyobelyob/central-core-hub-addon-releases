@@ -535,6 +535,29 @@ class CentralCoreClient:
         self.selected_sensors = []
         # cache of last published selected sensor values for change detection
         self._selected_sensor_cache = {}
+        # HA websocket listener instance (populated when HA integration configured)
+        self._ha_ws_listener = None
+        # Try to start HA websocket listener if HA API config present
+        try:
+            if self.ha_api_url and self.ha_api_token:
+                try:
+                    import ha_client as _ha
+
+                    try:
+                        self._ha_ws_listener = _ha.HAWebSocketListener(
+                            self.ha_api_url, self.ha_api_token, on_event=None, log_fn=_log
+                        )
+                        started = self._ha_ws_listener.start()
+                        _log(f"HA WS listener started={started}")
+                    except Exception:
+                        _log("Failed to start HA WS listener")
+                        self._ha_ws_listener = None
+                except Exception:
+                    # ha_client not available or import failed
+                    self._ha_ws_listener = None
+        except Exception:
+            # Non-fatal
+            self._ha_ws_listener = None
 
     def build_ack_topic(self, action, command_id):
         """Build a versioned ACK topic for the given action and command_id.
@@ -1032,11 +1055,58 @@ class CentralCoreClient:
                 self.run_iteration()
                 time.sleep(self.telemetry_interval)
         finally:
+            # Stop HA websocket listener if running (safe/idempotent)
+            try:
+                listener = getattr(self, "_ha_ws_listener", None)
+                if listener is not None:
+                    stop_fn = getattr(listener, "stop", None)
+                    if callable(stop_fn):
+                        try:
+                            stop_fn()
+                            _log("HA WS listener stopped")
+                        except Exception:
+                            _log("Failed to stop HA WS listener")
+                            traceback.print_exc()
+                    else:
+                        _log("HA WS listener has no stop() method")
+                    try:
+                        # Clear reference so subsequent calls are no-ops
+                        self._ha_ws_listener = None
+                    except Exception:
+                        pass
+            except Exception:
+                traceback.print_exc()
             try:
                 self._client.loop_stop()
                 self._client.disconnect()
             except Exception:
                 pass
+
+    def close(self):
+        """Stop background listeners and disconnect MQTT (safe to call multiple times)."""
+        try:
+            listener = getattr(self, "_ha_ws_listener", None)
+            if listener is not None:
+                stop_fn = getattr(listener, "stop", None)
+                if callable(stop_fn):
+                    try:
+                        stop_fn()
+                    except Exception:
+                        traceback.print_exc()
+                try:
+                    self._ha_ws_listener = None
+                except Exception:
+                    pass
+        except Exception:
+            traceback.print_exc()
+        try:
+            self._client.loop_stop()
+        except Exception:
+            pass
+        try:
+            self._client.disconnect()
+        except Exception:
+            pass
 
     def run_iteration(self):
         """Single run loop iteration: reconnect if needed, publish telemetry

@@ -165,12 +165,41 @@ class HAWebSocketListener:
         return True
 
     def stop(self):
+        # Idempotent stop: if already requested, return immediately
+        try:
+            if self._stop.is_set():
+                return
+        except Exception:
+            # If _stop is not a proper Event for some reason, continue
+            pass
+
         self._stop.set()
         try:
             if self._ws:
-                self._ws.close()
+                try:
+                    self._ws.close()
+                except Exception:
+                    traceback.print_exc()
         except Exception:
             traceback.print_exc()
+        # Attempt to join the thread (short timeout) and clear references
+        try:
+            thr = getattr(self, "_thread", None)
+            if thr is not None and getattr(thr, "is_alive", lambda: False)():
+                try:
+                    thr.join(timeout=2)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        try:
+            self._ws = None
+        except Exception:
+            pass
+        try:
+            self._thread = None
+        except Exception:
+            pass
 
     def _send_json(self, sock, obj):
         try:
