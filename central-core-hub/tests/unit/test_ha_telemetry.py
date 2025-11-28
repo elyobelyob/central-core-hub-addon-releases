@@ -1,4 +1,5 @@
 import json
+import time
 from pathlib import Path
 import importlib.util
 
@@ -12,66 +13,6 @@ def _load_module(path: Path, name: str):
     assert loader is not None
     loader.exec_module(module)
     return module
-
-
-def test_fetch_ha_info_parses_config_like_response(tmp_path):
-    # Prepare a fake requests-like module with a get() that returns an object
-    class Resp:
-        def __init__(self, payload):
-            self._payload = payload
-
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return self._payload
-
-    class FakeReqs:
-        def __init__(self, payload):
-            self.payload = payload
-
-        def get(self, url, headers=None, timeout=None):
-            return Resp(self.payload)
-
-    repo_root = Path(__file__).resolve().parents[3]
-    ha_path = repo_root / "central-core-hub" / "ha_client.py"
-    ha = _load_module(ha_path, "ha_client_testmod")
-
-    payload = {
-        "version": "2025.11.3",
-        "supervisor": {"version": "2025.11.5"},
-        "os_name": "Home Assistant OS",
-        "os_version": "16.3",
-        "frontend_version": "20251105.1",
-    }
-
-    info = ha.fetch_ha_info("http://ha", "token", requests_mod=FakeReqs(payload))
-    assert info is not None
-    assert info.get("core") == "2025.11.3"
-    assert info.get("supervisor") == "2025.11.5"
-    # operating_system may be provided as name or name+version; accept either
-    os_info = info.get("operating_system") or ""
-    assert "Home Assistant OS" in os_info or "16.3" in os_info
-
-
-def test_fetch_ha_info_handles_non_dict_and_errors(tmp_path):
-    class Resp:
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return [1, 2, 3]
-
-    class FakeReqs:
-        def get(self, url, headers=None, timeout=None):
-            return Resp()
-
-    repo_root = Path(__file__).resolve().parents[3]
-    ha_path = repo_root / "central-core-hub" / "ha_client.py"
-    ha = _load_module(ha_path, "ha_client_testmod2")
-
-    info = ha.fetch_ha_info("http://ha", "token", requests_mod=FakeReqs())
-    assert info is None
 
 
 def test_build_telemetry_includes_home_assistant():
@@ -94,58 +35,63 @@ def test_build_telemetry_includes_home_assistant():
     assert data["home_assistant"].get("core") == "2025.11.3"
 
 
-def test_publish_telemetry_includes_home_assistant(monkeypatch):
+def test_ha_websocket_writes_version_to_options(tmp_path, monkeypatch):
+    # Load the ha_client module from the repo
     repo_root = Path(__file__).resolve().parents[3]
-    mqtt_path = repo_root / "central-core-hub" / "mqtt_client.py"
-    mqtt = _load_module(mqtt_path, "mqtt_client_testmod")
     ha_path = repo_root / "central-core-hub" / "ha_client.py"
-    ha = _load_module(ha_path, "ha_client_testmod3")
-    # Ensure mqtt_client's `from ha_client import fetch_ha_info` finds our
-    # test-loaded module by inserting it into sys.modules under the expected
-    # name.
-    import sys
+    ha = _load_module(ha_path, "ha_client_testmod_ws")
 
-    sys.modules["ha_client"] = ha
+    # Redirect OPTIONS_PATH to a temp file so unit test doesn't touch /data
+    opts_file = tmp_path / "options.json"
+    monkeypatch.setattr(ha, "OPTIONS_PATH", str(opts_file))
 
-    # Create a dummy client with minimal options
-    opts = {"client_id": "test-hub", "ha_api_url": "http://ha", "ha_api_token": "tok"}
-    c = mqtt.CentralCoreClient(opts)
+    # Fake websocket object that will return the handshake messages and a
+    # get_config result containing the version.
+    class FakeWS:
+        def __init__(self, msgs):
+            self._msgs = msgs[:]
 
-    # Monkeypatch fetch_ha_info to return a known dict
-    monkeypatch.setattr(ha, "fetch_ha_info", lambda url, token: {"core": "2025.11.3"})
+        def send(self, data):
+            # accept and ignore
+            return None
 
-    captured = {}
+        def recv(self):
+            if self._msgs:
+                return json.dumps(self._msgs.pop(0))
+            time.sleep(0.05)
+            return ""
 
-    def fake_publish(topic, payload, qos=0):
-        captured["topic"] = topic
-        captured["payload"] = payload
+        def close(self):
+            return None
 
-        class R:
-            rc = 0
+    msgs = [
+        {"type": "auth_required"},
+        {"type": "auth_ok"},
+        {"type": "result", "id": 2, "result": {"version": "2025.11.3"}},
+    ]
 
-        return R()
+    # Monkeypatch websocket.create_connection to return our FakeWS
+    class FakeWSModule:
+        def create_connection(self, *args, **kwargs):
+            return FakeWS(msgs)
 
-    # Replace the instance _publish to capture what would be sent
-    monkeypatch.setattr(c, "_publish", fake_publish)
+    monkeypatch.setattr(ha, "websocket", FakeWSModule())
 
-    # Call publish_telemetry and ensure payload contains home_assistant
-    # To test that `home_assistant` is passed through, monkeypatch the
-    # module-level `build_telemetry` used by mqtt_client to capture kwargs
-    # and ensure `home_assistant` is present. This avoids interacting with
-    # the shared pydantic model which may filter unknown fields.
-    import json as _json
+    # Start listener; it should write the ha_version into the options file
+    listener = ha.HAWebSocketListener("http://ha.local", "tok", on_event=None, log_fn=lambda m: None)
+    started = listener.start()
+    assert started is True
 
-    def fake_bt(client_id, **kwargs):
-        # return a JSON payload that includes the kwargs for assertion
-        return _json.dumps({"client_id": client_id, **kwargs})
+    # Wait up to 2s for the options file to be written
+    deadline = time.time() + 2.0
+    while time.time() < deadline and not opts_file.exists():
+        time.sleep(0.05)
 
-    monkeypatch.setattr(mqtt, "build_telemetry", fake_bt)
+    # Stop the listener thread
+    listener.stop()
 
-    # Ensure ha_client import used by mqtt resolves to our test module
-    import sys
-    sys.modules["ha_client"] = ha
-
-    c.publish_telemetry()
-    assert "payload" in captured
-    data = json.loads(captured["payload"])
-    assert data.get("home_assistant") and data["home_assistant"].get("core") == "2025.11.3"
+    assert opts_file.exists(), "options.json not written by websocket listener"
+    data = json.loads(opts_file.read_text())
+    assert data.get("ha_version") == "2025.11.3"
+    # Ensure in-memory cache was also populated
+    assert ha.get_ha_version() == "2025.11.3"

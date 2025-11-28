@@ -12,6 +12,30 @@ import time
 import traceback
 # datetime/timezone not used in this module
 
+# Path to the add-on options file. Tests can monkeypatch this variable to
+# redirect writes to a temporary location.
+OPTIONS_PATH = "/data/options.json"
+
+# In-memory cache for the discovered Home Assistant version. This avoids
+# filesystem reads on every telemetry publish; the websocket listener will
+# populate this when it learns the version.
+_HA_VERSION_CACHE = None
+
+
+def set_ha_version(version: str):
+    """Set the in-memory cached HA version."""
+    global _HA_VERSION_CACHE
+    try:
+        _HA_VERSION_CACHE = str(version) if version is not None else None
+    except Exception:
+        _HA_VERSION_CACHE = None
+
+
+def get_ha_version():
+    """Return the in-memory cached HA version or None."""
+    return _HA_VERSION_CACHE
+
+
 try:
     import requests
 except Exception:
@@ -97,70 +121,10 @@ def fetch_sensors_by_ids(ha_api_url, ha_api_token, entity_ids, requests_mod=None
     return results
 
 
-def fetch_ha_info(ha_api_url, ha_api_token, requests_mod=None):
-    """Fetch basic Home Assistant instance information useful for telemetry.
-
-    This is a best-effort helper that attempts a few well-known endpoints
-    and maps likely keys to a small, stable dict. Returns None on error.
-    """
-    req = requests_mod or requests
-    if not ha_api_url or not ha_api_token or req is None:
-        return None
-    endpoints = ["/api/config", "/api/info", "/api/"]
-    base = ha_api_url.rstrip("/")
-    headers = {
-        "Authorization": f"Bearer {ha_api_token}",
-        "Content-Type": "application/json",
-    }
-    for ep in endpoints:
-        try:
-            url = base + ep
-            r = req.get(url, headers=headers, timeout=5)
-            r.raise_for_status()
-            data = r.json()
-            if not isinstance(data, dict):
-                continue
-            # Map a few likely fields to a compact shape used by telemetry
-            info = {}
-            # installation method
-            info["installation_method"] = (
-                data.get("installation_type")
-                or data.get("installation_method")
-                or data.get("installation")
-                or None
-            )
-            # core version
-            info["core"] = data.get("version") or data.get("core_version") or None
-            # supervisor
-            sup = data.get("supervisor")
-            if isinstance(sup, dict):
-                info["supervisor"] = sup.get("version")
-            else:
-                info["supervisor"] = data.get("supervisor_version") or data.get(
-                    "supervisor"
-                )
-            # operating system
-            # Build a readable operating system string from available fields.
-            os_name = data.get("os_name")
-            os_version = data.get("os_version")
-            if os_name and os_version:
-                os_combined = f"{os_name} {os_version}"
-            else:
-                os_combined = os_name or data.get("operating_system")
-            info["operating_system"] = os_combined or None
-            # frontend / frontend version
-            info["frontend"] = (
-                data.get("frontend")
-                or data.get("frontend_version")
-                or data.get("frontend_url")
-                or None
-            )
-            # If at least one meaningful field present, return it
-            if any(v for v in info.values()):
-                return info
-        except Exception:
-            continue
-    return None
+# Note: REST-based info extraction was found to be unreliable for HA version
+# in some deployments because the version is only exposed over the websocket
+# API. The prior `fetch_ha_info` helper was removed in favor of reading a
+# websocket-populated `ha_version` value from the add-on options file.
 
 
 class HAWebSocketListener:
@@ -257,6 +221,14 @@ class HAWebSocketListener:
                 self._ws,
                 {"id": 1, "type": "subscribe_events", "event_type": "state_changed"},
             )
+            # Request HA config/version once after auth. Some HA installations
+            # expose version information only via the websocket API. We send a
+            # `get_config` request (id=2) and handle the `result` message below.
+            try:
+                self._send_json(self._ws, {"id": 2, "type": "get_config"})
+            except Exception:
+                pass
+            ha_version_written = False
             last_ping = time.time()
             while not self._stop.is_set():
                 now = time.time()
@@ -278,6 +250,50 @@ class HAWebSocketListener:
                     continue
                 if msg.get("type") == "pong":
                     continue
+                # Handle result responses such as the get_config reply (id=2)
+                if msg.get("type") == "result" and msg.get("id") == 2 and not ha_version_written:
+                    try:
+                        res = msg.get("result") or {}
+                        # Try several common keys where HA may publish its version
+                        ha_version = None
+                        if isinstance(res, dict):
+                            ha_version = (
+                                res.get("version")
+                                or res.get("homeassistant_version")
+                                or (res.get("config") or {}).get("version")
+                            )
+                        # Persist to the add-on options path (tests may override
+                        # `OPTIONS_PATH`) similarly to `run.sh` so the main process
+                        # can pick up the discovered HA version.
+                        if ha_version:
+                            try:
+                                # Update in-memory cache first so telemetry can
+                                # immediately pick up the value without reading
+                                # the options file.
+                                try:
+                                    set_ha_version(ha_version)
+                                except Exception:
+                                    pass
+                                opts_path = OPTIONS_PATH
+                                try:
+                                    with open(opts_path, "r") as f:
+                                        opts = json.load(f)
+                                except Exception:
+                                    opts = {}
+                                if not isinstance(opts, dict):
+                                    opts = {}
+                                opts["ha_version"] = str(ha_version)
+                                try:
+                                    with open(opts_path, "w") as f:
+                                        json.dump(opts, f)
+                                    self._log(f"Wrote ha_version={ha_version} to {opts_path}")
+                                    ha_version_written = True
+                                except Exception as e:
+                                    self._log(f"Failed to write ha_version to {opts_path}: {e}")
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
                 if msg.get("type") != "event":
                     continue
                 data = msg.get("event", {}).get("data", {}) or {}
