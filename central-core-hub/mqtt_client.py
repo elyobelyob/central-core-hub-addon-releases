@@ -859,14 +859,28 @@ class CentralCoreClient:
         return False
 
     def publish_telemetry(self):
-        # Attempt to fetch Home Assistant core info and include in telemetry
+        # Attempt to fetch Home Assistant core info and include in telemetry.
+        # Add diagnostic logging so CI/runtime traces why `home_assistant`
+        # may be omitted from telemetry payloads (network, auth, or import errors).
         ha_info = None
         try:
             from ha_client import fetch_ha_info
 
-            ha_info = fetch_ha_info(self.ha_api_url, self.ha_api_token)
-        except Exception:
-            ha_info = None
+            if not self.ha_api_url or not self.ha_api_token:
+                _log("HA API config missing; skipping fetch of Home Assistant info")
+            else:
+                try:
+                    ha_info = fetch_ha_info(self.ha_api_url, self.ha_api_token)
+                    if ha_info is None:
+                        _log(
+                            "HA info fetch returned None (endpoint unreachable or unexpected response)"
+                        )
+                except Exception as exc:
+                    _log(f"Exception while fetching HA info: {exc}")
+                    traceback.print_exc()
+        except Exception as exc:
+            _log(f"Could not import ha_client.fetch_ha_info: {exc}")
+            traceback.print_exc()
 
         payload = build_telemetry(
             self.client_id,
