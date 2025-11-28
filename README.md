@@ -129,3 +129,32 @@ Integration test:
 See `central-core-hub/mqtt_client.py` for `build_vault_payload()` implementation.
 
 See `central-core-hub/run.sh` for implementation details.
+
+Formatting & Linting
+--------------------
+
+This repository uses `ruff` as the single tool for linting and formatting.
+
+- Format code in-place:
+
+```bash
+ruff format .
+```
+
+- Run lint checks:
+
+```bash
+ruff check .
+```
+
+If you use `pre-commit`, the repository is configured to run `ruff --fix` automatically on commits. To install the hook locally:
+
+```bash
+pip install pre-commit
+pre-commit install
+pre-commit run --all-files
+```
+
+Notes:
+- We intentionally removed Black and Flake8 in favor of Ruff. If you previously relied on Black, Ruff's formatting is compatible, but Black-specific tooling is not required.
+- The project's `ruff.toml` contains settings to make Ruff behave in a Black-compatible way (ignore `E203`, `line-length = 120`).
