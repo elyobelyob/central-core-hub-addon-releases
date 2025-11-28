@@ -670,15 +670,25 @@ class CentralCoreClient:
             traceback.print_exc()
             return None
 
-    def on_connect(self, client, userdata, flags, rc, properties=None):
+    def on_connect(self, client, userdata, *args, **kwargs):
         """MQTT on_connect callback.
 
-        Accept an optional `properties` argument (MQTT v5) for
-        compatibility with different paho-mqtt versions. Any exceptions
-        are caught so the paho background thread does not crash when the
-        broker is down or callbacks fail.
+        Accept variable args/kwargs to be tolerant of different paho-mqtt
+        versions (MQTT v3/v5 differences). Extract the return code (`rc`)
+        and optional `properties` when present. Catch all exceptions so
+        the paho background thread does not crash when callbacks fail.
         """
         try:
+            # rc may be provided positionally or as a kwarg (different paho versions)
+            rc = None
+            properties = None
+            if len(args) >= 1:
+                rc = args[0]
+            if len(args) >= 2:
+                properties = args[1]
+            rc = kwargs.get("rc", kwargs.get("reasonCode", rc))
+            properties = kwargs.get("properties", properties)
+
             _log(f"Connected to MQTT broker with rc={rc}")
             try:
                 # Subscribe to Vault command pattern with QoS=1
@@ -703,8 +713,26 @@ class CentralCoreClient:
             _log("Unhandled exception in on_connect", sys.stderr)
             traceback.print_exc()
 
-    def on_disconnect(self, client, userdata, rc, properties=None):
+    def on_disconnect(self, client, userdata, *args, **kwargs):
+        """MQTT on_disconnect callback.
+
+        Be tolerant of varying callback signatures from paho-mqtt. Attempt
+        to extract a return code or reason and set internal connected
+        state to False. Catch all exceptions so paho's background thread
+        remains running even if disconnect handling fails.
+        """
         try:
+            rc = None
+            properties = None
+            # Positional args may be (rc,) or (rc, properties, ...)
+            if len(args) >= 1:
+                rc = args[0]
+            if len(args) >= 2:
+                properties = args[1]
+            # Also check kwargs for common names
+            rc = kwargs.get("rc", kwargs.get("reasonCode", rc))
+            properties = kwargs.get("properties", properties)
+
             _log(f"Disconnected from MQTT broker rc={rc}")
             self._connected = False
         except Exception:
