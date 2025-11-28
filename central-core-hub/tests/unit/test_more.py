@@ -108,6 +108,40 @@ def test_get_cpu_percent_handles_none(monkeypatch):
     assert mod.get_cpu_percent() is None
 
 
+def test_resolve_ha_version_falls_back_to_rest(monkeypatch):
+    mod = _load_client_module()
+    c = mod.CentralCoreClient(
+        {
+            "client_id": "unit-ha",
+            "ha_api_url": "http://ha.local",
+            "ha_api_token": "tok",
+        }
+    )
+
+    class FakeRequests:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, url, headers=None, timeout=None):
+            self.calls.append(url)
+
+            class FakeResp:
+                def raise_for_status(self):
+                    return None
+
+                def json(self):
+                    return {"version": "2025.11.3"}
+
+            return FakeResp()
+
+    fake_requests = FakeRequests()
+    monkeypatch.setattr(mod, "requests", fake_requests, raising=False)
+    c._read_ha_version_from_options = lambda path: None
+    version = c._resolve_ha_version()
+    assert version == "2025.11.3"
+    assert c._ha_version_cache == "2025.11.3"
+
+
 def test_fetch_sensors_parses_http_response(monkeypatch):
     mod = _load_client_module()
 

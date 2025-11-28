@@ -33,6 +33,7 @@ def test_build_telemetry_includes_home_assistant():
     data = json.loads(raw)
     assert "home_assistant" in data
     assert data["home_assistant"].get("core") == "2025.11.3"
+    assert data.get("ha_version") == "2025.11.3"
 
 
 def test_ha_websocket_writes_version_to_options(tmp_path, monkeypatch):
