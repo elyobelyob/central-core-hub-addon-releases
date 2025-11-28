@@ -167,3 +167,21 @@ pre-commit run --all-files
 Notes:
 - We intentionally removed Black and Flake8 in favor of Ruff. If you previously relied on Black, Ruff's formatting is compatible, but Black-specific tooling is not required.
 - The project's `ruff.toml` contains settings to make Ruff behave in a Black-compatible way (ignore `E203`, `line-length = 120`).
+
+Release Notes
+-------------
+
+Recent notable commits (extracted from git history):
+
+From `v1.1.25..v1.1.26`:
+
+- chore(release): bump version to 1.1.26 (7076e68)
+- test(ha_client): add timeout, malformed-json, and pending-request timeout tests (56785e5)
+
+From `v1.1.26..HEAD`:
+
+- chore(release): include all changes; bump version to 1.1.27 (1f730f9)
+- docs(changelog): add release notes for v1.1.27 (d591831)
+- docs(changelog): backfill commits for v1.1.26..v1.1.27 (16b4f2e)
+
+For more details see `CHANGELOG.md` or the git history.
