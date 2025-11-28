@@ -567,9 +567,9 @@ class CentralCoreClient:
                         started = self._ha_ws_listener.start()
                         _log(f"HA WS listener started={started}")
                     except Exception:
-                    _log("Failed to start HA WS listener")
-                    traceback.print_exc()
-                    self._ha_ws_listener = None
+                        _log("Failed to start HA WS listener")
+                        traceback.print_exc()
+                        self._ha_ws_listener = None
                 except Exception:
                     # ha_client not available or import failed
                     _log("HA WS helper import failed")
