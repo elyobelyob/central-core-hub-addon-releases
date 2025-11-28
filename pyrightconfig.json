@@ -1,16 +1,16 @@
 {
     "pythonVersion": "3.14",
     "pythonPlatform": "Darwin",
+    "extraPaths": ["./.venv/lib/python3.14/site-packages"],
     "include": ["central-core-hub"],
     "exclude": [
         "central-core-hub/tests",
         "central-core-hub/__pycache__",
         "central-core-hub/tmp",
         "**/node_modules",
-        ".venv"
+        ".venv",
+        "central-core-hub/.venv"
     ],
     "reportMissingModuleSource": false,
-    "analysis": {
-        "useLibraryCodeForTypes": false
-    }
+    "useLibraryCodeForTypes": false
 }
