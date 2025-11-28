@@ -95,3 +95,52 @@ def test_ha_websocket_writes_version_to_options(tmp_path, monkeypatch):
     assert data.get("ha_version") == "2025.11.3"
     # Ensure in-memory cache was also populated
     assert ha.get_ha_version() == "2025.11.3"
+
+
+def test_ha_websocket_auth_message_writes_version(tmp_path, monkeypatch):
+    repo_root = Path(__file__).resolve().parents[3]
+    ha_path = repo_root / "central-core-hub" / "ha_client.py"
+    ha = _load_module(ha_path, "ha_client_testmod_ws_auth")
+
+    opts_file = tmp_path / "options.json"
+    monkeypatch.setattr(ha, "OPTIONS_PATH", str(opts_file))
+
+    class FakeWS:
+        def __init__(self, msgs):
+            self._msgs = msgs[:]
+
+        def send(self, data):
+            return None
+
+        def recv(self):
+            if self._msgs:
+                return json.dumps(self._msgs.pop(0))
+            time.sleep(0.05)
+            return ""
+
+        def close(self):
+            return None
+
+    msgs = [
+        {"type": "auth_required", "ha_version": "2025.12.1"},
+        {"type": "auth_ok"},
+    ]
+
+    class FakeWSModule:
+        def create_connection(self, *args, **kwargs):
+            return FakeWS(msgs)
+
+    monkeypatch.setattr(ha, "websocket", FakeWSModule())
+
+    listener = ha.HAWebSocketListener("http://ha.local", "tok", on_event=None, log_fn=lambda m: None)
+    assert listener.start() is True
+
+    deadline = time.time() + 2.0
+    while time.time() < deadline and not opts_file.exists():
+        time.sleep(0.05)
+
+    listener.stop()
+    assert opts_file.exists()
+    data = json.loads(opts_file.read_text())
+    assert data.get("ha_version") == "2025.12.1"
+    assert ha.get_ha_version() == "2025.12.1"

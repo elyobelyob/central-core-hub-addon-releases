@@ -223,4 +223,20 @@ def build_vault_payload(raw_payload_json):
         "ip": data.get("ip"),
         "metrics": metrics,
     }
+    ha_info = data.get("home_assistant")
+    if ha_info is not None:
+        try:
+            vault["home_assistant"] = dict(ha_info) if isinstance(ha_info, dict) else ha_info
+        except Exception:
+            vault["home_assistant"] = ha_info
+        core_version = None
+        if isinstance(ha_info, dict):
+            core_version = ha_info.get("core")
+        elif isinstance(ha_info, str):
+            core_version = ha_info
+        if core_version:
+            try:
+                vault["ha_version"] = str(core_version)
+            except Exception:
+                vault["ha_version"] = core_version
     return json.dumps(vault)

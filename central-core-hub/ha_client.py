@@ -213,6 +213,38 @@ class HAWebSocketListener:
         except Exception:
             pass
 
+    def _persist_ha_version(self, version):
+        """Cache and persist the discovered HA version."""
+        if version is None:
+            return False
+        try:
+            version_str = str(version)
+        except Exception:
+            return False
+
+        try:
+            set_ha_version(version_str)
+        except Exception:
+            pass
+
+        opts_path = OPTIONS_PATH
+        try:
+            with open(opts_path, "r") as f:
+                opts = json.load(f)
+        except Exception:
+            opts = {}
+        if not isinstance(opts, dict):
+            opts = {}
+        opts["ha_version"] = version_str
+        try:
+            with open(opts_path, "w") as f:
+                json.dump(opts, f)
+            self._log(f"Wrote ha_version={version_str} to {opts_path}")
+            return True
+        except Exception as e:
+            self._log(f"Failed to write ha_version to {opts_path}: {e}")
+        return False
+
     def _run(self):
         timeout_exc_cls = (
             WebSocketTimeoutException
@@ -233,11 +265,14 @@ class HAWebSocketListener:
                 return
             self._ws = websocket.create_connection(ws_url, timeout=15)
             # Expect auth_required, then send auth
+            ha_version_written = False
             hello_raw = self._ws.recv()
             hello = json.loads(hello_raw or "{}")
             if hello.get("type") != "auth_required":
                 self._log("HA WS unexpected hello")
                 return
+            if hello.get("ha_version"):
+                ha_version_written = self._persist_ha_version(hello.get("ha_version"))
             self._send_json(
                 self._ws, {"type": "auth", "access_token": self.ha_api_token}
             )
@@ -257,7 +292,6 @@ class HAWebSocketListener:
                 self._send_json(self._ws, {"id": 2, "type": "get_config"})
             except Exception:
                 pass
-            ha_version_written = False
             last_ping = time.time()
             while not self._stop.is_set():
                 now = time.time()
@@ -280,10 +314,13 @@ class HAWebSocketListener:
                 if msg.get("type") == "pong":
                     continue
                 # Handle result responses such as the get_config reply (id=2)
-                if msg.get("type") == "result" and msg.get("id") == 2 and not ha_version_written:
+                if (
+                    msg.get("type") == "result"
+                    and msg.get("id") == 2
+                    and not ha_version_written
+                ):
                     try:
                         res = msg.get("result") or {}
-                        # Try several common keys where HA may publish its version
                         ha_version = None
                         if isinstance(res, dict):
                             ha_version = (
@@ -291,36 +328,8 @@ class HAWebSocketListener:
                                 or res.get("homeassistant_version")
                                 or (res.get("config") or {}).get("version")
                             )
-                        # Persist to the add-on options path (tests may override
-                        # `OPTIONS_PATH`) similarly to `run.sh` so the main process
-                        # can pick up the discovered HA version.
                         if ha_version:
-                            try:
-                                # Update in-memory cache first so telemetry can
-                                # immediately pick up the value without reading
-                                # the options file.
-                                try:
-                                    set_ha_version(ha_version)
-                                except Exception:
-                                    pass
-                                opts_path = OPTIONS_PATH
-                                try:
-                                    with open(opts_path, "r") as f:
-                                        opts = json.load(f)
-                                except Exception:
-                                    opts = {}
-                                if not isinstance(opts, dict):
-                                    opts = {}
-                                opts["ha_version"] = str(ha_version)
-                                try:
-                                    with open(opts_path, "w") as f:
-                                        json.dump(opts, f)
-                                    self._log(f"Wrote ha_version={ha_version} to {opts_path}")
-                                    ha_version_written = True
-                                except Exception as e:
-                                    self._log(f"Failed to write ha_version to {opts_path}: {e}")
-                            except Exception:
-                                pass
+                            ha_version_written = self._persist_ha_version(ha_version)
                     except Exception:
                         pass
                 if msg.get("type") != "event":
