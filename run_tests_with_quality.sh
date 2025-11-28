@@ -7,10 +7,10 @@ echo "🔍 Running code quality checks..."
 
 # Check version consistency
 echo "📋 Checking version consistency..."
-python version_manager.py validate
+python3 version_manager.py validate
 
 echo "🧾 Running type checks with pyright..."
-python -m pip install pyright
+python3 -m pip install pyright
 pyright
 
 # Use ruff for formatting and linting checks
@@ -25,5 +25,5 @@ echo "✅ Code quality checks passed!"
 # Run tests
 echo "🧪 Running unit tests..."
 cd central-core-hub
-python -m pytest tests/unit/ -x --tb=short
+python3 -m pytest tests/unit/ -x --tb=short
 echo "🎉 All tests passed!"
