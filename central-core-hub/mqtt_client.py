@@ -648,30 +648,46 @@ class CentralCoreClient:
             traceback.print_exc()
             return None
 
-    def on_connect(self, client, userdata, flags, rc):
-        _log(f"Connected to MQTT broker with rc={rc}")
-        try:
-            # Subscribe to Vault command pattern with QoS=1
-            client.subscribe(self.cmd_sub_topic, qos=1)
-            _log(f"Subscribed to {self.cmd_sub_topic} (Vault command pattern)")
-        except Exception:
-            _log("Subscription failed", sys.stderr)
-        self._connected = True
-        # Publish sensors list immediately on startup/connection
-        try:
-            self.publish_sensors()
-        except Exception:
-            # do not let sensor publish failures prevent client
-            _log("Failed to publish sensors on connect", sys.stderr)
-        # Publish initial telemetry on connection
-        try:
-            self.publish_telemetry()
-        except Exception:
-            _log("Failed to publish telemetry on connect", sys.stderr)
+    def on_connect(self, client, userdata, flags, rc, properties=None):
+        """MQTT on_connect callback.
 
-    def on_disconnect(self, client, userdata, rc):
-        _log(f"Disconnected from MQTT broker rc={rc}")
-        self._connected = False
+        Accept an optional `properties` argument (MQTT v5) for
+        compatibility with different paho-mqtt versions. Any exceptions
+        are caught so the paho background thread does not crash when the
+        broker is down or callbacks fail.
+        """
+        try:
+            _log(f"Connected to MQTT broker with rc={rc}")
+            try:
+                # Subscribe to Vault command pattern with QoS=1
+                client.subscribe(self.cmd_sub_topic, qos=1)
+                _log(f"Subscribed to {self.cmd_sub_topic} (Vault command pattern)")
+            except Exception:
+                _log("Subscription failed", sys.stderr)
+            self._connected = True
+            # Publish sensors list immediately on startup/connection
+            try:
+                self.publish_sensors()
+            except Exception:
+                # do not let sensor publish failures prevent client
+                _log("Failed to publish sensors on connect", sys.stderr)
+            # Publish initial telemetry on connection
+            try:
+                self.publish_telemetry()
+            except Exception:
+                _log("Failed to publish telemetry on connect", sys.stderr)
+        except Exception:
+            # Ensure no exceptions escape the callback into paho's thread
+            _log("Unhandled exception in on_connect", sys.stderr)
+            traceback.print_exc()
+
+    def on_disconnect(self, client, userdata, rc, properties=None):
+        try:
+            _log(f"Disconnected from MQTT broker rc={rc}")
+            self._connected = False
+        except Exception:
+            _log("Unhandled exception in on_disconnect", sys.stderr)
+            traceback.print_exc()
 
     def on_message(self, client, userdata, msg):
         try:
