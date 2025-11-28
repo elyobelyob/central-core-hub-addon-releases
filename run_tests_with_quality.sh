@@ -6,24 +6,23 @@ set -e  # Exit on any error
 echo "🔍 Running code quality checks..."
 
 # Check version consistency
+PYTHON="./.venv/bin/python3"
+PYRIGHT="./.venv/bin/pyright"
+RUFF="./.venv/bin/ruff"
+
 echo "📋 Checking version consistency..."
-python3 version_manager.py validate
+$PYTHON version_manager.py validate
 
 echo "🧾 Running type checks with pyright..."
-python3 -m pip install pyright
-pyright
-
-# Use ruff for formatting and linting checks
-echo "📏 Checking code formatting with ruff..."
-ruff format --check central-core-hub/
+$PYTHON -m pip install pyright ruff
+$PYRIGHT
 
 echo "🔎 Running linting with ruff..."
-ruff check central-core-hub/
+$RUFF check .
 
 echo "✅ Code quality checks passed!"
 
 # Run tests
-echo "🧪 Running unit tests..."
-cd central-core-hub
-python3 -m pytest tests/unit/ -x --tb=short
+echo "🧪 Running unit tests with coverage..."
+PYTHONPATH=.venv/lib/python3.14/site-packages $PYTHON -m pytest central-core-hub/tests/unit/ -q --cov=central-core-hub --cov-report=xml:coverage.xml --cov-report=term-missing
 echo "🎉 All tests passed!"
