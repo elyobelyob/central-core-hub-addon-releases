@@ -248,7 +248,11 @@ class HAWebSocketListener:
         """Call a Home Assistant service over the websocket connection."""
         if not self._ws:
             return None
-        payload = {"type": "call_service", "domain": domain, "service": service}
+        payload: typing.Dict[str, typing.Any] = {
+            "type": "call_service",
+            "domain": domain,
+            "service": service,
+        }
         if service_data:
             payload["service_data"] = dict(service_data)
         try:
