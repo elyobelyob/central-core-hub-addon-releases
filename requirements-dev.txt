@@ -1,6 +1,5 @@
 pytest>=7.0.0
 pytest-cov>=4.0.0
-black>=24.1.0
-flake8>=6.0.0
+ruff>=0.12.0
 requests>=2.25.1
 paho-mqtt>=1.6.1

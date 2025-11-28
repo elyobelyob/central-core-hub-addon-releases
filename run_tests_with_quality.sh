@@ -9,13 +9,12 @@ echo "🔍 Running code quality checks..."
 echo "📋 Checking version consistency..."
 python version_manager.py validate
 
-# Run black (formatter) in check mode
-echo "📏 Checking code formatting with black..."
-black --check --diff central-core-hub/
+# Use ruff for formatting and linting checks
+echo "📏 Checking code formatting with ruff..."
+ruff format --check central-core-hub/
 
-# Run flake8 (linter)
-echo "🔎 Running linting with flake8..."
-flake8 central-core-hub/
+echo "🔎 Running linting with ruff..."
+ruff check central-core-hub/
 
 echo "✅ Code quality checks passed!"
 
