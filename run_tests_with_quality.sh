@@ -9,6 +9,10 @@ echo "🔍 Running code quality checks..."
 echo "📋 Checking version consistency..."
 python version_manager.py validate
 
+echo "🧾 Running type checks with pyright..."
+python -m pip install pyright
+pyright
+
 # Use ruff for formatting and linting checks
 echo "📏 Checking code formatting with ruff..."
 ruff format --check central-core-hub/
