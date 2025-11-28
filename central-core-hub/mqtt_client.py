@@ -75,6 +75,12 @@ MQTT_OPTIONS_ENV = "MQTT_OPTIONS_PATH"
 
 def get_addon_version():
     """Get the add-on version from config.json."""
+    # Allow an explicit override via environment variable. This is useful
+    # for containers, CI, or test harnesses where the runtime-installed
+    # `/config.json` may be out of date or intentionally different.
+    env_v = os.environ.get("ADDON_VERSION")
+    if env_v:
+        return env_v
     # Try HA add-on location first
     try:
         with open("/config.json", "r") as f:
