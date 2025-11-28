@@ -859,11 +859,21 @@ class CentralCoreClient:
         return False
 
     def publish_telemetry(self):
+        # Attempt to fetch Home Assistant core info and include in telemetry
+        ha_info = None
+        try:
+            from ha_client import fetch_ha_info
+
+            ha_info = fetch_ha_info(self.ha_api_url, self.ha_api_token)
+        except Exception:
+            ha_info = None
+
         payload = build_telemetry(
             self.client_id,
             **{
                 "version": get_addon_version(),
                 "telemetry_interval": self.telemetry_interval,
+                "home_assistant": ha_info,
             },
         )
         try:

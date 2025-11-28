@@ -97,6 +97,70 @@ def fetch_sensors_by_ids(ha_api_url, ha_api_token, entity_ids, requests_mod=None
     return results
 
 
+def fetch_ha_info(ha_api_url, ha_api_token, requests_mod=None):
+    """Fetch basic Home Assistant instance information useful for telemetry.
+
+    This is a best-effort helper that attempts a few well-known endpoints
+    and maps likely keys to a small, stable dict. Returns None on error.
+    """
+    req = requests_mod or requests
+    if not ha_api_url or not ha_api_token or req is None:
+        return None
+    endpoints = ["/api/config", "/api/info", "/api/"]
+    base = ha_api_url.rstrip("/")
+    headers = {
+        "Authorization": f"Bearer {ha_api_token}",
+        "Content-Type": "application/json",
+    }
+    for ep in endpoints:
+        try:
+            url = base + ep
+            r = req.get(url, headers=headers, timeout=5)
+            r.raise_for_status()
+            data = r.json()
+            if not isinstance(data, dict):
+                continue
+            # Map a few likely fields to a compact shape used by telemetry
+            info = {}
+            # installation method
+            info["installation_method"] = (
+                data.get("installation_type")
+                or data.get("installation_method")
+                or data.get("installation")
+                or None
+            )
+            # core version
+            info["core"] = data.get("version") or data.get("core_version") or None
+            # supervisor
+            sup = data.get("supervisor")
+            if isinstance(sup, dict):
+                info["supervisor"] = sup.get("version")
+            else:
+                info["supervisor"] = data.get("supervisor_version") or data.get(
+                    "supervisor"
+                )
+            # operating system
+            info["operating_system"] = (
+                data.get("os_name")
+                or data.get("operating_system")
+                or (data.get("os_name") and data.get("os_version") and f"{data.get('os_name')} {data.get('os_version')}")
+                or None
+            )
+            # frontend / frontend version
+            info["frontend"] = (
+                data.get("frontend")
+                or data.get("frontend_version")
+                or data.get("frontend_url")
+                or None
+            )
+            # If at least one meaningful field present, return it
+            if any(v for v in info.values()):
+                return info
+        except Exception:
+            continue
+    return None
+
+
 class HAWebSocketListener:
     """Minimal HA websocket listener to stream state_changed events for selected sensors."""
 

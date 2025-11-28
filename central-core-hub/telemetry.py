@@ -66,6 +66,7 @@ def build_telemetry(
     disk_info_fn=None,
     version=None,
     telemetry_interval=None,
+    home_assistant=None,
 ):
     hostname = socket.gethostname()
     ip = "unknown"
@@ -167,6 +168,14 @@ def build_telemetry(
         "addon_version": version,
         "telemetry_interval": telemetry_interval,
     }
+    # Optionally attach Home Assistant instance information when provided.
+    # This will be a small dict with keys like `installation_method`, `core`,
+    # `supervisor`, `operating_system`, and `frontend` when available.
+    if home_assistant is not None:
+        try:
+            payload["home_assistant"] = dict(home_assistant)
+        except Exception:
+            payload["home_assistant"] = None
     # Prefer the authoritative schema from central_core_mqtt_shared when available.
     try:
         import central_core_mqtt_shared.schemas as _schemas  # type: ignore
