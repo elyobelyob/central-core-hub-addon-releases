@@ -31,6 +31,63 @@ def handle_message(
     try:
         topic = msg.topic
         # Accept both legacy and versioned command topics (with or without /v1/)
+        expected_config_topic = f"hubs/{client.client_id}/v1/cmd/config/update"
+        expected_config_topic_legacy = f"hubs/{client.client_id}/cmd/config/update"
+        if topic == expected_config_topic or topic == expected_config_topic_legacy:
+            try:
+                cmd = (
+                    json.loads(payload_str)
+                    if payload_str and payload_str != "<binary>"
+                    else {}
+                )
+            except Exception:
+                cmd = {}
+            command_id = cmd.get("command_id")
+            action = cmd.get("action") or "config/update"
+            if command_id:
+                try:
+                    v1_ack = client.build_ack_topic(action, command_id)
+                except Exception:
+                    v1_ack = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
+                ack_payload = {
+                    "status": "acknowledged",
+                    "timestamp": datetime.now(timezone.utc)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                }
+                try:
+                    client._publish(v1_ack, json.dumps(ack_payload), qos=1)
+                except Exception:
+                    pass
+            upd_result = {}
+            try:
+                upd_result = client.trigger_addon_update() or {}
+            except Exception:
+                upd_result = {"success": False, "error": "trigger_failed"}
+
+            completion_payload = {
+                "status": "completed" if upd_result.get("success") else "failed",
+                "result": upd_result,
+                "timestamp": datetime.now(timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z"),
+            }
+            if command_id:
+                try:
+                    v1_comp = client.build_ack_topic(action, command_id)
+                except Exception:
+                    v1_comp = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
+                try:
+                    client._publish(v1_comp, json.dumps(completion_payload), qos=1)
+                except Exception:
+                    pass
+                try:
+                    legacy = f"hubs/{client.client_id}/cmd/{command_id}/response"
+                    client._publish(legacy, json.dumps(completion_payload), qos=1)
+                except Exception:
+                    pass
+            return
+
         expected_cmd_topic = f"hubs/{client.client_id}/cmd/sensors/poll"
         expected_cmd_topic_v1 = f"hubs/{client.client_id}/v1/cmd/sensors/poll"
         if topic == expected_cmd_topic or topic == expected_cmd_topic_v1:

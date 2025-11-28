@@ -39,6 +39,9 @@ def test_ha_ws_listener_started_and_stop_called(tmp_path, monkeypatch):
         def stop(self):
             self.stopped = True
 
+        def update_selectors(self, selectors):
+            self.selectors = selectors
+
     fake_ha = type("M", (), {"HAWebSocketListener": FakeListener, "OPTIONS_PATH": str(tmp_path / "options.json")})
 
     # Ensure mqtt_client imports our fake ha_client
@@ -54,6 +57,11 @@ def test_ha_ws_listener_started_and_stop_called(tmp_path, monkeypatch):
     inst = c._ha_ws_listener
     assert isinstance(inst, FakeListener)
     assert inst.started is True
+    assert inst.on_event == c._on_ha_state_event
+
+    # Updating the client's selected sensors should update selectors on the listener
+    c.selected_sensors = ["sensor.test"]
+    assert inst.selectors == {"sensor.test"}
 
     # Calling close should stop the listener
     c.close()

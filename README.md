@@ -102,7 +102,16 @@ The add-on subscribes to Vault-style command topics and supports the following c
 
 	- Notes:
 		- If HA is not configured, the command will report failures for targets and still ACK/complete if `command_id` is present.
-		- Telemetry published after `sensors/set` contains both `data` and `attributes` so consumers see authoritative values and metadata (units, device_class, etc.).
+- Telemetry published after `sensors/set` contains both `data` and `attributes` so consumers see authoritative values and metadata (units, device_class, etc.).
+### Config update command (Vault-driven)
+
+- `hubs/<client_id>/v1/cmd/config/update` (QoS 1)
+  - Trigger: Vault sends a JSON payload with an optional `command_id`/`action`.
+  - Behavior:
+    1. Immediately ACKs the command to `hubs/<client_id>/v1/ack/config.update/<command_id>` (if provided).
+    2. Calls HA’s websocket services (`supervisor.check_addon_updates` or `hassio.check_addon_updates` followed by `supervisor.addon_update`/`hassio.addon_update`) using the add-on slug from `central-core-hub/config.json`.
+    3. Publishes a completion response containing the service call results to both the versioned ACK topic and the legacy `hubs/<client_id>/cmd/<command_id>/response` topic.
+  - Payload `result` includes both the “check” and “update” responses along with a `success` flag so Vault knows whether a newer version was installed.
 
 ### Home Assistant integration options
 

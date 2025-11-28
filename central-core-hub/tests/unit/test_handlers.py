@@ -43,6 +43,13 @@ class DummyClient:
     def _publish(self, topic, payload, qos=0):
         self.published.append({"topic": topic, "payload": payload, "qos": qos})
 
+    def trigger_addon_update(self):
+        return {
+            "success": True,
+            "check": {"domain": "supervisor"},
+            "update": {"domain": "supervisor"},
+        }
+
 
 def test_handle_sensors_poll_no_ha():
     mqtt_mod, handlers = _load_modules()
@@ -81,3 +88,36 @@ def test_handle_sensors_set_no_ha_fails():
     # completion response should be published to the command response topic
     ack_topic = f"hubs/{c.client_id}/v1/ack/sensors.set/cmd1"
     assert any(p["topic"] == ack_topic for p in c.published)
+
+
+def test_config_update_command_triggers_addon_update():
+    mqtt_mod, handlers = _load_modules()
+    c = DummyClient()
+    cmd = {
+        "command_id": "conf123",
+        "action": "config/update",
+        "payload": {},
+    }
+    topic = f"hubs/{c.client_id}/v1/cmd/config/update"
+    msg = DummyMsg(topic, json.dumps(cmd).encode("utf-8"))
+
+    handlers.handle_message(
+        c,
+        msg,
+        json.dumps(cmd),
+        fetch_sensors=lambda a, b: [],
+        build_telemetry=mqtt_mod.build_telemetry,
+        build_vault_payload=mqtt_mod.build_vault_payload,
+        requests=None,
+    )
+
+    ack_topic = f"hubs/{c.client_id}/v1/ack/config.update/conf123"
+    response_topic = f"hubs/{c.client_id}/cmd/conf123/response"
+    ack_messages = [p for p in c.published if p["topic"] == ack_topic]
+    response_messages = [p for p in c.published if p["topic"] == response_topic]
+    assert ack_messages, "no ack published for config update"
+    assert response_messages, "no response published for config update"
+
+    payload = json.loads(response_messages[-1]["payload"])
+    assert payload["status"] == "completed"
+    assert payload["result"]["success"] is True

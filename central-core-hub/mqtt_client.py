@@ -541,11 +541,13 @@ class CentralCoreClient:
         # the list of sensor entity_ids that Vault has indicated are selected
         # Vault is considered authoritative for selections when it requests/sets
         # them; handlers will update this list accordingly.
-        self.selected_sensors = []
-        # cache of last published selected sensor values for change detection
         self._selected_sensor_cache = {}
+        self._selected_sensors = []
+        self._selected_sensors_set = set()
+        self.selected_sensors = []
         # HA websocket listener instance (populated when HA integration configured)
         self._ha_ws_listener = None
+        self._addon_slug = None
         # Try to start HA websocket listener if HA API config present
         try:
             if self.ha_api_url and self.ha_api_token:
@@ -554,7 +556,11 @@ class CentralCoreClient:
 
                     try:
                         self._ha_ws_listener = _ha.HAWebSocketListener(
-                            self.ha_api_url, self.ha_api_token, on_event=None, log_fn=_log
+                            self.ha_api_url,
+                            self.ha_api_token,
+                            on_event=self._on_ha_state_event,
+                            log_fn=_log,
+                            selectors=self._selected_sensors_set,
                         )
                         started = self._ha_ws_listener.start()
                         _log(f"HA WS listener started={started}")
@@ -567,6 +573,43 @@ class CentralCoreClient:
         except Exception:
             # Non-fatal
             self._ha_ws_listener = None
+
+    def _update_ha_listener_selectors(self):
+        listener = getattr(self, "_ha_ws_listener", None)
+        if listener is None:
+            return
+        updater = getattr(listener, "update_selectors", None)
+        if not callable(updater):
+            return
+        try:
+            updater(self._selected_sensors_set)
+        except Exception:
+            pass
+
+    def _prune_selected_sensor_cache(self):
+        if not self._selected_sensors_set:
+            self._selected_sensor_cache = {}
+            return
+        self._selected_sensor_cache = {
+            entity: value
+            for entity, value in self._selected_sensor_cache.items()
+            if entity in self._selected_sensors_set
+        }
+
+    @property
+    def selected_sensors(self):
+        return list(self._selected_sensors)
+
+    @selected_sensors.setter
+    def selected_sensors(self, value):
+        try:
+            new_list = list(value) if value else []
+        except Exception:
+            new_list = []
+        self._selected_sensors = new_list
+        self._selected_sensors_set = set(new_list)
+        self._prune_selected_sensor_cache()
+        self._update_ha_listener_selectors()
 
     def build_ack_topic(self, action, command_id):
         """Build a versioned ACK topic for the given action and command_id.
@@ -701,6 +744,116 @@ class CentralCoreClient:
             _log(f"MQTT ERROR publishing to {topic}", sys.stderr)
             traceback.print_exc()
             return None
+
+    def _on_ha_state_event(self, entity_id, new_state):
+        """Handle HA websocket state_changed events for selected sensors."""
+        if not entity_id:
+            return
+        if not self._selected_sensors_set or entity_id not in self._selected_sensors_set:
+            return
+        if not new_state:
+            return
+
+        raw_state = new_state.get("state")
+        normalized = self._normalize_sensor_value(raw_state)
+        prev_value = self._selected_sensor_cache.get(entity_id)
+        if prev_value == normalized:
+            return
+        self._selected_sensor_cache[entity_id] = normalized
+
+        attrs = new_state.get("attributes") or {}
+        name = attrs.get("friendly_name") or new_state.get("name") or entity_id
+        enabled = not bool(attrs.get("disabled_by"))
+        now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        telemetry_payload = {
+            "data": {entity_id: normalized},
+            "names": {entity_id: name},
+            "enabled": {entity_id: enabled},
+            "attributes": {entity_id: dict(attrs)},
+            "timestamp": now_iso,
+        }
+        try:
+            self._publish(
+                self.preferred_sensors_topic,
+                json.dumps(telemetry_payload),
+                qos=0,
+            )
+        except Exception:
+            _log("Failed to publish selected sensor change via HA WS", sys.stderr)
+        return
+
+    def _call_ha_service(
+        self,
+        domain,
+        service,
+        service_data=None,
+        timeout=15.0,
+    ):
+        listener = getattr(self, "_ha_ws_listener", None)
+        if listener is None:
+            return None
+        call_srv = getattr(listener, "call_service", None)
+        if not callable(call_srv):
+            return None
+        try:
+            return call_srv(
+                domain,
+                service,
+                service_data=service_data,
+                timeout=timeout,
+            )
+        except Exception:
+            return None
+
+    def _resolve_addon_slug(self):
+        slug = getattr(self, "_addon_slug", None)
+        if slug:
+            return slug
+        slug = None
+        try:
+            config_path = pathlib.Path(__file__).parent / "config.json"
+            with open(config_path, "r") as f:
+                data = json.load(f)
+                slug = data.get("slug")
+        except Exception:
+            slug = None
+        if not slug:
+            slug = os.environ.get("ADDON_SLUG")
+        self._addon_slug = slug
+        return slug
+
+    def trigger_addon_update(self):
+        slug = self._resolve_addon_slug()
+        if not slug:
+            return {"success": False, "reason": "addon_slug_missing"}
+
+        check_domains = (
+            ("supervisor", "check_addon_updates"),
+            ("hassio", "check_addon_updates"),
+        )
+        check_result = None
+        for domain, service in check_domains:
+            res = self._call_ha_service(domain, service, {"addon": slug})
+            if res is not None:
+                check_result = {"domain": domain, "result": res}
+                break
+
+        update_domains = (
+            ("supervisor", "addon_update"),
+            ("hassio", "addon_update"),
+        )
+        update_result = None
+        for domain, service in update_domains:
+            res = self._call_ha_service(domain, service, {"addon": slug})
+            if res is not None:
+                update_result = {"domain": domain, "result": res}
+                break
+
+        return {
+            "success": update_result is not None,
+            "check": check_result,
+            "update": update_result,
+        }
 
     def on_connect(self, client, userdata, *args, **kwargs):
         """MQTT on_connect callback.

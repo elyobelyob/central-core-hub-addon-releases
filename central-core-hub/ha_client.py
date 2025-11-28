@@ -10,6 +10,7 @@ import json
 import threading
 import time
 import traceback
+import typing
 # datetime/timezone not used in this module
 
 # Path to the add-on options file. Tests can monkeypatch this variable to
@@ -139,6 +140,9 @@ class HAWebSocketListener:
         self._thread = None
         self._stop = threading.Event()
         self._ws = None
+        self._prot_req_lock = threading.Lock()
+        self._next_request_id = 3
+        self._pending_requests: dict[int, dict[str, typing.Any]] = {}
 
     def update_selectors(self, selectors):
         self.selectors = set(selectors or [])
@@ -213,6 +217,57 @@ class HAWebSocketListener:
         except Exception:
             pass
 
+    def _register_request(self):
+        event = threading.Event()
+        with self._prot_req_lock:
+            req_id = self._next_request_id
+            self._next_request_id += 1
+            self._pending_requests[req_id] = {"event": event, "result": None}
+        return req_id, event
+
+    def _set_pending_result(self, req_id, result):
+        if req_id is None:
+            return
+        with self._prot_req_lock:
+            pending = self._pending_requests.get(req_id)
+        if pending is None:
+            return
+        pending["result"] = result
+        try:
+            pending["event"].set()
+        except Exception:
+            pass
+
+    def call_service(
+        self,
+        domain: str,
+        service: str,
+        service_data: typing.Optional[typing.Dict[str, typing.Any]] = None,
+        timeout: float = 15.0,
+    ) -> typing.Optional[typing.Dict[str, typing.Any]]:
+        """Call a Home Assistant service over the websocket connection."""
+        if not self._ws:
+            return None
+        payload = {"type": "call_service", "domain": domain, "service": service}
+        if service_data:
+            payload["service_data"] = dict(service_data)
+        try:
+            req_id, event = self._register_request()
+        except Exception:
+            return None
+        payload["id"] = req_id
+        try:
+            self._send_json(self._ws, payload)
+        except Exception:
+            with self._prot_req_lock:
+                self._pending_requests.pop(req_id, None)
+            return None
+        completed = event.wait(timeout)
+        with self._prot_req_lock:
+            final = self._pending_requests.pop(req_id, None)
+        if not completed or final is None:
+            return None
+        return final.get("result")
     def _persist_ha_version(self, version):
         """Cache and persist the discovered HA version."""
         if version is None:
@@ -314,24 +369,28 @@ class HAWebSocketListener:
                 if msg.get("type") == "pong":
                     continue
                 # Handle result responses such as the get_config reply (id=2)
-                if (
-                    msg.get("type") == "result"
-                    and msg.get("id") == 2
-                    and not ha_version_written
-                ):
-                    try:
-                        res = msg.get("result") or {}
-                        ha_version = None
-                        if isinstance(res, dict):
-                            ha_version = (
-                                res.get("version")
-                                or res.get("homeassistant_version")
-                                or (res.get("config") or {}).get("version")
-                            )
-                        if ha_version:
-                            ha_version_written = self._persist_ha_version(ha_version)
-                    except Exception:
-                        pass
+                if msg.get("type") == "result":
+                    req_id = msg.get("id")
+                    if req_id == 2 and not ha_version_written:
+                        try:
+                            res = msg.get("result") or {}
+                            ha_version = None
+                            if isinstance(res, dict):
+                                ha_version = (
+                                    res.get("version")
+                                    or res.get("homeassistant_version")
+                                    or (res.get("config") or {}).get("version")
+                                )
+                            if ha_version:
+                                ha_version_written = self._persist_ha_version(
+                                    ha_version
+                                )
+                        except Exception:
+                            pass
+                        # continue so we do not treat get_config as pending request
+                        continue
+                    self._set_pending_result(req_id, msg)
+                    continue
                 if msg.get("type") != "event":
                     continue
                 data = msg.get("event", {}).get("data", {}) or {}
