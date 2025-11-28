@@ -4,6 +4,10 @@ WORKDIR /app
 
 # Install dependencies
 COPY requirements.txt .
+
+# Ensure `git` is available so pip can install VCS dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the code
