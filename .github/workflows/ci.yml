@@ -20,9 +20,11 @@ jobs:
           python -m pip install --upgrade pip
           # Try installing the released package first from PyPI; if not
           # available, fall back to installing the package directly from
-          # the GitHub repository. Finally install the repo's requirements.
+          # the GitHub repository. Finally install the repo's requirements
+          # and ensure PyYAML is available for tests that parse YAML.
           pip install central-core-mqtt-shared || pip install git+https://github.com/elyobelyob/central-core-mqtt-shared.git@main
           pip install -r requirements.txt
+          pip install pyyaml
       - name: Run linters and type checks
         run: |
           pip install pyright flake8

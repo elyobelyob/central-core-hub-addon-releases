@@ -1,6 +1,7 @@
 import json
 import re
 from pathlib import Path
+import yaml
 
 
 def _read_json(path: Path):
@@ -9,17 +10,19 @@ def _read_json(path: Path):
 
 
 def _read_yaml_version(path: Path):
-    """Lightweight parser to extract the top-level `version` value from a
-    YAML manifest without requiring PyYAML. Looks for a line like
-    `version: "1.2.3"` or `version: 1.2.3` and returns the version string.
+    """Parse the YAML manifest and return its top-level `version` value.
+
+    Uses PyYAML's `safe_load` for correctness. Tests / CI must ensure
+    `pyyaml` is installed before running this test.
     """
-    pattern = re.compile(r"^\s*version\s*:\s*[\"']?(?P<ver>[0-9]+\.[0-9]+\.[0-9]+)[\"']?\s*$")
     with path.open() as f:
-        for line in f:
-            m = pattern.match(line)
-            if m:
-                return m.group("ver")
-    return None
+        data = yaml.safe_load(f)
+    if not isinstance(data, dict):
+        return None
+    v = data.get("version")
+    if v is None:
+        return None
+    return str(v).strip()
 
 
 def test_versions_aligned_across_manifests():
