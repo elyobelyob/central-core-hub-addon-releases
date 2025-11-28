@@ -39,7 +39,7 @@ def test_on_message_passes_binary_payload_to_handler(monkeypatch):
         def decode(self, *a, **k):
             raise RuntimeError("no decode")
 
-    msg = types.SimpleNamespace(topic="hubs/bin/cmd/test", payload=BadPayload())
+    msg = types.SimpleNamespace(topic="hubs/bin/v1/cmd/test", payload=BadPayload())
 
     called = {}
 

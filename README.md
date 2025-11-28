@@ -57,13 +57,13 @@ Notes:
 
 ### Commands (subscribe)
 
-The add-on subscribes to Vault-style command topics and supports the following commands for `hubs/<client_id>/cmd/...`:
+The add-on subscribes to Vault-style command topics and supports the following commands for `hubs/<client_id>/v1/cmd/...`:
 
-- `hubs/<client_id>/cmd/sensors/poll` (QoS 1)
+- `hubs/<client_id>/v1/cmd/sensors/poll` (QoS 1)
 	- Request: optional JSON payload with `command_id` and an optional `payload.sensors` list to request a subset.
 	- Behavior: publishes an immediate ACK to the versioned ACK topic `hubs/<client_id>/v1/ack/<action.replace('/', '.')>/<command_id>` (if `command_id` present), then publishes sensor telemetry to `hubs/<client_id>/telemetry/sensors`, and finally publishes a completion response with a result summary to the same versioned ACK topic.
 
-- `hubs/<client_id>/cmd/sensors/set` (QoS 1)
+- `hubs/<client_id>/v1/cmd/sensors/set` (QoS 1)
 	- Request payload examples:
 
 		1) List form
@@ -110,7 +110,7 @@ The add-on subscribes to Vault-style command topics and supports the following c
   - Behavior:
     1. Immediately ACKs the command to `hubs/<client_id>/v1/ack/config.update/<command_id>` (if provided).
     2. Calls HA’s websocket services (`supervisor.check_addon_updates` or `hassio.check_addon_updates` followed by `supervisor.addon_update`/`hassio.addon_update`) using the add-on slug from `central-core-hub/config.json`.
-    3. Publishes a completion response containing the service call results to both the versioned ACK topic and the legacy `hubs/<client_id>/cmd/<command_id>/response` topic.
+    3. Publishes a completion response containing the service call results to the versioned ACK topic `hubs/<client_id>/v1/ack/<action.replace('/', '.')>/<command_id>` (the same topic receives both ACK and completion payloads).
   - Payload `result` includes both the “check” and “update” responses along with a `success` flag so Vault knows whether a newer version was installed.
 
 ### Home Assistant integration options

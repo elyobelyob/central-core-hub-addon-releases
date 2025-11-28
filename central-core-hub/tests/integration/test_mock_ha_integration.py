@@ -101,7 +101,7 @@ def test_set_and_readback_with_mock_ha():
         "M",
         (),
         {
-            "topic": f"hubs/{c.client_id}/cmd/sensors/set",
+            "topic": f"hubs/{c.client_id}/v1/cmd/sensors/set",
             "payload": json.dumps(command).encode("utf-8"),
         },
     )

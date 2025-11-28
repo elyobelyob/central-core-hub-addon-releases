@@ -52,7 +52,7 @@ def test_poll_malformed_payload_no_ack(monkeypatch):
     c.vault_topic = ""
 
     # payload_str is invalid JSON -> handler should treat as {} and not ack
-    msg = DummyMsg(f"hubs/{c.client_id}/cmd/sensors/poll", b"not-a-json")
+    msg = DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/poll", b"not-a-json")
 
     # on_message will decode payload into '<binary>' unless provided; call handlers via on_message
     c.on_message(None, None, msg)
@@ -108,7 +108,7 @@ def test_set_with_sensors_as_dict_and_readback_failure(monkeypatch):
     payload = {"sensors": {"sensor.a": "10", "sensor.b": "20"}}
     cmd = {"command_id": "cid", "action": "sensors/set", "payload": payload}
     msg = DummyMsg(
-        f"hubs/{c.client_id}/cmd/sensors/set", json.dumps(cmd).encode("utf-8")
+        f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(cmd).encode("utf-8")
     )
 
     c.on_message(None, None, msg)

@@ -71,7 +71,7 @@ def test_on_message_handles_missing_handlers_import(monkeypatch):
 
     class DummyMsg:
         def __init__(self):
-            self.topic = "hubs/unit/cmd/other"
+            self.topic = "hubs/unit/v1/cmd/other"
             self.payload = b"{}"
 
     # Force importlib.util.spec_from_file_location to raise so fallback fails

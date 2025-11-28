@@ -30,10 +30,9 @@ def handle_message(
     """
     try:
         topic = msg.topic
-        # Accept both legacy and versioned command topics (with or without /v1/)
+        # Accept recent versioned command topics (v1)
         expected_config_topic = f"hubs/{client.client_id}/v1/cmd/config/update"
-        expected_config_topic_legacy = f"hubs/{client.client_id}/cmd/config/update"
-        if topic == expected_config_topic or topic == expected_config_topic_legacy:
+        if topic == expected_config_topic:
             try:
                 cmd = (
                     json.loads(payload_str)
@@ -81,16 +80,10 @@ def handle_message(
                     client._publish(v1_comp, json.dumps(completion_payload), qos=1)
                 except Exception:
                     pass
-                try:
-                    legacy = f"hubs/{client.client_id}/cmd/{command_id}/response"
-                    client._publish(legacy, json.dumps(completion_payload), qos=1)
-                except Exception:
-                    pass
             return
 
-        expected_cmd_topic = f"hubs/{client.client_id}/cmd/sensors/poll"
         expected_cmd_topic_v1 = f"hubs/{client.client_id}/v1/cmd/sensors/poll"
-        if topic == expected_cmd_topic or topic == expected_cmd_topic_v1:
+        if topic == expected_cmd_topic_v1:
             try:
                 cmd = (
                     json.loads(payload_str)
@@ -118,12 +111,6 @@ def handle_message(
                     client._publish(v1_ack, json.dumps(ack_payload), qos=1)
                 except Exception:
                     pass  # pragma: no cover
-                # Also publish legacy response topic for backward compatibility
-                try:
-                    legacy = f"hubs/{client.client_id}/cmd/{command_id}/response"
-                    client._publish(legacy, json.dumps(ack_payload), qos=1)
-                except Exception:
-                    pass
 
             sensors_requested = None
             try:
@@ -233,17 +220,10 @@ def handle_message(
                     client._publish(v1_comp, json.dumps(comp_payload), qos=1)
                 except Exception:
                     pass  # pragma: no cover
-                # Also publish legacy completion/response topic for backward compatibility
-                try:
-                    legacy = f"hubs/{client.client_id}/cmd/{command_id}/response"
-                    client._publish(legacy, json.dumps(comp_payload), qos=1)
-                except Exception:
-                    pass
             return
 
-        expected_set_topic = f"hubs/{client.client_id}/cmd/sensors/set"
         expected_set_topic_v1 = f"hubs/{client.client_id}/v1/cmd/sensors/set"
-        if topic == expected_set_topic or topic == expected_set_topic_v1:
+        if topic == expected_set_topic_v1:
             try:
                 cmd = (
                     json.loads(payload_str)
@@ -266,12 +246,6 @@ def handle_message(
                 }
                 try:
                     client._publish(v1_ack, json.dumps(ack_payload), qos=1)
-                except Exception:
-                    pass
-                # Also publish legacy ack/response topic for backward compatibility
-                try:
-                    legacy = f"hubs/{client.client_id}/cmd/{command_id}/response"
-                    client._publish(legacy, json.dumps(ack_payload), qos=1)
                 except Exception:
                     pass
 
@@ -349,12 +323,6 @@ def handle_message(
                 }
                 try:
                     client._publish(v1_comp, json.dumps(comp_payload), qos=1)
-                except Exception:
-                    pass
-                # Also publish legacy completion/response topic for backward compatibility
-                try:
-                    legacy = f"hubs/{client.client_id}/cmd/{command_id}/response"
-                    client._publish(legacy, json.dumps(comp_payload), qos=1)
                 except Exception:
                     pass
 
