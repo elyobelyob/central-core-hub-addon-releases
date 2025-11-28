@@ -17,24 +17,51 @@ import typing
 # redirect writes to a temporary location.
 OPTIONS_PATH = "/data/options.json"
 
-# In-memory cache for the discovered Home Assistant version. This avoids
-# filesystem reads on every telemetry publish; the websocket listener will
-# populate this when it learns the version.
-_HA_VERSION_CACHE = None
+# In-memory cache for the discovered Home Assistant version. Store a
+# small struct with the version string and the timestamp it was set so
+# consumers can apply a TTL without hitting the filesystem.
+_HA_VERSION_CACHE: typing.Optional[dict] = None
 
 
-def set_ha_version(version: str):
-    """Set the in-memory cached HA version."""
+def set_ha_version(version: str, ts: float | None = None):
+    """Set the in-memory cached HA version with optional timestamp.
+
+    If `ts` is not provided, the current time is used.
+    """
     global _HA_VERSION_CACHE
     try:
-        _HA_VERSION_CACHE = str(version) if version is not None else None
+        if version is None:
+            _HA_VERSION_CACHE = None
+            return
+        ver = str(version)
+        _HA_VERSION_CACHE = {"version": ver, "ts": float(ts or time.time())}
     except Exception:
         _HA_VERSION_CACHE = None
 
 
-def get_ha_version():
-    """Return the in-memory cached HA version or None."""
-    return _HA_VERSION_CACHE
+def get_ha_version(ttl_seconds: float | None = None):
+    """Return the in-memory cached HA version or None.
+
+    If `ttl_seconds` is provided, return None when the cached value is
+    older than the TTL.
+    """
+    global _HA_VERSION_CACHE
+    if not _HA_VERSION_CACHE:
+        return None
+    try:
+        ver = _HA_VERSION_CACHE.get("version")
+        ts = _HA_VERSION_CACHE.get("ts")
+        if ttl_seconds is not None and ts is not None:
+            try:
+                if (time.time() - float(ts)) > float(ttl_seconds):
+                    return None
+            except Exception:
+                # If timestamp arithmetic fails, be conservative and
+                # return None so callers will re-resolve.
+                return None
+        return ver
+    except Exception:
+        return None
 
 
 try:
@@ -129,12 +156,27 @@ def fetch_sensors_by_ids(ha_api_url, ha_api_token, entity_ids, requests_mod=None
 
 
 class HAWebSocketListener:
-    """Minimal HA websocket listener to stream state_changed events for selected sensors."""
+    """Minimal HA websocket listener to stream state_changed events for selected sensors.
 
-    def __init__(self, ha_api_url, ha_api_token, on_event, log_fn=None, selectors=None):
+    Accepts an optional `on_ha_version` callback that will be invoked when
+    the listener discovers/persists a Home Assistant version string. This
+    allows the caller to perform one-shot actions (e.g. publish telemetry)
+    when the HA core version becomes available.
+    """
+
+    def __init__(
+        self,
+        ha_api_url,
+        ha_api_token,
+        on_event,
+        log_fn=None,
+        selectors=None,
+        on_ha_version=None,
+    ):
         self.ha_api_url = ha_api_url
         self.ha_api_token = ha_api_token
         self.on_event = on_event
+        self.on_ha_version = on_ha_version
         self.log_fn = log_fn or (lambda m: None)
         self.selectors = set(selectors or [])
         self._thread = None
@@ -282,7 +324,8 @@ class HAWebSocketListener:
             return False
 
         try:
-            set_ha_version(version_str)
+            # Store with timestamp so callers may apply a TTL
+            set_ha_version(version_str, ts=time.time())
         except Exception:
             pass
 
@@ -299,6 +342,19 @@ class HAWebSocketListener:
             with open(opts_path, "w") as f:
                 json.dump(opts, f)
             self._log(f"Wrote ha_version={version_str} to {opts_path}")
+            # Notify caller that we discovered a HA version so they can
+            # perform one-shot actions like publishing telemetry.
+            try:
+                cb = getattr(self, "on_ha_version", None)
+                if callable(cb):
+                    try:
+                        cb(version_str)
+                    except Exception:
+                        # Do not let a callback failure interfere with
+                        # persistence; log and continue.
+                        traceback.print_exc()
+            except Exception:
+                pass
             return True
         except Exception as e:
             self._log(f"Failed to write ha_version to {opts_path}: {e}")

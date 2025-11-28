@@ -1,4 +1,5 @@
 import json
+import sys
 import time
 from pathlib import Path
 import importlib.util
@@ -145,3 +146,31 @@ def test_ha_websocket_auth_message_writes_version(tmp_path, monkeypatch):
     data = json.loads(opts_file.read_text())
     assert data.get("ha_version") == "2025.12.1"
     assert ha.get_ha_version() == "2025.12.1"
+
+
+def test_resolve_ha_version_uses_mqtt_options(tmp_path, monkeypatch):
+    repo_root = Path(__file__).resolve().parents[3]
+    ha_path = repo_root / "central-core-hub" / "ha_client.py"
+    mqtt_path = repo_root / "central-core-hub" / "mqtt_client.py"
+
+    spec = importlib.util.spec_from_file_location("ha_client", str(ha_path))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load ha_client spec")
+    ha_mod = importlib.util.module_from_spec(spec)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(ha_mod)
+    monkeypatch.setitem(sys.modules, "ha_client", ha_mod)
+
+    opts_file = tmp_path / "mqtt_options.json"
+    opts_file.write_text(json.dumps({"ha_version": "2025.12.5"}))
+    monkeypatch.setenv("MQTT_OPTIONS_PATH", str(opts_file))
+    monkeypatch.setattr(ha_mod, "OPTIONS_PATH", "/tmp/unused-options.json")
+
+    mqtt_mod = _load_module(mqtt_path, "mqtt_client_testmod_for_ha")
+    client = object.__new__(mqtt_mod.CentralCoreClient)
+    client._ha_version_cache = None
+    client.ha_api_url = None
+    client.ha_api_token = None
+
+    assert mqtt_mod.CentralCoreClient._resolve_ha_version(client) == "2025.12.5"
