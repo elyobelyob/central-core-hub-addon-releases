@@ -557,13 +557,28 @@ class CentralCoreClient:
                     import ha_client as _ha
 
                     try:
-                        self._ha_ws_listener = _ha.HAWebSocketListener(
-                            self.ha_api_url,
-                            self.ha_api_token,
-                            on_event=self._on_ha_state_event,
-                            log_fn=_log,
-                            selectors=self._selected_sensors_set,
-                        )
+                        # Pass an on_ha_version callback when supported by the
+                        # listener implementation. Older test fakes may not accept
+                        # the kwarg, so fall back to constructing without it.
+                        cls = getattr(_ha, "HAWebSocketListener")
+                        try:
+                            self._ha_ws_listener = cls(
+                                self.ha_api_url,
+                                self.ha_api_token,
+                                on_event=self._on_ha_state_event,
+                                log_fn=_log,
+                                selectors=self._selected_sensors_set,
+                                on_ha_version=self._on_ha_version,
+                            )
+                        except TypeError:
+                            # Fallback for legacy listener implementations/fakes
+                            self._ha_ws_listener = cls(
+                                self.ha_api_url,
+                                self.ha_api_token,
+                                on_event=self._on_ha_state_event,
+                                log_fn=_log,
+                                selectors=self._selected_sensors_set,
+                            )
                         started = self._ha_ws_listener.start()
                         _log(f"HA WS listener started={started}")
                     except Exception:
@@ -846,6 +861,34 @@ class CentralCoreClient:
         except Exception:
             return None
 
+    def _on_ha_version(self, version):
+        """Callback invoked when the HA websocket listener discovers a HA version.
+
+        Perform a one-shot telemetry publish so consumers see the updated
+        Home Assistant core information promptly.
+        """
+        if not version:
+            return
+        try:
+            ver = str(version)
+        except Exception:
+            return
+        prev = getattr(self, "_ha_version_cache", None)
+        # Update the local cache and trigger a one-shot telemetry publish
+        # only when the version has changed.
+        try:
+            if prev == ver:
+                self._ha_version_cache = ver
+                return
+            self._ha_version_cache = ver
+            try:
+                self.publish_telemetry()
+            except Exception:
+                _log("One-shot telemetry publish failed", sys.stderr)
+                traceback.print_exc()
+        except Exception:
+            traceback.print_exc()
+
     def _resolve_addon_slug(self):
         slug = getattr(self, "_addon_slug", None)
         if slug:
@@ -1097,7 +1140,12 @@ class CentralCoreClient:
             getter = getattr(_ha, "get_ha_version", None)
             if callable(getter):
                 try:
-                    version = getter()
+                    # Prefer a TTL-aware getter if available; fall back to
+                    # a no-arg getter for older versions.
+                    try:
+                        version = getter(ttl_seconds=300)
+                    except TypeError:
+                        version = getter()
                 except Exception:
                     version = None
             opts_path = getattr(_ha, "OPTIONS_PATH", None)
@@ -1122,16 +1170,31 @@ class CentralCoreClient:
 
     @staticmethod
     def _read_ha_version_from_options(opts_path):
-        path = opts_path or "/data/options.json"
-        try:
-            with open(path, "r") as f:
-                opts = json.load(f)
+        candidates = []
+        if opts_path:
+            candidates.append(str(opts_path))
+        resolved = _resolve_options_path()
+        if resolved:
+            resolved_str = str(resolved)
+            if resolved_str not in candidates:
+                candidates.append(resolved_str)
+        if not candidates:
+            candidates.append("/data/options.json")
+        for path in candidates:
+            if not path:
+                continue
+            try:
+                with open(path, "r") as f:
+                    opts = json.load(f)
+            except Exception:
+                continue
             if isinstance(opts, dict):
                 hv = opts.get("ha_version")
                 if hv:
-                    return str(hv)
-        except Exception:
-            pass
+                    try:
+                        return str(hv)
+                    except Exception:
+                        return hv
         return None
 
     def _fetch_ha_version_from_api(self):
