@@ -81,6 +81,22 @@ def get_addon_version():
     env_v = os.environ.get("ADDON_VERSION")
     if env_v:
         return env_v
+    # Check add-on options (Home Assistant mounts `/data/options.json`).
+    # Some add-on installers surface the installed version in the add-on
+    # options or allow an `addon_version` field to be set; prefer that
+    # when present so the value matches what is shown on the Add-on UI.
+    try:
+        if os.path.exists(OPTIONS_PATH):
+            with open(OPTIONS_PATH, "r") as f:
+                try:
+                    opts = json.load(f) or {}
+                    ver = opts.get("addon_version") or opts.get("version")
+                    if ver:
+                        return ver
+                except Exception:
+                    pass
+    except Exception:
+        pass
     # Try HA add-on location first
     try:
         with open("/config.json", "r") as f:
