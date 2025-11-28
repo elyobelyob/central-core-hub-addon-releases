@@ -1,5 +1,11 @@
 [tool.ruff]
 line-length = 120
-exclude = [".venv"]
-# Keep the default rule set but allow projects to add ignores via CLI or
-# CI as needed. This file centralizes ruff configuration for local and CI runs.
+exclude = [".venv", "venv", ".git", "__pycache__"]
+# Keep the default rule set but add a couple of project-level exceptions
+# so Ruff's behavior matches the prior Black + Flake8 setup.
+extend-ignore = ["E203"]
+per-file-ignores = {"__init__.py" = ["F401"]}
+
+[tool.black]
+# Mirror Black settings so tools share the same formatting configuration.
+line-length = 120
