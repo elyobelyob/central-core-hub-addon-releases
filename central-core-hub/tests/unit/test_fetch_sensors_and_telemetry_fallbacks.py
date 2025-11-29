@@ -45,7 +45,7 @@ def test_fetch_sensors_parses_entities(monkeypatch):
                     "state": "12",
                     "attributes": {"friendly_name": "X", "extra": 1},
                 },
-                {"entity_id": "binary.y", "state": "on", "attributes": {}},
+                    {"entity_id": "binary_sensor.y", "state": "on", "attributes": {}},
             ]
 
     class RClient:
@@ -55,8 +55,9 @@ def test_fetch_sensors_parses_entities(monkeypatch):
     cast(Any, mc).requests = RClient()
     sensors = mc.fetch_sensors("http://ha", "tok")
     assert isinstance(sensors, list)
-    # only sensor.* should be included
+    # sensor.* should be included; binary sensors are denied by default
     assert any(s["entity_id"] == "sensor.x" for s in sensors)
+    assert not any(s["entity_id"] == "binary_sensor.y" for s in sensors)
 
 
 def test_telemetry_get_cpu_from_mqtt_client_module(monkeypatch):
