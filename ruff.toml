@@ -4,6 +4,7 @@ exclude = [".venv", "build", "dist", "venv", ".git", "__pycache__"]
 # Black compatibility: Black's formatting can trigger some pycodestyle
 # warnings (notably E203). Ignore that so Ruff+Black behave consistently
 # and don't fight each other.
+[lint]
 extend-ignore = ["E203"]
 
 # Common per-file ignores (e.g. allow unused imports in package __init__ files)

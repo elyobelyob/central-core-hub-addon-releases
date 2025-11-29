@@ -1,0 +1,10 @@
+{
+  "apply_registry": true,
+  "registry_mode": "deny",
+  "entries": [
+    {
+      "entity_id": "sensor.forbidden*",
+      "provide": false
+    }
+  ]
+}

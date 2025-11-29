@@ -71,6 +71,132 @@ except Exception:
 
 OPTIONS_PATH = "/data/options.json"
 MQTT_OPTIONS_ENV = "MQTT_OPTIONS_PATH"
+SENSOR_REGISTRY = pathlib.Path(__file__).parent / "SENSOR_REGISTRY.yaml"
+# In-memory cache for the parsed SENSOR_REGISTRY to avoid repeated disk
+# reads during tight publish loops. Calls to `reload_sensor_registry()` will
+# clear the cache so handlers can update the file at runtime.
+_SENSOR_REGISTRY_CACHE = None
+_SENSOR_REGISTRY_MTIME = None
+
+
+def _load_sensor_registry():
+    """Read and parse the SENSOR_REGISTRY.yaml file.
+
+    Returns a list of registry entry dicts (with keys: entity_id, type, provide)
+    or an empty list if the registry is not present, malformed, or not
+    opted-in.
+    """
+    try:
+        import yaml
+
+        # Use mtime-based caching to avoid re-parsing the file every call.
+        global _SENSOR_REGISTRY_CACHE, _SENSOR_REGISTRY_MTIME
+        if not SENSOR_REGISTRY.exists():
+            _SENSOR_REGISTRY_CACHE = []
+            _SENSOR_REGISTRY_MTIME = None
+            return []
+        try:
+            mtime = SENSOR_REGISTRY.stat().st_mtime
+        except Exception:
+            mtime = None
+        if _SENSOR_REGISTRY_CACHE is not None and mtime is not None and mtime == _SENSOR_REGISTRY_MTIME:
+            return _SENSOR_REGISTRY_CACHE
+        with open(SENSOR_REGISTRY, "r") as f:
+            doc = yaml.safe_load(f) or {}
+        if not isinstance(doc, dict):
+            _SENSOR_REGISTRY_CACHE = []
+            _SENSOR_REGISTRY_MTIME = mtime
+            return []
+        mode = doc.get("registry_mode")
+        apply_registry = bool(doc.get("apply_registry", False))
+        if mode is None and not apply_registry:
+            _SENSOR_REGISTRY_CACHE = []
+            _SENSOR_REGISTRY_MTIME = mtime
+            return []
+        entries = doc.get("entries") or []
+        results = []
+        for e in entries:
+            if not isinstance(e, dict):
+                continue
+            results.append(
+                {
+                    "entity_id": e.get("entity_id"),
+                    "type": e.get("type"),
+                    "provide": e.get("provide"),
+                }
+            )
+        _SENSOR_REGISTRY_CACHE = results
+        _SENSOR_REGISTRY_MTIME = mtime
+        return results
+    except Exception:
+        return []
+
+
+def reload_sensor_registry():
+    """Invalidate any cached sensor registry so subsequent calls read disk."""
+    global _SENSOR_REGISTRY_CACHE, _SENSOR_REGISTRY_MTIME
+    _SENSOR_REGISTRY_CACHE = None
+    _SENSOR_REGISTRY_MTIME = None
+
+
+def is_entity_allowed(entity_id: str) -> bool:
+    """Return True if the given entity_id is allowed by the registry.
+
+    If the registry is absent or not enabled, default to allowing the
+    entity (safe/fallback behavior).
+    """
+    try:
+        import fnmatch
+        import yaml
+
+        if not SENSOR_REGISTRY.exists():
+            return True
+        with open(SENSOR_REGISTRY, "r") as f:
+            doc = yaml.safe_load(f) or {}
+        if not isinstance(doc, dict):
+            return True
+        mode = doc.get("registry_mode")
+        apply_registry = bool(doc.get("apply_registry", False))
+        if mode is None and not apply_registry:
+            return True
+
+        active_mode = str(mode).lower() if mode else "deny"
+
+        # Collect patterns
+        allow_patterns = []
+        deny_patterns = []
+        for e in doc.get("entries") or []:
+            if not isinstance(e, dict):
+                continue
+            eid = e.get("entity_id")
+            prov = e.get("provide")
+            if not isinstance(eid, str):
+                continue
+            if active_mode == "allow":
+                if prov:
+                    allow_patterns.append(eid)
+            else:
+                if prov is False:
+                    deny_patterns.append(eid)
+
+        if active_mode == "allow":
+            if not allow_patterns:
+                return True
+            for p in allow_patterns:
+                if fnmatch.fnmatch(entity_id, p):
+                    return True
+            return False
+
+        # deny mode
+        if not deny_patterns:
+            return True
+        for p in deny_patterns:
+            if fnmatch.fnmatch(entity_id, p):
+                return False
+        return True
+    except Exception:
+        return True
+
 
 
 def get_addon_version():
@@ -374,6 +500,10 @@ def get_cpu_percent():  # noqa: F811
 def fetch_sensors(ha_api_url, ha_api_token):
     if not ha_api_url or not ha_api_token or requests is None:
         return None
+    # fetch_sensors historically included an internal registry loader. For
+    # the larger change set we expose lightweight helpers so other publish
+    # paths can ask whether an entity should be published.
+
     try:
         url = ha_api_url.rstrip("/") + "/api/states"
         headers = {
@@ -386,19 +516,98 @@ def fetch_sensors(ha_api_url, ha_api_token):
         sensors = []
         for ent in data:
             ent_id = ent.get("entity_id")
-            if ent_id and ent_id.startswith("sensor."):
-                sensors.append(
-                    {
-                        "entity_id": ent_id,
-                        "state": ent.get("state"),
-                        "name": ent.get("attributes", {}).get("friendly_name")
-                        or ent_id,
-                        "attributes": ent.get("attributes", {}) or {},
-                        "last_changed": ent.get("last_changed"),
-                        "last_updated": ent.get("last_updated"),
-                    }
-                )
-        return sensors
+            if not ent_id:
+                continue
+            if not (
+                ent_id.startswith("sensor.") or ent_id.startswith("binary_sensor.")
+            ):
+                continue
+            sensors.append(
+                {
+                    "entity_id": ent_id,
+                    "state": ent.get("state"),
+                    "name": ent.get("attributes", {}).get("friendly_name") or ent_id,
+                    "attributes": ent.get("attributes", {}) or {},
+                    "last_changed": ent.get("last_changed"),
+                    "last_updated": ent.get("last_updated"),
+                }
+            )
+
+        # Consult SENSOR_REGISTRY if present. Registry is the source-of-truth:
+        # - If registry empty or unavailable, include all collected sensors
+        # - If registry contains entries, apply allowlist semantics:
+        #   * If any registry entry has provide==True, only include those that match
+        #   * If registry exists but no entries have provide==True (placeholders), include all
+        reg = _load_sensor_registry()
+        if not reg:
+            return sensors
+
+        # Support wildcard patterns in the registry (fnmatch semantics).
+        # Registry modes:
+        #  - 'deny'  : entries with `provide: false` exclude matching entities
+        #  - 'allow' : entries with `provide: true` allow matching entities (others excluded)
+        # If the registry is present but contains no effective rules for the
+        # chosen mode, fall back to including all sensors (safe default).
+        import fnmatch
+
+        mode = None
+        try:
+            # obtain the registry_mode from the file again (top-level)
+            with open(SENSOR_REGISTRY, "r") as _f:
+                import yaml as _yaml
+
+                _doc = _yaml.safe_load(_f) or {}
+                if isinstance(_doc, dict):
+                    mode = _doc.get("registry_mode")
+        except Exception:
+            mode = None
+
+        # determine active mode: prefer explicit mode, otherwise default to 'deny'
+        active_mode = str(mode).lower() if mode else "deny"
+
+        # Collect patterns according to mode
+        allow_patterns = []
+        deny_patterns = []
+        for e in reg:
+            eid = e.get("entity_id")
+            prov = e.get("provide")
+            if not isinstance(eid, str):
+                continue
+            if active_mode == "allow":
+                # allow mode: collect patterns where provide is truthy
+                if prov:
+                    allow_patterns.append(eid)
+            else:
+                # deny mode: collect patterns where provide is explicitly False
+                if prov is False:
+                    deny_patterns.append(eid)
+
+        if active_mode == "allow":
+            if not allow_patterns:
+                return sensors
+            filtered = []
+            for s in sensors:
+                ent = s.get("entity_id")
+                for p in allow_patterns:
+                    if fnmatch.fnmatch(ent, p):
+                        filtered.append(s)
+                        break
+            return filtered
+
+        # deny mode
+        if not deny_patterns:
+            return sensors
+        filtered = []
+        for s in sensors:
+            ent = s.get("entity_id")
+            denied = False
+            for p in deny_patterns:
+                if fnmatch.fnmatch(ent, p):
+                    denied = True
+                    break
+            if not denied:
+                filtered.append(s)
+        return filtered
     except Exception:
         return None
 
@@ -809,6 +1018,16 @@ class CentralCoreClient:
             return
         if not new_state:
             return
+
+        # Respect the central SENSOR_REGISTRY: if the entity is not allowed
+        # by the registry, skip publishing its state changes even if selected.
+        try:
+            if not is_entity_allowed(entity_id):
+                _log(f"Registry denies publishing for {entity_id}; skipping")
+                return
+        except Exception:
+            # If registry check fails, fall back to previous behavior
+            pass
 
         raw_state = new_state.get("state")
         normalized = self._normalize_sensor_value(raw_state)
@@ -1316,7 +1535,11 @@ class CentralCoreClient:
             return
         sensors = fetch_sensors(self.ha_api_url, self.ha_api_token) or []
         selected_set = set(self.selected_sensors)
-        filtered = [s for s in sensors if s.get("entity_id") in selected_set]
+        filtered = [
+            s
+            for s in sensors
+            if s.get("entity_id") in selected_set and is_entity_allowed(s.get("entity_id"))
+        ]
 
         data_map = {}
         names_map = {}
