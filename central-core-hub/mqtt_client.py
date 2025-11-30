@@ -1726,6 +1726,14 @@ class CentralCoreClient:
         # websocket listener. The websocket writes `ha_version` into the
         # add-on options file (path configurable via `ha_client.OPTIONS_PATH`).
         ha_version = self._resolve_ha_version()
+        # Defensive fallback: always try a direct read of the add-on
+        # options file so telemetry includes `ha_version` even if the
+        # in-memory cache isn't yet populated (cheap and reliable).
+        if not ha_version:
+            try:
+                ha_version = self._read_ha_version_from_options(None)
+            except Exception:
+                ha_version = None
         ha_info = {"core": ha_version} if ha_version else None
 
         payload = build_telemetry(
