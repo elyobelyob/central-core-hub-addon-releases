@@ -127,11 +127,24 @@ echo "Running linters and test suite..."
 
 # Run ruff if available (prefer venv)
 if [[ -x "$ROOT_DIR/.venv/bin/ruff" ]]; then
-  echo "Running ruff (venv) ..."
-  "$ROOT_DIR/.venv/bin/ruff" check .
+  RUFF_EXE="$ROOT_DIR/.venv/bin/ruff"
 elif command -v ruff >/dev/null 2>&1; then
-  echo "Running ruff ..."
-  ruff check .
+  RUFF_EXE="ruff"
+else
+  RUFF_EXE=""
+fi
+
+if [[ -n "$RUFF_EXE" ]]; then
+  echo "Found ruff at $RUFF_EXE"
+  if [[ "$DRY_RUN" -eq 0 ]]; then
+    echo "Running ruff --fix ..."
+    "$RUFF_EXE" --fix . || { echo 'ruff --fix failed' >&2; exit 1; }
+  else
+    echo "[DRY-RUN] Would run: $RUFF_EXE --fix ."
+  fi
+
+  echo "Running ruff check ..."
+  "$RUFF_EXE" check . || { echo 'ruff check failed' >&2; exit 1; }
 else
   echo "Warning: ruff not found, skipping lint check"
 fi
