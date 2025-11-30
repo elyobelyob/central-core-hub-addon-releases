@@ -3,10 +3,12 @@
 Message dispatch handlers extracted from `mqtt_client` to make the
 command lifecycles testable independently.
 """
+
 import json
 import os
 import traceback
 from datetime import datetime, timezone
+
 
 def _is_entity_allowed(entity_id):
     """Runtime helper that consults `mqtt_client.is_entity_allowed` when
@@ -14,6 +16,7 @@ def _is_entity_allowed(entity_id):
     """
     try:
         import mqtt_client as _mc
+
         fn = getattr(_mc, "is_entity_allowed", None)
         if callable(fn):
             try:
@@ -51,11 +54,7 @@ def handle_message(
         expected_config_topic = f"hubs/{client.client_id}/v1/cmd/config/update"
         if topic == expected_config_topic:
             try:
-                cmd = (
-                    json.loads(payload_str)
-                    if payload_str and payload_str != "<binary>"
-                    else {}
-                )
+                cmd = json.loads(payload_str) if payload_str and payload_str != "<binary>" else {}
             except Exception:
                 cmd = {}
             command_id = cmd.get("command_id")
@@ -67,9 +66,7 @@ def handle_message(
                     v1_ack = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
                 ack_payload = {
                     "status": "acknowledged",
-                    "timestamp": datetime.now(timezone.utc)
-                    .isoformat()
-                    .replace("+00:00", "Z"),
+                    "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 }
                 try:
                     client._publish(v1_ack, json.dumps(ack_payload), qos=1)
@@ -84,9 +81,7 @@ def handle_message(
             completion_payload = {
                 "status": "completed" if upd_result.get("success") else "failed",
                 "result": upd_result,
-                "timestamp": datetime.now(timezone.utc)
-                .isoformat()
-                .replace("+00:00", "Z"),
+                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             }
             if command_id:
                 try:
@@ -102,11 +97,7 @@ def handle_message(
         expected_cmd_topic_v1 = f"hubs/{client.client_id}/v1/cmd/sensors/poll"
         if topic == expected_cmd_topic_v1:
             try:
-                cmd = (
-                    json.loads(payload_str)
-                    if payload_str and payload_str != "<binary>"
-                    else {}
-                )
+                cmd = json.loads(payload_str) if payload_str and payload_str != "<binary>" else {}
             except Exception:
                 cmd = {}
 
@@ -120,9 +111,7 @@ def handle_message(
                     v1_ack = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
                 ack_payload = {
                     "status": "acknowledged",
-                    "timestamp": datetime.now(timezone.utc)
-                    .isoformat()
-                    .replace("+00:00", "Z"),
+                    "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 }
                 try:
                     client._publish(v1_ack, json.dumps(ack_payload), qos=1)
@@ -181,6 +170,7 @@ def handle_message(
             # also include friendly names and enabled status if available
             names_map = {}
             enabled_map = {}
+            attrs_map = {}
             for s in sensors:
                 ent = s.get("entity_id")
                 if not ent or not _is_entity_allowed(ent):
@@ -189,18 +179,18 @@ def handle_message(
                 names_map[ent] = attrs.get("friendly_name") or s.get("name") or ent
                 # consider entity disabled if 'disabled_by' attribute is set
                 enabled_map[ent] = not bool(attrs.get("disabled_by"))
+                attrs_map[ent] = attrs
 
             now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             telemetry_payload = {
                 "data": data_map,
                 "names": names_map,
+                "attributes": attrs_map,
                 "enabled": enabled_map,
                 "timestamp": now_iso,
             }
             try:
-                client._publish(
-                    client.preferred_sensors_topic, json.dumps(telemetry_payload), qos=0
-                )
+                client._publish(client.preferred_sensors_topic, json.dumps(telemetry_payload), qos=0)
             except Exception:
                 pass  # pragma: no cover
 
@@ -220,22 +210,20 @@ def handle_message(
             # containing the selected sensor IDs. The Vault-authoritative
             # list (`client.selected_sensors`) is preferred when available.
             try:
-                    if getattr(client, "vault_topic", None):
-                        selected = getattr(client, "selected_sensors", None) or list(
-                            data_map.keys()
-                        )
-                        # Filter the selected sensors through the registry
-                        try:
-                            selected = [s for s in selected if _is_entity_allowed(s)]
-                        except Exception:
-                            pass
-                        reminder = {
-                            "schema_version": 1,
-                            "client_id": client.client_id,
-                            "timestamp": now_iso,
-                            "selected_sensors": list(selected),
-                        }
-                        client._publish(client.vault_topic, json.dumps(reminder), qos=0)
+                if getattr(client, "vault_topic", None):
+                    selected = getattr(client, "selected_sensors", None) or list(data_map.keys())
+                    # Filter the selected sensors through the registry
+                    try:
+                        selected = [s for s in selected if _is_entity_allowed(s)]
+                    except Exception:
+                        pass
+                    reminder = {
+                        "schema_version": 1,
+                        "client_id": client.client_id,
+                        "timestamp": now_iso,
+                        "selected_sensors": list(selected),
+                    }
+                    client._publish(client.vault_topic, json.dumps(reminder), qos=0)
             except Exception:
                 pass  # pragma: no cover
 
@@ -262,11 +250,7 @@ def handle_message(
         expected_set_topic_v1 = f"hubs/{client.client_id}/v1/cmd/sensors/set"
         if topic == expected_set_topic_v1:
             try:
-                cmd = (
-                    json.loads(payload_str)
-                    if payload_str and payload_str != "<binary>"
-                    else {}
-                )
+                cmd = json.loads(payload_str) if payload_str and payload_str != "<binary>" else {}
             except Exception:
                 cmd = {}
 
@@ -277,9 +261,7 @@ def handle_message(
                 v1_ack = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
                 ack_payload = {
                     "status": "acknowledged",
-                    "timestamp": datetime.now(timezone.utc)
-                    .isoformat()
-                    .replace("+00:00", "Z"),
+                    "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 }
                 try:
                     client._publish(v1_ack, json.dumps(ack_payload), qos=1)
@@ -317,6 +299,7 @@ def handle_message(
                             data_map = {}
                             names_map = {}
                             enabled_map = {}
+                            attrs_map = {}
                             for si in sensors:
                                 ent = si.get("entity_id")
                                 if not ent:
@@ -345,10 +328,12 @@ def handle_message(
                                 attrs = si.get("attributes", {}) or {}
                                 names_map[ent] = attrs.get("friendly_name") or si.get("name") or ent
                                 enabled_map[ent] = not bool(attrs.get("disabled_by"))
+                                attrs_map[ent] = attrs
                             now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                             telemetry_payload = {
                                 "data": data_map,
                                 "names": names_map,
+                                "attributes": attrs_map,
                                 "enabled": enabled_map,
                                 "timestamp": now_iso,
                             }
@@ -423,6 +408,7 @@ def handle_message(
                                         "data": mt.get("data", {}),
                                         "names": mt.get("names", {}),
                                         "enabled": mt.get("enabled", {}),
+                                        "attributes": mt.get("attributes", {}),
                                     },
                                     "timestamp": now_iso,
                                 }
@@ -455,11 +441,7 @@ def handle_message(
                 if not ent:  # pragma: no cover - unreachable via normal JSON input
                     continue
                 try:
-                    if (
-                        client.ha_api_url
-                        and client.ha_api_token
-                        and requests is not None
-                    ):
+                    if client.ha_api_url and client.ha_api_token and requests is not None:
                         url = client.ha_api_url.rstrip("/") + f"/api/states/{ent}"
                         headers = {
                             "Authorization": f"Bearer {client.ha_api_token}",
@@ -484,9 +466,7 @@ def handle_message(
                             readback_attrs[ent] = {}
                         results["set"].append(ent)
                     else:
-                        results["failed"].append(
-                            {"entity_id": ent, "reason": "no_ha_config"}
-                        )
+                        results["failed"].append({"entity_id": ent, "reason": "no_ha_config"})
                 except Exception as e:
                     results["failed"].append({"entity_id": ent, "reason": str(e)})
 
@@ -536,12 +516,8 @@ def handle_message(
                 enabled_map = {}
                 for ent in data_map.keys():
                     attrs = readback_attrs.get(ent, {}) or {}  # pragma: no cover
-                    names_map[ent] = (
-                        attrs.get("friendly_name") or ent
-                    )  # pragma: no cover
-                    enabled_map[ent] = not bool(
-                        attrs.get("disabled_by")
-                    )  # pragma: no cover
+                    names_map[ent] = attrs.get("friendly_name") or ent  # pragma: no cover
+                    enabled_map[ent] = not bool(attrs.get("disabled_by"))  # pragma: no cover
 
                 if data_map:  # pragma: no cover
                     telemetry_payload = {
@@ -564,18 +540,14 @@ def handle_message(
                     # that list; otherwise fall back to the data_map keys.
                     try:
                         if getattr(client, "vault_topic", None):
-                            selected = getattr(
-                                client, "selected_sensors", None
-                            ) or list(data_map.keys())
+                            selected = getattr(client, "selected_sensors", None) or list(data_map.keys())
                             reminder = {
                                 "schema_version": 1,
                                 "client_id": client.client_id,
                                 "timestamp": now_iso,
                                 "selected_sensors": list(selected),
                             }
-                            client._publish(
-                                client.vault_topic, json.dumps(reminder), qos=0
-                            )
+                            client._publish(client.vault_topic, json.dumps(reminder), qos=0)
                     except Exception:
                         pass  # pragma: no cover
             except Exception:  # pragma: no cover - defensive branch hard to reproduce in tests
@@ -601,16 +573,12 @@ def handle_message(
                         "timestamp": now_iso,
                     }
                     try:
-                        client._publish(
-                            client.preferred_sensors_topic, json.dumps(telemetry_payload), qos=0
-                        )
+                        client._publish(client.preferred_sensors_topic, json.dumps(telemetry_payload), qos=0)
                     except Exception:
                         pass
                 try:
                     if getattr(client, "vault_topic", None):
-                        selected = getattr(client, "selected_sensors", None) or list(
-                            (data_map or {}).keys()
-                        )
+                        selected = getattr(client, "selected_sensors", None) or list((data_map or {}).keys())
                         reminder = {
                             "schema_version": 1,
                             "client_id": client.client_id,
@@ -628,11 +596,7 @@ def handle_message(
         expected_registry_set = f"hubs/{client.client_id}/v1/cmd/registry/set"
         if topic == expected_registry_set:
             try:
-                cmd = (
-                    json.loads(payload_str)
-                    if payload_str and payload_str != "<binary>"
-                    else {}
-                )
+                cmd = json.loads(payload_str) if payload_str and payload_str != "<binary>" else {}
             except Exception:
                 cmd = {}
 
@@ -702,7 +666,9 @@ def handle_message(
                                     try:
                                         v1_comp = client.build_ack_topic(action, command_id)
                                     except Exception:
-                                        v1_comp = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
+                                        v1_comp = (
+                                            f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
+                                        )
                                     comp_payload = {"status": "failed", "result": result}
                                     client._publish(v1_comp, json.dumps(comp_payload), qos=1)
                                 except Exception:
