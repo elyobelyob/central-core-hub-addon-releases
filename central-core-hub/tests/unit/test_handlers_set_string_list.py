@@ -85,10 +85,12 @@ def test_set_accepts_string_list_and_publishes_reminder(monkeypatch):
         "sensor.sun_next_dusk",
     ]
 
-    # ensure current sensor values were published immediately to preferred_sensors_topic
-    pref_msgs = [p for p in dummy.published if p["topic"] == c.preferred_sensors_topic]
-    assert pref_msgs, "no telemetry published to preferred_sensors_topic"
-    pref_payload = json.loads(pref_msgs[-1]["payload"])
-    assert "data" in pref_payload and "names" in pref_payload and "enabled" in pref_payload
-    data_keys = sorted(pref_payload["data"].keys())
+    # ensure current sensor values were included in the completion ACK
+    v1_comp = f"hubs/{c.client_id}/v1/ack/sensors.set/{command['command_id']}"
+    comp_msgs = [p for p in dummy.published if p["topic"] == v1_comp]
+    assert comp_msgs, "no completion ACK published"
+    comp_payload = json.loads(comp_msgs[-1]["payload"])
+    result = comp_payload.get("result", {})
+    assert "data" in result and "names" in result and "enabled" in result
+    data_keys = sorted(result.get("data", {}).keys())
     assert data_keys == ["sensor.sun_next_dawn", "sensor.sun_next_dusk"]

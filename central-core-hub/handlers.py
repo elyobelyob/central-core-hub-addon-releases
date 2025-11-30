@@ -352,10 +352,9 @@ def handle_message(
                                 "enabled": enabled_map,
                                 "timestamp": now_iso,
                             }
-                            try:
-                                client._publish(client.preferred_sensors_topic, json.dumps(telemetry_payload), qos=0)
-                            except Exception:
-                                pass
+                            # Do not publish this to the general telemetry topic here;
+                            # instead attach the telemetry payload to the completion ACK
+                            monitor_telemetry = telemetry_payload
                             try:
                                 import mqtt_client as _mc
 
@@ -411,11 +410,28 @@ def handle_message(
                                 v1_comp = client.build_ack_topic(action, command_id)
                             except Exception:
                                 v1_comp = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
-                            comp_payload = {
-                                "status": "completed",
-                                "result": {"selected": list(s)},
-                                "timestamp": now_iso,
-                            }
+                            # If we built monitor_telemetry above, include it in the
+                            # completion ACK so callers receive the current values
+                            mt = locals().get("monitor_telemetry")
+                            if mt:
+                                comp_payload = {
+                                    "status": "completed",
+                                    "result": {
+                                        "selected": list(s),
+                                        "sensors_reported": list(mt.get("data", {}).keys()),
+                                        "count": len(mt.get("data", {})),
+                                        "data": mt.get("data", {}),
+                                        "names": mt.get("names", {}),
+                                        "enabled": mt.get("enabled", {}),
+                                    },
+                                    "timestamp": now_iso,
+                                }
+                            else:
+                                comp_payload = {
+                                    "status": "completed",
+                                    "result": {"selected": list(s)},
+                                    "timestamp": now_iso,
+                                }
                             try:
                                 client._publish(v1_comp, json.dumps(comp_payload), qos=1)
                             except Exception:
