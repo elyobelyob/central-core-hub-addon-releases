@@ -50,6 +50,11 @@ def test_set_accepts_string_list_and_publishes_reminder(monkeypatch):
     dummy = DummyClient()
     c._client = dummy
     c.vault_topic = "vault/unit"
+    # Provide fake sensors so the handler can publish current values
+    monkeypatch.setattr(mc, "fetch_sensors", lambda url, token: [
+        {"entity_id": "sensor.sun_next_dawn", "state": "2025-12-01T01:23:45Z", "attributes": {"friendly_name": "Next Dawn"}},
+        {"entity_id": "sensor.sun_next_dusk", "state": "2025-12-01T12:34:56Z", "attributes": {"friendly_name": "Next Dusk"}},
+    ])
 
     command = {
         "command_id": "set123",
@@ -79,3 +84,11 @@ def test_set_accepts_string_list_and_publishes_reminder(monkeypatch):
         "sensor.sun_next_dawn",
         "sensor.sun_next_dusk",
     ]
+
+    # ensure current sensor values were published immediately to preferred_sensors_topic
+    pref_msgs = [p for p in dummy.published if p["topic"] == c.preferred_sensors_topic]
+    assert pref_msgs, "no telemetry published to preferred_sensors_topic"
+    pref_payload = json.loads(pref_msgs[-1]["payload"])
+    assert "data" in pref_payload and "names" in pref_payload and "enabled" in pref_payload
+    data_keys = sorted(pref_payload["data"].keys())
+    assert data_keys == ["sensor.sun_next_dawn", "sensor.sun_next_dusk"]
