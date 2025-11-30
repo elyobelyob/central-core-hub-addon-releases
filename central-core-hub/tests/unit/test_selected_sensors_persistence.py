@@ -41,12 +41,10 @@ class DummyMsg:
         self.payload = payload_bytes
 
 
-
-
-
 def test_client_loads_persisted_selection_on_init(tmp_path):
     mc, handlers = _load_modules()
     import sys
+
     prev = sys.modules.get("mqtt_client")
     sys.modules["mqtt_client"] = mc
     CentralCoreClient = mc.CentralCoreClient

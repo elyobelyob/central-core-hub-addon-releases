@@ -68,13 +68,7 @@ def test_publish_sensors_calls_publish_and_updates_timestamp(monkeypatch):
     topics = [p["topic"] for p in dummy.published]
     assert c.preferred_sensors_topic in topics
     # payloads are JSON; check structure: publish_sensors uses a 'sensors' list
-    payload = json.loads(
-        next(
-            p["payload"]
-            for p in dummy.published
-            if p["topic"] == c.preferred_sensors_topic
-        )
-    )
+    payload = json.loads(next(p["payload"] for p in dummy.published if p["topic"] == c.preferred_sensors_topic))
     assert "sensors" in payload and "timestamp" in payload
     # sensors list contains entries with entity_id
     ids = [s.get("entity_id") for s in payload["sensors"]]
@@ -116,19 +110,11 @@ def test_handle_sensors_poll_command_ack_and_completion(monkeypatch):
     assert ack_topic in topics
     assert c.preferred_sensors_topic in topics
     # check that telemetry payload contains reported sensor
-    tele_payload = json.loads(
-        next(
-            p["payload"]
-            for p in dummy.published
-            if p["topic"] == c.preferred_sensors_topic
-        )
-    )
+    tele_payload = json.loads(next(p["payload"] for p in dummy.published if p["topic"] == c.preferred_sensors_topic))
     assert "data" in tele_payload and "sensor.temp" in tele_payload["data"]
     # new: ensure friendly name and enabled status are included
     assert "names" in tele_payload and "sensor.temp" in tele_payload["names"]
-    assert "enabled" in tele_payload and isinstance(
-        tele_payload["enabled"].get("sensor.temp"), bool
-    )
+    assert "enabled" in tele_payload and isinstance(tele_payload["enabled"].get("sensor.temp"), bool)
 
 
 def test_handle_sensors_set_command_calls_ha_and_responds(monkeypatch):
@@ -154,9 +140,7 @@ def test_handle_sensors_set_command_calls_ha_and_responds(monkeypatch):
     def fake_get(url, headers=None, timeout=10):
         # return readback state matching the posted value in tests
         if url.endswith("/api/states/sensor.temp"):
-            return FakeResp(
-                {"state": "22.0", "attributes": {"unit_of_measurement": "°C"}}
-            )
+            return FakeResp({"state": "22.0", "attributes": {"unit_of_measurement": "°C"}})
         if url.endswith("/api/states/sensor.hum"):
             return FakeResp({"state": "43", "attributes": {"unit_of_measurement": "%"}})
         return FakeResp({"state": "unknown", "attributes": {}})
@@ -202,24 +186,10 @@ def test_handle_sensors_set_command_calls_ha_and_responds(monkeypatch):
     assert ack_topic in topics
     # telemetry should be published to preferred sensors topic with data map
     assert c.preferred_sensors_topic in topics
-    tele = json.loads(
-        next(
-            p["payload"]
-            for p in dummy.published
-            if p["topic"] == c.preferred_sensors_topic
-        )
-    )
-    assert (
-        "data" in tele
-        and "sensor.temp" in tele["data"]
-        and "sensor.hum" in tele["data"]
-    )
+    tele = json.loads(next(p["payload"] for p in dummy.published if p["topic"] == c.preferred_sensors_topic))
+    assert "data" in tele and "sensor.temp" in tele["data"] and "sensor.hum" in tele["data"]
     # include name and enabled maps
-    assert (
-        "names" in tele
-        and "sensor.temp" in tele["names"]
-        and "sensor.hum" in tele["names"]
-    )
+    assert "names" in tele and "sensor.temp" in tele["names"] and "sensor.hum" in tele["names"]
     assert "enabled" in tele and isinstance(tele["enabled"].get("sensor.temp"), bool)
 
 
@@ -282,13 +252,7 @@ def test_handle_sensors_set_without_readback(monkeypatch):
 
     # Telemetry should be published using the requested state (coerced to float)
     assert c.preferred_sensors_topic in [p["topic"] for p in dummy.published]
-    tele = json.loads(
-        next(
-            p["payload"]
-            for p in dummy.published
-            if p["topic"] == c.preferred_sensors_topic
-        )
-    )
+    tele = json.loads(next(p["payload"] for p in dummy.published if p["topic"] == c.preferred_sensors_topic))
     assert "data" in tele
     # coerced value should be numeric 22.5
     assert isinstance(tele["data"].get("sensor.temp"), float)

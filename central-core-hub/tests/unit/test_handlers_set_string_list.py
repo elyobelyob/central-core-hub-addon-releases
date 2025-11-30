@@ -51,10 +51,22 @@ def test_set_accepts_string_list_and_publishes_reminder(monkeypatch):
     c._client = dummy
     c.vault_topic = "vault/unit"
     # Provide fake sensors so the handler can publish current values
-    monkeypatch.setattr(mc, "fetch_sensors", lambda url, token: [
-        {"entity_id": "sensor.sun_next_dawn", "state": "2025-12-01T01:23:45Z", "attributes": {"friendly_name": "Next Dawn"}},
-        {"entity_id": "sensor.sun_next_dusk", "state": "2025-12-01T12:34:56Z", "attributes": {"friendly_name": "Next Dusk"}},
-    ])
+    monkeypatch.setattr(
+        mc,
+        "fetch_sensors",
+        lambda url, token: [
+            {
+                "entity_id": "sensor.sun_next_dawn",
+                "state": "2025-12-01T01:23:45Z",
+                "attributes": {"friendly_name": "Next Dawn"},
+            },
+            {
+                "entity_id": "sensor.sun_next_dusk",
+                "state": "2025-12-01T12:34:56Z",
+                "attributes": {"friendly_name": "Next Dusk"},
+            },
+        ],
+    )
 
     command = {
         "command_id": "set123",

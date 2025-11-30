@@ -49,7 +49,13 @@ def test_ha_ws_listener_started_and_stop_called(tmp_path, monkeypatch):
 
     mqtt = _load_module(mqtt_path, "mqtt_client_testmod_ws")
 
-    opts = {"client_id": "test-hub", "mqtt_host": "127.0.0.1", "mqtt_port": 1883, "ha_api_url": "http://ha", "ha_api_token": "tok"}
+    opts = {
+        "client_id": "test-hub",
+        "mqtt_host": "127.0.0.1",
+        "mqtt_port": 1883,
+        "ha_api_url": "http://ha",
+        "ha_api_token": "tok",
+    }
     c = mqtt.CentralCoreClient(opts)
 
     # Listener should have been created and started

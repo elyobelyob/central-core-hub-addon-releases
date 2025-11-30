@@ -151,9 +151,7 @@ def test_connect_loop_handles_connect_failed_and_retries(monkeypatch):
     c.connect_once = lambda: False
 
     # cause sleep to raise to break out of loop after first iteration
-    monkeypatch.setattr(
-        mod.time, "sleep", lambda s: (_ for _ in ()).throw(SystemExit())
-    )
+    monkeypatch.setattr(mod.time, "sleep", lambda s: (_ for _ in ()).throw(SystemExit()))
 
     try:
         c.connect()
@@ -187,9 +185,7 @@ def test_connect_loop_handles_timed_out_wait(monkeypatch):
 
     c._client = FakeClient()
 
-    monkeypatch.setattr(
-        mod.time, "sleep", lambda s: (_ for _ in ()).throw(SystemExit())
-    )
+    monkeypatch.setattr(mod.time, "sleep", lambda s: (_ for _ in ()).throw(SystemExit()))
 
     try:
         c.connect()
@@ -213,11 +209,7 @@ def test_paho_import_absent_sets_mqtt_none():
     if spec is None or getattr(spec, "loader", None) is None:
         raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
-    orig_import = (
-        __builtins__["__import__"]
-        if isinstance(__builtins__, dict)
-        else __builtins__.__import__
-    )
+    orig_import = __builtins__["__import__"] if isinstance(__builtins__, dict) else __builtins__.__import__
     try:
         __builtins__["__import__"] = lambda *a, **k: hook(orig_import, *a, **k)
         loader = spec.loader
@@ -238,9 +230,7 @@ def test_import_with_helpers_present(monkeypatch, tmp_path):
     src_dir = repo_root / "central-core-hub"
     monkeypatch.syspath_prepend(str(src_dir))
     # import mqtt_client under a fresh name so top-level try import runs
-    spec = importlib.util.spec_from_file_location(
-        "mqtt_client_with_helpers", str(src_dir / "mqtt_client.py")
-    )
+    spec = importlib.util.spec_from_file_location("mqtt_client_with_helpers", str(src_dir / "mqtt_client.py"))
     if spec is None or getattr(spec, "loader", None) is None:
         raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
@@ -357,9 +347,7 @@ def test_cert_path_handling():
 
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / "mqtt_client.py"
-    spec = importlib.util.spec_from_file_location(
-        "mqtt_client_cert_path_test", str(src)
-    )
+    spec = importlib.util.spec_from_file_location("mqtt_client_cert_path_test", str(src))
     if spec is None or getattr(spec, "loader", None) is None:
         raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)

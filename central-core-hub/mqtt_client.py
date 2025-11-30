@@ -9,6 +9,7 @@ Responsibilities:
 - Subscribe to Vault-style command topics `hubs/{client_id}/v1/cmd/...` and handle commands
 - Reconnect automatically and log connection lifecycle to stdout
 """
+
 import importlib.util
 import json
 import os
@@ -38,6 +39,7 @@ except Exception:
 
 try:
     import central_core_mqtt_shared as mqtt_shared
+
     # The shared package may expose helpers as top-level attributes
     # (e.g. `central_core_mqtt_shared.topics`) or as submodules
     # (`central_core_mqtt_shared.topics`). Prefer a top-level attribute
@@ -225,7 +227,6 @@ def is_entity_allowed(entity_id: str) -> bool:
         return True
 
 
-
 def get_addon_version():
     """Get the add-on version from config.json."""
     # Allow an explicit override via environment variable. This is useful
@@ -320,6 +321,7 @@ try:
             version=version or get_addon_version(),
             telemetry_interval=telemetry_interval or 30,
         )
+
     build_vault_payload = _tele_mod.build_vault_payload
     # expose a single name for analyzers: assign the implementation
     build_telemetry = _bt_from_mod
@@ -327,9 +329,7 @@ except Exception:
     # Fallback: load modules relative to this file using importlib
     _base = pathlib.Path(__file__).parent
     try:
-        spec_h = importlib.util.spec_from_file_location(
-            "cc_helpers", str(_base / "helpers.py")
-        )
+        spec_h = importlib.util.spec_from_file_location("cc_helpers", str(_base / "helpers.py"))
         if spec_h is None or spec_h.loader is None:
             raise ImportError("could not load helpers spec")
         _helpers = importlib.util.module_from_spec(spec_h)
@@ -382,9 +382,7 @@ except Exception:
                 return None, None
 
     try:
-        spec_t = importlib.util.spec_from_file_location(
-            "cc_telemetry", str(_base / "telemetry.py")
-        )
+        spec_t = importlib.util.spec_from_file_location("cc_telemetry", str(_base / "telemetry.py"))
         if spec_t is None or spec_t.loader is None:
             raise ImportError("could not load telemetry spec")
         _tele = importlib.util.module_from_spec(spec_t)
@@ -437,9 +435,7 @@ except Exception:
 try:
     _orig_bt = build_telemetry
 
-    def _wrapped_build_telemetry(
-        client_id, version=None, telemetry_interval=None, **kwargs
-    ):
+    def _wrapped_build_telemetry(client_id, version=None, telemetry_interval=None, **kwargs):
         modname = getattr(_orig_bt, "__module__", None)
         tele_mod = sys.modules.get(modname) if modname else None
         old = None
@@ -545,9 +541,7 @@ def fetch_sensors(ha_api_url, ha_api_token):
             ent_id = ent.get("entity_id")
             if not ent_id:
                 continue
-            if not (
-                ent_id.startswith("sensor.") or ent_id.startswith("binary_sensor.")
-            ):
+            if not (ent_id.startswith("sensor.") or ent_id.startswith("binary_sensor.")):
                 continue
             sensors.append(
                 {
@@ -643,9 +637,7 @@ class CentralCoreClient:
     def __init__(self, options):
         self.options = options
         self.mqtt_host = options.get("mqtt_host") or os.environ.get("MQTT_HOST", "")
-        self.mqtt_port = int(
-            options.get("mqtt_port") or os.environ.get("MQTT_PORT", 1883)
-        )
+        self.mqtt_port = int(options.get("mqtt_port") or os.environ.get("MQTT_PORT", 1883))
         self.mqtt_username = options.get("mqtt_username") or ""
         self.mqtt_password = options.get("mqtt_password") or ""
         self.mqtt_tls = bool(options.get("mqtt_tls"))
@@ -655,9 +647,7 @@ class CentralCoreClient:
         self.mqtt_cert_bundle = options.get("mqtt_cert_bundle") or ""
         # Handle certificate content vs paths
         self._setup_cert_files()
-        self.client_id = options.get(
-            "client_id"
-        ) or socket.gethostname().lower().replace(" ", "-")
+        self.client_id = options.get("client_id") or socket.gethostname().lower().replace(" ", "-")
         self.ha_api_url = options.get("ha_api_url") or ""
         self.ha_api_token = options.get("ha_api_token") or ""
         # Diagnostic: log whether HA options are present (do not print token)
@@ -686,9 +676,7 @@ class CentralCoreClient:
             # Build the authoritative topics using the shared package helper.
             # Use protocol version 1 (current default in the shared package).
             ver = 1
-            self.telemetry_topic = topics.build_topic(
-                topics.TELEMETRY_SYSTEM, hub_id=self.client_id, version=ver
-            )
+            self.telemetry_topic = topics.build_topic(topics.TELEMETRY_SYSTEM, hub_id=self.client_id, version=ver)
             self.preferred_sensors_topic = topics.build_topic(
                 topics.TELEMETRY_SENSORS, hub_id=self.client_id, version=ver
             )
@@ -725,9 +713,7 @@ class CentralCoreClient:
             # Fallback: load the runtime helper relative to this file
             try:
                 _base = pathlib.Path(__file__).parent
-                spec_rt = importlib.util.spec_from_file_location(
-                    "cc_mqtt_runtime", str(_base / "mqtt_runtime.py")
-                )
+                spec_rt = importlib.util.spec_from_file_location("cc_mqtt_runtime", str(_base / "mqtt_runtime.py"))
                 if spec_rt is None or spec_rt.loader is None:
                     raise ImportError("could not load mqtt_runtime spec")
                 _rt = importlib.util.module_from_spec(spec_rt)
@@ -839,9 +825,7 @@ class CentralCoreClient:
                         # Log which sensors the websocket is currently monitoring
                         try:
                             if self._selected_sensors_set:
-                                _log(
-                                    f"HA WS monitoring sensors: {', '.join(sorted(self._selected_sensors_set))}"
-                                )
+                                _log(f"HA WS monitoring sensors: {', '.join(sorted(self._selected_sensors_set))}")
                             else:
                                 _log("HA WS monitoring sensors: none")
                         except Exception:
@@ -975,9 +959,7 @@ class CentralCoreClient:
                     return False
             if not isinstance(data, dict):
                 return False
-            candidates = data.get("certificates") or data.get("certs") or data.get(
-                "certificate_bundle"
-            )
+            candidates = data.get("certificates") or data.get("certs") or data.get("certificate_bundle")
             if not isinstance(candidates, dict):
                 return False
             applied = False
@@ -1008,9 +990,7 @@ class CentralCoreClient:
                 return ""
             if cert_str.startswith("-----BEGIN"):
                 # It's certificate content, write to temp file
-                with tempfile.NamedTemporaryFile(
-                    mode="w", suffix=suffix, delete=False
-                ) as f:
+                with tempfile.NamedTemporaryFile(mode="w", suffix=suffix, delete=False) as f:
                     f.write(cert_str)
                     return f.name
             else:
@@ -1031,9 +1011,7 @@ class CentralCoreClient:
         keys = []
 
         for block_type, content in matches:
-            full_block = (
-                f"-----BEGIN {block_type}-----\n{content}\n-----END {block_type}-----"
-            )
+            full_block = f"-----BEGIN {block_type}-----\n{content}\n-----END {block_type}-----"
             if "CERTIFICATE" in block_type:
                 certs.append(full_block)
             elif "PRIVATE KEY" in block_type:
@@ -1050,9 +1028,7 @@ class CentralCoreClient:
     def _publish(self, topic, payload, qos=0):
         """Publish and log the MQTT publish action and result."""
         try:
-            _log(
-                f"MQTT -> PUBLISH to {topic} qos={qos} len={len(payload) if payload is not None else 0}"
-            )
+            _log(f"MQTT -> PUBLISH to {topic} qos={qos} len={len(payload) if payload is not None else 0}")
             result = self._client.publish(topic, payload, qos=qos)
             # paho may return an object with rc or a tuple
             try:
@@ -1358,9 +1334,7 @@ class CentralCoreClient:
             except Exception:
                 try:
                     _base = pathlib.Path(__file__).parent
-                    spec_h = importlib.util.spec_from_file_location(
-                        "cc_handlers", str(_base / "handlers.py")
-                    )
+                    spec_h = importlib.util.spec_from_file_location("cc_handlers", str(_base / "handlers.py"))
                     if spec_h is None or spec_h.loader is None:
                         raise ImportError("could not load handlers spec")
                     _hmod = importlib.util.module_from_spec(spec_h)
@@ -1550,15 +1524,11 @@ class CentralCoreClient:
                 vault_payload = build_vault_payload(payload)
                 if vault_payload:
                     self._publish(self.vault_topic, vault_payload)
-                    _log(
-                        f"Also published vault-formatted telemetry to {self.vault_topic}"
-                    )
+                    _log(f"Also published vault-formatted telemetry to {self.vault_topic}")
                 else:
                     # Fallback: publish the full payload if transformation failed
                     self._publish(self.vault_topic, payload)
-                    _log(
-                        f"Also published (fallback) telemetry to vault topic {self.vault_topic}"
-                    )
+                    _log(f"Also published (fallback) telemetry to vault topic {self.vault_topic}")
             except Exception:
                 _log(
                     f"Failed to publish telemetry to vault topic {self.vault_topic}",
@@ -1583,12 +1553,8 @@ class CentralCoreClient:
         }
         # Publish to preferred Vault topic (development-only; legacy dropped)
         try:
-            self._publish(
-                self.preferred_sensors_topic, json.dumps(payload), qos=0
-            )
-            _log(
-                f"Published sensors list to {self.preferred_sensors_topic} (count={len(payload['sensors'])})"
-            )
+            self._publish(self.preferred_sensors_topic, json.dumps(payload), qos=0)
+            _log(f"Published sensors list to {self.preferred_sensors_topic} (count={len(payload['sensors'])})")
         except Exception:
             _log(
                 f"Failed to publish sensors to {self.preferred_sensors_topic}",
@@ -1625,11 +1591,7 @@ class CentralCoreClient:
             return
         sensors = fetch_sensors(self.ha_api_url, self.ha_api_token) or []
         selected_set = set(self.selected_sensors)
-        filtered = [
-            s
-            for s in sensors
-            if s.get("entity_id") in selected_set and is_entity_allowed(s.get("entity_id"))
-        ]
+        filtered = [s for s in sensors if s.get("entity_id") in selected_set and is_entity_allowed(s.get("entity_id"))]
 
         data_map = {}
         names_map = {}
@@ -1663,9 +1625,7 @@ class CentralCoreClient:
             "timestamp": now_iso,
         }
         try:
-            self._publish(
-                self.preferred_sensors_topic, json.dumps(telemetry_payload), qos=0
-            )
+            self._publish(self.preferred_sensors_topic, json.dumps(telemetry_payload), qos=0)
         except Exception:
             _log("Failed to publish selected sensor changes", sys.stderr)
 
@@ -1757,9 +1717,7 @@ class CentralCoreClient:
                 try:
                     # Websocket-selected sensors
                     if self._selected_sensors_set:
-                        _log(
-                            f"Periodic: HA WS monitoring sensors: {', '.join(sorted(self._selected_sensors_set))}"
-                        )
+                        _log(f"Periodic: HA WS monitoring sensors: {', '.join(sorted(self._selected_sensors_set))}")
                     else:
                         _log("Periodic: HA WS monitoring sensors: none")
                 except Exception:
@@ -1788,8 +1746,7 @@ def main():
     options = load_options()
     # Sanitize options for logging (hide sensitive data)
     safe_options = {
-        k: ("[REDACTED]" if "token" in k or "password" in k or "cert" in k else v)
-        for k, v in options.items()
+        k: ("[REDACTED]" if "token" in k or "password" in k or "cert" in k else v) for k, v in options.items()
     }
     _log(f"Loaded options: {safe_options}")
     c = CentralCoreClient(options)

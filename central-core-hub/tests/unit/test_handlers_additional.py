@@ -38,9 +38,7 @@ def test_handle_poll_with_publish_exceptions():
 
     c._publish = bad_publish
 
-    msg = type(
-        "M", (), {"topic": f"hubs/{c.client_id}/v1/cmd/sensors/poll", "payload": b"{}"}
-    )
+    msg = type("M", (), {"topic": f"hubs/{c.client_id}/v1/cmd/sensors/poll", "payload": b"{}"})
     # should not raise
     handlers.handle_message(
         c,

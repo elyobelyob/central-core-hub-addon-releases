@@ -83,9 +83,7 @@ def test_ack_publish_raises_but_processing_continues(monkeypatch):
     def fetch_sensors(url, token):
         return [{"entity_id": "sensor.a", "state": "1", "attributes": {}}]
 
-    msg = DummyMsg(
-        f"hubs/{c.client_id}/v1/cmd/sensors/poll", json.dumps(cmd).encode("utf-8")
-    )
+    msg = DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/poll", json.dumps(cmd).encode("utf-8"))
 
     # Should not raise despite _publish raising for ack
     handlers.handle_message(
@@ -99,9 +97,7 @@ def test_ack_publish_raises_but_processing_continues(monkeypatch):
     )
 
     # telemetry publish still recorded
-    assert any(
-        p["topic"] == c.preferred_sensors_topic for p in c.published
-    )
+    assert any(p["topic"] == c.preferred_sensors_topic for p in c.published)
     # completion may or may not have been published depending on where the exception occurred
 
 
@@ -117,9 +113,7 @@ def test_set_no_ha_config_reports_failed(monkeypatch):
         "action": "sensors/set",
         "payload": {"sensors": [{"entity_id": "sensor.x", "state": "2"}]},
     }
-    msg = DummyMsg(
-        f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(cmd).encode("utf-8")
-    )
+    msg = DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(cmd).encode("utf-8"))
 
     handlers.handle_message(
         c,
@@ -168,13 +162,9 @@ def test_set_requests_post_raises_results_failed(monkeypatch):
         "action": "sensors/set",
         "payload": {"sensors": [{"entity_id": "sensor.y", "state": "3"}]},
     }
-    msg = DummyMsg(
-        f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(cmd).encode("utf-8")
-    )
+    msg = DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(cmd).encode("utf-8"))
 
-    handlers.handle_message(
-        c, msg, msg.payload.decode("utf-8"), lambda u, t: [], None, None, requests
-    )
+    handlers.handle_message(c, msg, msg.payload.decode("utf-8"), lambda u, t: [], None, None, requests)
 
     # completion should indicate failure for post error
     resp_topic = build_ack_for_client_id(c.client_id, cmd["action"], cmd["command_id"])
@@ -192,14 +182,10 @@ def test_fetch_sensors_raises_is_caught(monkeypatch):
         raise RuntimeError("fetch fail")
 
     cmd = {"action": "sensors/poll"}
-    msg = DummyMsg(
-        f"hubs/{c.client_id}/v1/cmd/sensors/poll", json.dumps(cmd).encode("utf-8")
-    )
+    msg = DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/poll", json.dumps(cmd).encode("utf-8"))
 
     # Should not raise; handler catches top-level exceptions
-    handlers.handle_message(
-        c, msg, msg.payload.decode("utf-8"), bad_fetch, None, None, None
-    )
+    handlers.handle_message(c, msg, msg.payload.decode("utf-8"), bad_fetch, None, None, None)
 
     # No publishes should have occurred due to fetch failure
     assert not c.published

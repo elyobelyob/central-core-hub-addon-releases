@@ -240,9 +240,7 @@ def test_set_pending_result_missing_id_does_not_throw():
 
 def test_ha_listener_loop_processes_ping_get_config_and_events(monkeypatch, tmp_path):
     repo_root = Path(__file__).resolve().parents[3]
-    ha_mod = _load_module(
-        repo_root / "central-core-hub" / "ha_client.py", "ha_client_extra_loop"
-    )
+    ha_mod = _load_module(repo_root / "central-core-hub" / "ha_client.py", "ha_client_extra_loop")
 
     opts_file = tmp_path / "options.json"
     ha_mod.OPTIONS_PATH = str(opts_file)
@@ -346,6 +344,8 @@ def test_ha_listener_loop_processes_ping_get_config_and_events(monkeypatch, tmp_
     assert opts_file.exists()
     assert json.loads(opts_file.read_text()).get("ha_version") == "2026.0.0"
     assert any(msg.get("type") == "ping" for msg in fake_ws.sent)
+
+
 def test_ha_listener_loop_processes_events_and_persists_version(tmp_path):
     repo_root = Path(__file__).resolve().parents[3]
     ha_mod = _load_module(repo_root / "central-core-hub" / "ha_client.py", "ha_client_extra_loop")

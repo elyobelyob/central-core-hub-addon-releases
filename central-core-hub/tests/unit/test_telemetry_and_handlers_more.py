@@ -8,9 +8,7 @@ from typing import Any, cast
 def _load_module(path_name):
     repo_root = Path(__file__).resolve().parents[3]
     src = repo_root / "central-core-hub" / path_name
-    spec = importlib.util.spec_from_file_location(
-        path_name.replace(".py", ""), str(src)
-    )
+    spec = importlib.util.spec_from_file_location(path_name.replace(".py", ""), str(src))
     if spec is None or getattr(spec, "loader", None) is None:
         raise ImportError("could not load spec")
     module = importlib.util.module_from_spec(spec)
@@ -129,9 +127,7 @@ def test_handlers_poll_with_disabled_and_names(monkeypatch):
 
     # call handle_message for poll topic
     msg = types.SimpleNamespace(topic="hubs/hub1/v1/cmd/sensors/poll", payload=b"{}")
-    handlers.handle_message(
-        client, msg, "{}", fetch_sensors, lambda cid: "{}", lambda raw: None, None
-    )
+    handlers.handle_message(client, msg, "{}", fetch_sensors, lambda cid: "{}", lambda raw: None, None)
 
     # find the published telemetry payload
     tele_msgs = [p for p in published if p["topic"] == client.preferred_sensors_topic]
@@ -158,16 +154,10 @@ def test_handlers_set_no_ha_config_causes_failed(monkeypatch):
     client = C()
 
     # build a set command payload with sensors to set
-    payload = json.dumps(
-        {"command_id": "c1", "payload": {"sensors": {"sensor.x": "1"}}}
-    )
-    msg = types.SimpleNamespace(
-        topic="hubs/hub2/v1/cmd/sensors/set", payload=payload.encode("utf-8")
-    )
+    payload = json.dumps({"command_id": "c1", "payload": {"sensors": {"sensor.x": "1"}}})
+    msg = types.SimpleNamespace(topic="hubs/hub2/v1/cmd/sensors/set", payload=payload.encode("utf-8"))
     # requests is None, so should mark as failed due to no_ha_config
-    handlers.handle_message(
-        client, msg, payload, lambda u, t: [], lambda cid: "{}", lambda raw: None, None
-    )
+    handlers.handle_message(client, msg, payload, lambda u, t: [], lambda cid: "{}", lambda raw: None, None)
 
     # completed response should be published
     comp = [p for p in published if p["qos"] == 1]

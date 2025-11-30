@@ -3,9 +3,7 @@ from types import SimpleNamespace
 
 
 def load_runtime():
-    spec = importlib.util.spec_from_file_location(
-        "mqtt_runtime", "./central-core-hub/mqtt_runtime.py"
-    )
+    spec = importlib.util.spec_from_file_location("mqtt_runtime", "./central-core-hub/mqtt_runtime.py")
     if spec is None or getattr(spec, "loader", None) is None:
         raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)

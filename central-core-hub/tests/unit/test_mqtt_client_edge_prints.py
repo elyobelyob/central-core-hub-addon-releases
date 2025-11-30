@@ -51,9 +51,7 @@ def test_connect_loop_reports_timed_out(monkeypatch):
 
     c._client = ClientShim()
     # make sleep raise to break loop after printing
-    monkeypatch.setattr(
-        mc.time, "sleep", lambda s: (_ for _ in ()).throw(RuntimeError("stop"))
-    )
+    monkeypatch.setattr(mc.time, "sleep", lambda s: (_ for _ in ()).throw(RuntimeError("stop")))
 
     try:
         c.connect()
@@ -64,17 +62,13 @@ def test_connect_loop_reports_timed_out(monkeypatch):
 def test_publish_sensors_handles_publish_exception(monkeypatch):
     mc = _load_module()
     CentralCoreClient = mc.CentralCoreClient
-    c = CentralCoreClient(
-        {"client_id": "pub-ex", "ha_api_url": "http://ha", "ha_api_token": "t"}
-    )
+    c = CentralCoreClient({"client_id": "pub-ex", "ha_api_url": "http://ha", "ha_api_token": "t"})
 
     # fetch_sensors returns a list
     monkeypatch.setattr(
         mc,
         "fetch_sensors",
-        lambda u, t: [
-            {"entity_id": "sensor.z", "state": "1", "name": "z", "attributes": {}}
-        ],
+        lambda u, t: [{"entity_id": "sensor.z", "state": "1", "name": "z", "attributes": {}}],
     )
 
     # make _publish raise to hit exception path in publish_sensors

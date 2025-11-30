@@ -91,9 +91,7 @@ def test_handler_ack_publish_raises_but_handler_continues(monkeypatch):
     assert hloader is not None
     hloader.exec_module(handlers)
 
-    c = CentralCoreClient(
-        {"client_id": "ackerr", "ha_api_url": "http://ha", "ha_api_token": "t"}
-    )
+    c = CentralCoreClient({"client_id": "ackerr", "ha_api_url": "http://ha", "ha_api_token": "t"})
 
     # make _publish raise to simulate publish failures
     def bad_publish(topic, payload, qos=0):
@@ -117,20 +115,14 @@ def test_handler_ack_publish_raises_but_handler_continues(monkeypatch):
         build_telemetry=mod.build_telemetry,
         build_vault_payload=mod.build_vault_payload,
         requests=types.SimpleNamespace(
-            post=lambda *a, **k: types.SimpleNamespace(
-                raise_for_status=lambda: None, json=lambda: {"state": "1"}
-            ),
-            get=lambda *a, **k: types.SimpleNamespace(
-                raise_for_status=lambda: None, json=lambda: {"state": "1"}
-            ),
+            post=lambda *a, **k: types.SimpleNamespace(raise_for_status=lambda: None, json=lambda: {"state": "1"}),
+            get=lambda *a, **k: types.SimpleNamespace(raise_for_status=lambda: None, json=lambda: {"state": "1"}),
         ),
     )
 
 
 def test_mqtt_runtime_tls_set_raises(monkeypatch):
-    rt_src = (
-        Path(__file__).resolve().parents[3] / "central-core-hub" / "mqtt_runtime.py"
-    )
+    rt_src = Path(__file__).resolve().parents[3] / "central-core-hub" / "mqtt_runtime.py"
     spec = importlib.util.spec_from_file_location("mqtt_runtime", str(rt_src))
     if spec is None or getattr(spec, "loader", None) is None:
         raise ImportError("could not load spec")

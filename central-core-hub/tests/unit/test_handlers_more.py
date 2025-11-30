@@ -113,9 +113,7 @@ def test_set_handles_post_error_and_records_failed(monkeypatch):
     completions = [f for f in founds if f.get("status") == "completed"]
     if completions:
         assert "result" in completions[0]
-        assert completions[0]["result"]["failed"] and isinstance(
-            completions[0]["result"]["failed"], list
-        )
+        assert completions[0]["result"]["failed"] and isinstance(completions[0]["result"]["failed"], list)
 
 
 def test_set_includes_attributes_from_readback(monkeypatch):
@@ -165,7 +163,4 @@ def test_set_includes_attributes_from_readback(monkeypatch):
             break
     assert found is not None
     assert "attributes" in found
-    assert (
-        "sensor.attr" in found["attributes"]
-        and found["attributes"]["sensor.attr"].get("friendly_name") == "Attr"
-    )
+    assert "sensor.attr" in found["attributes"] and found["attributes"]["sensor.attr"].get("friendly_name") == "Attr"

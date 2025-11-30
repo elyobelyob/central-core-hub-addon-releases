@@ -103,9 +103,7 @@ def test_read_proc_stat_and_cpu_percent(monkeypatch):
 
     monkeypatch.setattr(
         "builtins.open",
-        lambda path, *a, **k: (
-            io.StringIO(data) if str(path) == "/proc/stat" else open(path, *a, **k)
-        ),
+        lambda path, *a, **k: (io.StringIO(data) if str(path) == "/proc/stat" else open(path, *a, **k)),
     )
     idle, total = h._read_proc_stat()
     assert idle is not None and total is not None

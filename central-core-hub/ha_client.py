@@ -6,6 +6,7 @@ Responsibilities:
 - Fetch sensors via REST (/api/states and per-entity /api/states/<id>)
 - Stream state_changed events over the HA websocket API with ping/pong keepalive
 """
+
 import json
 import threading
 import time
@@ -102,8 +103,7 @@ def fetch_sensors(ha_api_url, ha_api_token, requests_mod=None):
                     {
                         "entity_id": ent_id,
                         "state": ent.get("state"),
-                        "name": ent.get("attributes", {}).get("friendly_name")
-                        or ent_id,
+                        "name": ent.get("attributes", {}).get("friendly_name") or ent_id,
                         "attributes": ent.get("attributes", {}) or {},
                         # Preserve HA timestamps when present so downstream systems
                         # can reason about data recency.
@@ -137,8 +137,7 @@ def fetch_sensors_by_ids(ha_api_url, ha_api_token, entity_ids, requests_mod=None
                     {
                         "entity_id": data.get("entity_id"),
                         "state": data.get("state"),
-                        "name": data.get("attributes", {}).get("friendly_name")
-                        or data.get("entity_id"),
+                        "name": data.get("attributes", {}).get("friendly_name") or data.get("entity_id"),
                         "attributes": data.get("attributes", {}) or {},
                         "last_changed": data.get("last_changed"),
                         "last_updated": data.get("last_updated"),
@@ -194,9 +193,9 @@ class HAWebSocketListener:
         if not base:
             return None
         if base.startswith("https://"):
-            base = "wss://" + base[len("https://"):]
+            base = "wss://" + base[len("https://") :]
         elif base.startswith("http://"):
-            base = "ws://" + base[len("http://"):]
+            base = "ws://" + base[len("http://") :]
         return f"{base}/api/websocket"
 
     def start(self):
@@ -314,6 +313,7 @@ class HAWebSocketListener:
         if not completed or final is None:
             return None
         return final.get("result")
+
     def _persist_ha_version(self, version):
         """Cache and persist the discovered HA version."""
         if version is None:
@@ -361,13 +361,11 @@ class HAWebSocketListener:
         return False
 
     def _run(self):
-        timeout_exc_cls = (
-            WebSocketTimeoutException
-            or (websocket and getattr(websocket, "WebSocketTimeoutException", None))
+        timeout_exc_cls = WebSocketTimeoutException or (
+            websocket and getattr(websocket, "WebSocketTimeoutException", None)
         )
-        addr_exc_cls = (
-            WebSocketAddressException
-            or (websocket and getattr(websocket, "WebSocketAddressException", None))
+        addr_exc_cls = WebSocketAddressException or (
+            websocket and getattr(websocket, "WebSocketAddressException", None)
         )
 
         try:
@@ -388,9 +386,7 @@ class HAWebSocketListener:
                 return
             if hello.get("ha_version"):
                 ha_version_written = self._persist_ha_version(hello.get("ha_version"))
-            self._send_json(
-                self._ws, {"type": "auth", "access_token": self.ha_api_token}
-            )
+            self._send_json(self._ws, {"type": "auth", "access_token": self.ha_api_token})
             auth_resp = json.loads(self._ws.recv() or "{}")
             if auth_resp.get("type") != "auth_ok":
                 self._log("HA WS auth failed")
@@ -442,9 +438,7 @@ class HAWebSocketListener:
                                     or (res.get("config") or {}).get("version")
                                 )
                             if ha_version:
-                                ha_version_written = self._persist_ha_version(
-                                    ha_version
-                                )
+                                ha_version_written = self._persist_ha_version(ha_version)
                         except Exception:
                             pass
                         # continue so we do not treat get_config as pending request

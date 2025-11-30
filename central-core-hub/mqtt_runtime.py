@@ -4,6 +4,7 @@ Small helper module to create and configure an MQTT client for
 `CentralCoreClient`. This isolates TLS/configuration and the
 client shim so it can be unit-tested independently.
 """
+
 import sys
 import traceback
 from datetime import datetime, timezone
@@ -79,14 +80,10 @@ def setup_mqtt_client(ctx, mqtt_mod):
                     callback_api_version=mqtt_mod.CallbackAPIVersion.VERSION2,
                 )
             else:
-                ctx._client = mqtt_mod.Client(
-                    client_id=ctx.client_id, clean_session=True
-                )
+                ctx._client = mqtt_mod.Client(client_id=ctx.client_id, clean_session=True)
         except TypeError:
             try:
-                ctx._client = mqtt_mod.Client(
-                    client_id=ctx.client_id, clean_session=True
-                )
+                ctx._client = mqtt_mod.Client(client_id=ctx.client_id, clean_session=True)
             except TypeError:
                 try:
                     ctx._client = mqtt_mod.Client(client_id=ctx.client_id)

@@ -74,7 +74,7 @@ class VersionManager:
 
     def parse_version(self, version: str) -> tuple:
         """Parse version string into (major, minor, patch)."""
-        match = re.match(r'^(\d+)\.(\d+)\.(\d+)$', version)
+        match = re.match(r"^(\d+)\.(\d+)\.(\d+)$", version)
         if not match:
             raise ValueError(f"Invalid version format: {version}")
         return tuple(int(x) for x in match.groups())
@@ -103,7 +103,7 @@ class VersionManager:
 
     def update_version_in_file(self, file_path: Path, new_version: str) -> None:
         """Update version in a specific file."""
-        if file_path.name.endswith('.json'):
+        if file_path.name.endswith(".json"):
             # JSON files
             with open(file_path, "r") as f:
                 data = json.load(f)
@@ -115,18 +115,13 @@ class VersionManager:
                 if file_path.name != "repository.json":
                     f.write("\n")  # Add newline for non-repository files
 
-        elif file_path.name.endswith('.yaml'):
+        elif file_path.name.endswith(".yaml"):
             # YAML files
             with open(file_path, "r") as f:
                 content = f.read()
 
             # Replace version line
-            content = re.sub(
-                r'^version:\s*"[^"]*"',
-                f'version: "{new_version}"',
-                content,
-                flags=re.MULTILINE
-            )
+            content = re.sub(r'^version:\s*"[^"]*"', f'version: "{new_version}"', content, flags=re.MULTILINE)
 
             with open(file_path, "w") as f:
                 f.write(content)

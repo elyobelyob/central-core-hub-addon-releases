@@ -91,13 +91,9 @@ def test_handle_message_set_no_ha_and_request_exceptions(monkeypatch):
     msg = types.SimpleNamespace(topic=f"hubs/{c.client_id}/v1/cmd/sensors/set")
 
     # payload sets two sensors; with no HA config, results should go to failed
-    payload = json.dumps(
-        {"command_id": "x", "payload": {"sensors": {"a": "on", "b": "3"}}}
-    )
+    payload = json.dumps({"command_id": "x", "payload": {"sensors": {"a": "on", "b": "3"}}})
 
-    handlers.handle_message(
-        c, msg, payload, lambda *a, **k: [], lambda *a, **k: None, lambda x: x, None
-    )
+    handlers.handle_message(c, msg, payload, lambda *a, **k: [], lambda *a, **k: None, lambda x: x, None)
 
     # Completed response should have been published (command_id present)
     assert any("/v1/ack/" in p[0] for p in c.pubs)
@@ -223,9 +219,7 @@ def test_handle_message_set_with_ha_readback(monkeypatch):
 
     requests_mock = MockRequests()
 
-    payload = json.dumps(
-        {"command_id": "set_cmd", "payload": {"sensors": {"ent1": "on"}}}
-    )
+    payload = json.dumps({"command_id": "set_cmd", "payload": {"sensors": {"ent1": "on"}}})
 
     handlers.handle_message(
         c,

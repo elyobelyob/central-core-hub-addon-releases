@@ -5,9 +5,7 @@ import json
 
 
 def load_telemetry():
-    spec = importlib.util.spec_from_file_location(
-        "telemetry", "./central-core-hub/telemetry.py"
-    )
+    spec = importlib.util.spec_from_file_location("telemetry", "./central-core-hub/telemetry.py")
     if spec is None or getattr(spec, "loader", None) is None:
         raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
