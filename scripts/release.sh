@@ -137,10 +137,19 @@ fi
 if [[ -n "$RUFF_EXE" ]]; then
   echo "Found ruff at $RUFF_EXE"
   if [[ "$DRY_RUN" -eq 0 ]]; then
-    echo "Running ruff --fix ..."
-    "$RUFF_EXE" --fix . || { echo 'ruff --fix failed' >&2; exit 1; }
+    echo "Attempting to auto-fix with ruff (try --fix, format, check --fix)..."
+    # Try several ruff commands depending on installed version
+    if "$RUFF_EXE" --fix . 2>/dev/null; then
+      echo "ruff --fix applied"
+    elif "$RUFF_EXE" format . 2>/dev/null; then
+      echo "ruff format applied"
+    elif "$RUFF_EXE" check --fix . 2>/dev/null; then
+      echo "ruff check --fix applied"
+    else
+      echo "Warning: ruff does not support an auto-fix command on this version; skipping auto-fix" >&2
+    fi
   else
-    echo "[DRY-RUN] Would run: $RUFF_EXE --fix ."
+    echo "[DRY-RUN] Would attempt: $RUFF_EXE --fix . (or fallback to format/check --fix)"
   fi
 
   echo "Running ruff check ..."
