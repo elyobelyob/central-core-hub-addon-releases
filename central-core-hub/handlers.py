@@ -291,9 +291,75 @@ def handle_message(
                 payload_obj = cmd.get("payload") if isinstance(cmd, dict) else None
                 if isinstance(payload_obj, dict):
                     s = payload_obj.get("sensors")
+                    # Accept dict mapping entity_id->state
                     if isinstance(s, dict):
                         for ent, st in s.items():
                             sensors_to_set.append({"entity_id": ent, "state": st})
+                    # New: accept a list of plain entity-id strings and treat
+                    # it as a selection (equivalent to sensors/poll). In this
+                    # case we store the selection and publish a vault
+                    # reminder, then respond with a completed ack.
+                    elif isinstance(s, list) and all(isinstance(x, str) for x in s):
+                        try:
+                            client.selected_sensors = list(s)
+                        except Exception:
+                            pass
+                        # make a stable 'selected' value for reminder/persist
+                        selected = getattr(client, "selected_sensors", None) or list(s)
+                        # Publish reminder to vault if configured
+                        now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                        try:
+                            if getattr(client, "vault_topic", None):
+                                reminder = {
+                                    "schema_version": 1,
+                                    "client_id": client.client_id,
+                                    "timestamp": now_iso,
+                                    "selected_sensors": list(selected),
+                                }
+                                client._publish(client.vault_topic, json.dumps(reminder), qos=0)
+                        except Exception:
+                            pass
+                        # Persist the selected sensors so they survive restarts
+                        try:
+                            import tempfile
+                            import pathlib
+
+                            try:
+                                import mqtt_client as _mc
+                            except Exception:
+                                _mc = None
+
+                            target = getattr(_mc, "SELECTED_SENSORS_FILE", None) if _mc is not None else None
+                            if not target:
+                                target = pathlib.Path(__file__).parent / "SELECTED_SENSORS.json"
+                            else:
+                                target = pathlib.Path(str(target))
+
+                            d = target.parent
+                            d.mkdir(parents=True, exist_ok=True)
+                            with tempfile.NamedTemporaryFile(mode="w", dir=str(d), delete=False) as tf:
+                                tf.write(json.dumps(list(selected), indent=2))
+                                tmpname = tf.name
+                            pathlib.Path(tmpname).replace(target)
+                        except Exception:
+                            pass
+                        # Send completion ack for sensors/set
+                        if command_id:
+                            try:
+                                v1_comp = client.build_ack_topic(action, command_id)
+                            except Exception:
+                                v1_comp = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
+                            comp_payload = {
+                                "status": "completed",
+                                "result": {"selected": list(s)},
+                                "timestamp": now_iso,
+                            }
+                            try:
+                                client._publish(v1_comp, json.dumps(comp_payload), qos=1)
+                            except Exception:
+                                pass
+                        return
+                    # Accept list of dicts with entity_id/state
                     elif isinstance(s, list):
                         for item in s:
                             if isinstance(item, dict) and item.get("entity_id"):

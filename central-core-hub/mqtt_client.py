@@ -72,6 +72,8 @@ except Exception:
 OPTIONS_PATH = "/data/options.json"
 MQTT_OPTIONS_ENV = "MQTT_OPTIONS_PATH"
 SENSOR_REGISTRY = pathlib.Path(__file__).parent / "SENSOR_REGISTRY.yaml"
+# File to persist the vault-selected sensors so selections survive restarts
+SELECTED_SENSORS_FILE = pathlib.Path(__file__).parent / "SELECTED_SENSORS.json"
 # In-memory cache for the parsed SENSOR_REGISTRY to avoid repeated disk
 # reads during tight publish loops. Calls to `reload_sensor_registry()` will
 # clear the cache so handlers can update the file at runtime.
@@ -780,7 +782,24 @@ class CentralCoreClient:
         self._selected_sensor_cache = {}
         self._selected_sensors = []
         self._selected_sensors_set = set()
-        self.selected_sensors = []
+        # Load any persisted selected sensors so selections survive restarts
+        try:
+            # Default to empty list; file may not exist in many environments
+            sel = []
+            try:
+                if SELECTED_SENSORS_FILE.exists():
+                    with open(SELECTED_SENSORS_FILE, "r") as f:
+                        import json
+
+                        data = json.load(f)
+                        if isinstance(data, list):
+                            sel = data
+            except Exception:
+                sel = []
+            self.selected_sensors = sel
+        except Exception:
+            # Fallback: ensure property initialized
+            self.selected_sensors = []
         # HA websocket listener instance (populated when HA integration configured)
         self._ha_ws_listener = None
         self._addon_slug = None
