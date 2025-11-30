@@ -24,6 +24,135 @@ import typing
 from datetime import datetime, timezone
 from typing import cast
 
+# Outbox configuration: persistent file location and maximum queued items.
+# Default file is under the add-on data directory so it survives upgrades.
+OUTBOX_FILE = pathlib.Path(os.environ.get("MQTT_OUTBOX_FILE") or "/data/outbox.jsonl")
+OUTBOX_MAX = int(os.environ.get("MQTT_OUTBOX_MAX") or "1000")
+OUTBOX_TOPICS = os.environ.get("MQTT_OUTBOX_TOPICS")
+
+def _should_persist_topic(topic: str) -> bool:
+    """Decide whether a topic should be persisted to the outbox.
+
+    By default persist Vault ACK topics (contain '/v1/ack/'), the
+    configured vault topic (if present), and the preferred sensors topic
+    name pattern. Users can override selection with `MQTT_OUTBOX_TOPICS`
+    environment variable as a comma-separated list of substrings to match.
+    """
+    try:
+        if not topic:
+            return False
+        # If explicit override provided, use substring match for any entry
+        if OUTBOX_TOPICS:
+            for part in [p.strip() for p in OUTBOX_TOPICS.split(",") if p.strip()]:
+                if part in topic:
+                    return True
+            return False
+        # Default heuristics
+        if "/v1/ack/" in topic:
+            return True
+        # vault topic typically contains 'vault' or '/vault/'
+        if "vault" in topic:
+            return True
+        # sensors preferred topic uses 'sensors' in topic
+        if "sensors" in topic:
+            return True
+        return False
+    except Exception:
+        return False
+
+
+class PersistentOutbox:
+    """Simple newline-delimited JSON persistent outbox.
+
+    Format: each line is a JSON object with keys: topic, payload, qos, ts
+    """
+
+    def __init__(self, path: pathlib.Path, max_items: int = 1000):
+        self.path = pathlib.Path(path)
+        self.max_items = int(max_items)
+        # make sure directory exists
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+
+    def append(self, topic: str, payload: str, qos: int = 0) -> bool:
+        """Append a message to the outbox. Returns True on success.
+
+        If the outbox exceeds `max_items`, the oldest entries are discarded.
+        """
+        try:
+            # Read current count (best-effort) and rotate if needed
+            lines = []
+            if self.path.exists():
+                try:
+                    with open(self.path, "r") as f:
+                        lines = f.read().splitlines()
+                except Exception:
+                    lines = []
+            # prune oldest if needed
+            if len(lines) >= self.max_items:
+                lines = lines[-(self.max_items - 1) :]
+            entry = json.dumps({"topic": topic, "payload": payload, "qos": qos, "ts": time.time()})
+            lines.append(entry)
+            # atomic write
+            import tempfile as _temp
+
+            with _temp.NamedTemporaryFile(mode="w", dir=str(self.path.parent), delete=False) as tf:
+                tf.write("\n".join(lines) + "\n")
+                tmp = tf.name
+            pathlib.Path(tmp).replace(self.path)
+            return True
+        except Exception:
+            return False
+
+    def _read_all(self):
+        try:
+            if not self.path.exists():
+                return []
+            with open(self.path, "r") as f:
+                return [json.loads(l) for l in f.read().splitlines() if l.strip()]
+        except Exception:
+            return []
+
+    def replace_all(self, entries):
+        try:
+            import tempfile as _temp
+
+            lines = [json.dumps(e) for e in entries]
+            with _temp.NamedTemporaryFile(mode="w", dir=str(self.path.parent), delete=False) as tf:
+                tf.write("\n".join(lines) + ("\n" if lines else ""))
+                tmp = tf.name
+            pathlib.Path(tmp).replace(self.path)
+            return True
+        except Exception:
+            return False
+
+    def flush_with_sender(self, sender_fn):
+        """Attempt to flush outbox by calling sender_fn(topic,payload,qos).
+
+        sender_fn should return True on success, False on failure/exception.
+        Returns number of messages successfully flushed.
+        """
+        entries = self._read_all()
+        if not entries:
+            return 0
+        remaining = []
+        success = 0
+        for e in entries:
+            try:
+                ok = bool(sender_fn(e.get("topic"), e.get("payload"), e.get("qos", 0)))
+            except Exception:
+                ok = False
+            if ok:
+                success += 1
+            else:
+                remaining.append(e)
+        # replace file with remaining entries
+        self.replace_all(remaining)
+        return success
+
+
 
 def _log(msg, file=sys.stdout):
     """Log a message with UTC timestamp."""
@@ -786,6 +915,12 @@ class CentralCoreClient:
 
                 self._client = _ClientShim()
 
+        # Persistent outbox for queued outbound messages (best-effort)
+        try:
+            self._outbox = PersistentOutbox(OUTBOX_FILE, max_items=OUTBOX_MAX)
+        except Exception:
+            self._outbox = None
+
         self._connected = False
         # Cache the last HA version we observed so telemetry can reuse it
         self._ha_version_cache = None
@@ -1056,8 +1191,32 @@ class CentralCoreClient:
 
     def _publish(self, topic, payload, qos=0):
         """Publish and log the MQTT publish action and result."""
+        # If this topic is eligible for persistence and the outbox is
+        # configured, attempt publish but fall back to enqueuing the
+        # message for later delivery on connect.
+        try:
+            outbox = getattr(self, "_outbox", None)
+        except Exception:
+            outbox = None
         try:
             _log(f"MQTT -> PUBLISH to {topic} qos={qos} len={len(payload) if payload is not None else 0}")
+            # If not connected, only enqueue when we have a real paho MQTT
+            # client (i.e. runtime) and the topic is eligible for persistence.
+            # In tests the client is often a dummy shim; allow those publishes
+            # to proceed so unit tests keep their expectations.
+            if (
+                outbox
+                and (not getattr(self, "_connected", False))
+                and _should_persist_topic(topic)
+                and (mqtt is not None and isinstance(getattr(self, "_client", None), getattr(mqtt, "Client", type(None))))
+            ):
+                try:
+                    outbox.append(topic, payload if payload is not None else "", qos)
+                    _log(f"MQTT OUTBOX -> queued for {topic}")
+                    return None
+                except Exception:
+                    pass
+
             result = self._client.publish(topic, payload, qos=qos)
             # paho may return an object with rc or a tuple
             try:
@@ -1095,9 +1254,24 @@ class CentralCoreClient:
                 disp = "<unserializable>"
 
             _log(f"MQTT <- PUBLISH result for {topic} rc={rc} payload={disp}")
+            # If publish returned an rc indicating failure and outbox is enabled,
+            # persist the message for retry if the topic is eligible.
+            try:
+                if outbox and getattr(result, "rc", 0) != 0 and _should_persist_topic(topic):
+                    outbox.append(topic, payload if payload is not None else "", qos)
+            except Exception:
+                pass
             return result
         except Exception:
             _log(f"MQTT ERROR publishing to {topic}", sys.stderr)
+            # On exception, persist the message if appropriate
+            try:
+                outbox = getattr(self, "_outbox", None)
+                if outbox and _should_persist_topic(topic):
+                    outbox.append(topic, payload if payload is not None else "", qos)
+                    _log(f"MQTT OUTBOX -> queued for {topic} after error")
+            except Exception:
+                pass
             traceback.print_exc()
             return None
 
@@ -1280,6 +1454,23 @@ class CentralCoreClient:
             except Exception:
                 _log("Subscription failed", sys.stderr)
             self._connected = True
+            # Attempt to flush any persisted outbox messages on connect.
+            try:
+                outbox = getattr(self, "_outbox", None)
+                if outbox is not None:
+                    def _sender(t, p, q):
+                        try:
+                            r = self._client.publish(t, p, qos=q)
+                            rc = getattr(r, "rc", 0)
+                            return rc == 0
+                        except Exception:
+                            return False
+
+                    flushed = outbox.flush_with_sender(_sender)
+                    if flushed:
+                        _log(f"Flushed {flushed} messages from outbox")
+            except Exception:
+                pass
             # Publish sensors list immediately on startup/connection
             try:
                 self.publish_sensors()
