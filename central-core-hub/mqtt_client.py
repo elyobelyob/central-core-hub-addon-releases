@@ -30,6 +30,7 @@ OUTBOX_FILE = pathlib.Path(os.environ.get("MQTT_OUTBOX_FILE") or "/data/outbox.j
 OUTBOX_MAX = int(os.environ.get("MQTT_OUTBOX_MAX") or "1000")
 OUTBOX_TOPICS = os.environ.get("MQTT_OUTBOX_TOPICS")
 
+
 def _should_persist_topic(topic: str) -> bool:
     """Decide whether a topic should be persisted to the outbox.
 
@@ -111,7 +112,7 @@ class PersistentOutbox:
             if not self.path.exists():
                 return []
             with open(self.path, "r") as f:
-                return [json.loads(l) for l in f.read().splitlines() if l.strip()]
+                return [json.loads(line) for line in f.read().splitlines() if line.strip()]
         except Exception:
             return []
 
@@ -151,7 +152,6 @@ class PersistentOutbox:
         # replace file with remaining entries
         self.replace_all(remaining)
         return success
-
 
 
 def _log(msg, file=sys.stdout):
@@ -1208,7 +1208,9 @@ class CentralCoreClient:
                 outbox
                 and (not getattr(self, "_connected", False))
                 and _should_persist_topic(topic)
-                and (mqtt is not None and isinstance(getattr(self, "_client", None), getattr(mqtt, "Client", type(None))))
+                and (
+                    mqtt is not None and isinstance(getattr(self, "_client", None), getattr(mqtt, "Client", type(None)))
+                )
             ):
                 try:
                     outbox.append(topic, payload if payload is not None else "", qos)
@@ -1458,6 +1460,7 @@ class CentralCoreClient:
             try:
                 outbox = getattr(self, "_outbox", None)
                 if outbox is not None:
+
                     def _sender(t, p, q):
                         try:
                             r = self._client.publish(t, p, qos=q)

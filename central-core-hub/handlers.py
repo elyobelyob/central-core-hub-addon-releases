@@ -181,12 +181,29 @@ def handle_message(
                 enabled_map[ent] = not bool(attrs.get("disabled_by"))
                 attrs_map[ent] = attrs
 
+            # build observed timestamps map (prefer HA-provided timestamps,
+            # fall back to current time)
+            observed_map = {}
+            for s in sensors:
+                ent = s.get("entity_id")
+                if not ent or not _is_entity_allowed(ent):
+                    continue
+                obs = None
+                try:
+                    obs = s.get("last_changed") or s.get("last_updated")
+                except Exception:
+                    obs = None
+                if not obs:
+                    obs = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                observed_map[ent] = obs
+
             now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             telemetry_payload = {
                 "data": data_map,
                 "names": names_map,
                 "attributes": attrs_map,
                 "enabled": enabled_map,
+                "observed": observed_map,
                 "timestamp": now_iso,
             }
             try:
@@ -329,12 +346,28 @@ def handle_message(
                                 names_map[ent] = attrs.get("friendly_name") or si.get("name") or ent
                                 enabled_map[ent] = not bool(attrs.get("disabled_by"))
                                 attrs_map[ent] = attrs
+                            # build observed timestamps for selected sensors
+                            observed_map = {}
+                            for si in sensors:
+                                ent = si.get("entity_id")
+                                if not ent:
+                                    continue
+                                obs = None
+                                try:
+                                    obs = si.get("last_changed") or si.get("last_updated")
+                                except Exception:
+                                    obs = None
+                                if not obs:
+                                    obs = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                                observed_map[ent] = obs
+
                             now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                             telemetry_payload = {
                                 "data": data_map,
                                 "names": names_map,
                                 "attributes": attrs_map,
                                 "enabled": enabled_map,
+                                "observed": observed_map,
                                 "timestamp": now_iso,
                             }
                             # Do not publish this to the general telemetry topic here;
@@ -409,6 +442,7 @@ def handle_message(
                                         "names": mt.get("names", {}),
                                         "enabled": mt.get("enabled", {}),
                                         "attributes": mt.get("attributes", {}),
+                                        "observed": mt.get("observed", {}),
                                     },
                                     "timestamp": now_iso,
                                 }
@@ -434,6 +468,7 @@ def handle_message(
             results = {"set": [], "failed": []}
             readback_values = {}
             readback_attrs = {}
+            readback_observed = {}
 
             for item in sensors_to_set:
                 ent = item.get("entity_id")
@@ -458,12 +493,22 @@ def handle_message(
                                 read_state = data.get("state")
                                 readback_values[ent] = read_state
                                 readback_attrs[ent] = data.get("attributes", {}) or {}
+                                # prefer HA-provided timestamps if available
+                                try:
+                                    obs = data.get("last_changed") or data.get("last_updated")
+                                except Exception:
+                                    obs = None
+                                if not obs:
+                                    obs = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                                readback_observed[ent] = obs
                             except Exception:
                                 readback_values[ent] = st
                                 readback_attrs[ent] = {}
+                                readback_observed[ent] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                         else:
                             readback_values[ent] = st
                             readback_attrs[ent] = {}
+                            readback_observed[ent] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                         results["set"].append(ent)
                     else:
                         results["failed"].append({"entity_id": ent, "reason": "no_ha_config"})
@@ -525,6 +570,7 @@ def handle_message(
                         "attributes": attrs_map,
                         "names": names_map,
                         "enabled": enabled_map,
+                        "observed": readback_observed,
                         "timestamp": now_iso,
                     }
                     try:
@@ -570,6 +616,7 @@ def handle_message(
                         "attributes": attrs_map,
                         "names": names_map,
                         "enabled": enabled_map,
+                        "observed": {},
                         "timestamp": now_iso,
                     }
                     try:
