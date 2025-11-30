@@ -28,14 +28,14 @@ if [[ -n "${1-}" ]]; then
   NEW_VERSION="$1"
 else
   # Read version from repository.json using python for robust parsing
-  CUR_VERSION=$($PYTHON - <<'PY'
+  CUR_VERSION=$($PYTHON - "$REPO_JSON" <<'PY'
 import json,sys
 fn=sys.argv[1]
 with open(fn) as f:
     v=json.load(f).get('version')
 print(v)
 PY
-  "$REPO_JSON")
+  )
 
   if [[ -z "$CUR_VERSION" ]]; then
     echo "Could not determine current version" >&2
@@ -53,8 +53,29 @@ else
   echo "Releasing version $NEW_VERSION"
 fi
 
+# If not a dry-run, ensure files are writable before attempting updates
+check_writable() {
+  local f="$1"
+  if [[ -e "$f" ]]; then
+    [[ -w "$f" ]] || return 1
+  else
+    local d
+    d=$(dirname "$f")
+    [[ -w "$d" ]] || return 1
+  fi
+}
+
+if [[ "$DRY_RUN" -eq 0 ]]; then
+  for f in "$REPO_JSON" "$ADDON_JSON" "$ADDON_YAML"; do
+    if ! check_writable "$f"; then
+      echo "Error: $f is not writable. Fix file permissions or run with appropriate privileges." >&2
+      exit 1
+    fi
+  done
+fi
+
 # Update repository.json
-$PYTHON - <<PY
+$PYTHON - "$REPO_JSON" "$NEW_VERSION" <<PY
 import json,sys
 fn=sys.argv[1]
 v=sys.argv[2]
@@ -65,26 +86,25 @@ with open(fn,'w') as f:
     json.dump(j,f,indent=1)
     f.write('\n')
 PY
-"$REPO_JSON" "$NEW_VERSION"
 
 # Update central-core-hub/config.json
-$PYTHON - <<PY
+$PYTHON - "$ADDON_JSON" "$NEW_VERSION" <<PY
 import json,sys
 fn=sys.argv[1]
 v=sys.argv[2]
 with open(fn) as f:
-    j=json.load(f)
+  j=json.load(f)
 j['version']=v
 with open(fn,'w') as f:
-    json.dump(j,f,indent=2)
-    f.write('\n')
+  json.dump(j,f,indent=2)
+  f.write('\n')
 PY
-"$ADDON_JSON" "$NEW_VERSION"
 
 # Update central-core-hub/config.yaml - replace version: "..."
 if grep -q '^version:' "$ADDON_YAML"; then
   # Use python to safely rewrite the YAML line to avoid relying on sed portability
-  $PYTHON - <<PY
+  $PYTHON - "$ADDON_YAML" "$NEW_VERSION" <<PY
+import sys
 from pathlib import Path
 p=Path(sys.argv[1])
 v=sys.argv[2]
@@ -92,13 +112,12 @@ txt=p.read_text()
 lines=txt.splitlines()
 for i,l in enumerate(lines):
     if l.strip().startswith('version:'):
-        # preserve indentation and quoting style
-        indent=l[:l.index('v')]
-        lines[i]=f'{indent}version: "{v}"'
+        idx = l.find('version')
+        indent = l[:idx] if idx!=-1 else l[:len(l)-len(l.lstrip())]
+        lines[i]=f"{indent}version: \"{v}\""
         break
 p.write_text('\n'.join(lines)+"\n")
 PY
-  "$ADDON_YAML" "$NEW_VERSION"
 else
   echo "version: \"$NEW_VERSION\"" >> "$ADDON_YAML"
 fi
