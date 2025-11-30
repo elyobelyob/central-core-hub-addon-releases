@@ -18,9 +18,7 @@ def _load_client_module():
 
 def test_selected_sensor_changes_publish_on_change(monkeypatch):
     mc = _load_client_module()
-    c = mc.CentralCoreClient(
-        {"client_id": "hub1", "ha_api_url": "http://ha", "ha_api_token": "tok"}
-    )
+    c = mc.CentralCoreClient({"client_id": "hub1", "ha_api_url": "http://ha", "ha_api_token": "tok"})
     # Ensure the module-level `requests` symbol is present so the
     # stricter runtime behavior in `publish_selected_sensor_changes`
     # does not early-return during tests. Tests mock `fetch_sensors`
@@ -30,9 +28,7 @@ def test_selected_sensor_changes_publish_on_change(monkeypatch):
     monkeypatch.setattr(
         c,
         "_publish",
-        lambda topic, payload, qos=0: publishes.append(
-            {"topic": topic, "payload": json.loads(payload)}
-        ),
+        lambda topic, payload, qos=0: publishes.append({"topic": topic, "payload": json.loads(payload)}),
     )
     c.selected_sensors = ["sensor.a", "sensor.b"]
 
@@ -85,16 +81,12 @@ def test_selected_sensor_changes_publish_on_change(monkeypatch):
 
 def test_selected_sensor_changes_streaming(monkeypatch):
     mc = _load_client_module()
-    c = mc.CentralCoreClient(
-        {"client_id": "hub2", "ha_api_url": "http://ha", "ha_api_token": "tok"}
-    )
+    c = mc.CentralCoreClient({"client_id": "hub2", "ha_api_url": "http://ha", "ha_api_token": "tok"})
     publishes = []
     monkeypatch.setattr(
         c,
         "_publish",
-        lambda topic, payload, qos=0: publishes.append(
-            {"topic": topic, "payload": json.loads(payload)}
-        ),
+        lambda topic, payload, qos=0: publishes.append({"topic": topic, "payload": json.loads(payload)}),
     )
 
     c.selected_sensors = ["sensor.stream"]
@@ -124,7 +116,5 @@ def test_selected_sensor_changes_streaming(monkeypatch):
     assert len(publishes) == 2
 
     # events for sensors that are not selected should be ignored
-    c._on_ha_state_event(
-        "sensor.other", {"state": "10", "attributes": {"friendly_name": "Other"}}
-    )
+    c._on_ha_state_event("sensor.other", {"state": "10", "attributes": {"friendly_name": "Other"}})
     assert len(publishes) == 2

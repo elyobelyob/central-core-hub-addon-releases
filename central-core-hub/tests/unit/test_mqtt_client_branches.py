@@ -99,9 +99,7 @@ def test_publish_sensors_no_ha_does_nothing():
 def test_on_connect_subscribe_exception_calls_publish_sensors(monkeypatch):
     mod = _load_module()
     CentralCoreClient = mod.CentralCoreClient
-    c = CentralCoreClient(
-        {"client_id": "conn1", "ha_api_url": "http://ha", "ha_api_token": "t"}
-    )
+    c = CentralCoreClient({"client_id": "conn1", "ha_api_url": "http://ha", "ha_api_token": "t"})
 
     class BadSubscriber:
         def subscribe(self, topic, qos=0):

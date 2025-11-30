@@ -73,7 +73,13 @@ def test_one_shot_publish_on_ha_version(monkeypatch):
 
     monkeypatch.setattr(mqtt.CentralCoreClient, "publish_telemetry", _mark_publish, raising=False)
 
-    opts = {"client_id": "test-hub", "mqtt_host": "127.0.0.1", "mqtt_port": 1883, "ha_api_url": "http://ha", "ha_api_token": "tok"}
+    opts = {
+        "client_id": "test-hub",
+        "mqtt_host": "127.0.0.1",
+        "mqtt_port": 1883,
+        "ha_api_url": "http://ha",
+        "ha_api_token": "tok",
+    }
     c = mqtt.CentralCoreClient(opts)
 
     assert getattr(c, "_published_once", False) is True

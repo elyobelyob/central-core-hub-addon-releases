@@ -198,13 +198,9 @@ def test_sensors_poll_with_requested_subset(monkeypatch):
         ],
     )
 
-    c = CentralCoreClient(
-        {"client_id": "u5", "ha_api_url": "http://ha", "ha_api_token": "tok"}
-    )
+    c = CentralCoreClient({"client_id": "u5", "ha_api_url": "http://ha", "ha_api_token": "tok"})
     published = []
-    c._publish = lambda topic, payload, qos=0: published.append(
-        (topic, json.loads(payload))
-    )
+    c._publish = lambda topic, payload, qos=0: published.append((topic, json.loads(payload)))
 
     # create poll command requesting only sensor.b
     cmd = {"command_id": "p1", "payload": {"sensors": ["sensor.b"]}}
@@ -232,9 +228,7 @@ def test_sensors_set_mapping_and_no_ha_config(monkeypatch):
     # Instantiate without HA config
     c = CentralCoreClient({"client_id": "u6"})
     published = []
-    c._publish = lambda topic, payload, qos=0: published.append(
-        (topic, json.loads(payload))
-    )
+    c._publish = lambda topic, payload, qos=0: published.append((topic, json.loads(payload)))
 
     # mapping-style payload
     cmd = {"command_id": "smap", "payload": {"sensors": {"sensor.x": "9"}}}

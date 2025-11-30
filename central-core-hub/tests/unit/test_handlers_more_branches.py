@@ -54,19 +54,11 @@ def test_poll_data_type_parsing(monkeypatch):
     c.vault_topic = ""
 
     cmd = {"command_id": "cid1", "action": "sensors/poll", "payload": {}}
-    msg = DummyMsg(
-        f"hubs/{c.client_id}/v1/cmd/sensors/poll", json.dumps(cmd).encode("utf-8")
-    )
+    msg = DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/poll", json.dumps(cmd).encode("utf-8"))
 
     c.on_message(None, None, msg)
 
-    tele_payload = json.loads(
-        next(
-            p["payload"]
-            for p in dummy.published
-            if p["topic"] == c.preferred_sensors_topic
-        )
-    )
+    tele_payload = json.loads(next(p["payload"] for p in dummy.published if p["topic"] == c.preferred_sensors_topic))
     data = tele_payload.get("data")
     assert data["sensor.on"] is True
     assert data["sensor.off"] is False
@@ -106,9 +98,7 @@ def test_on_message_binary_payload_and_set_no_ha_config(monkeypatch):
         "action": "sensors/set",
         "payload": {"sensors": [{"entity_id": "sensor.x", "state": "2"}]},
     }
-    msg2 = DummyMsg(
-        f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(cmd).encode("utf-8")
-    )
+    msg2 = DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(cmd).encode("utf-8"))
     c.on_message(None, None, msg2)
 
     # find completion response using client's build_ack_topic

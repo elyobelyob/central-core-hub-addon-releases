@@ -111,9 +111,7 @@ def test_exercise_mqtt_client_branches(monkeypatch):
     monkeypatch.setattr(
         mc,
         "fetch_sensors",
-        lambda u, t: [
-            {"entity_id": "sensor.foo", "state": "1", "name": "foo", "attributes": {}}
-        ],
+        lambda u, t: [{"entity_id": "sensor.foo", "state": "1", "name": "foo", "attributes": {}}],
     )
     c._client = make_shim(publish_ok=True)
     c.publish_sensors()

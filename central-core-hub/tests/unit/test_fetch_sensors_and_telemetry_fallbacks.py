@@ -45,7 +45,7 @@ def test_fetch_sensors_parses_entities(monkeypatch):
                     "state": "12",
                     "attributes": {"friendly_name": "X", "extra": 1},
                 },
-                    {"entity_id": "binary_sensor.y", "state": "on", "attributes": {}},
+                {"entity_id": "binary_sensor.y", "state": "on", "attributes": {}},
             ]
 
     class RClient:
@@ -93,9 +93,7 @@ def test_on_message_falls_back_to_file_load(monkeypatch):
     c._publish = fake_publish
 
     # call on_message which should import handlers via file and call handle_message
-    msg = types.SimpleNamespace(
-        topic=f"hubs/{c.client_id}/v1/cmd/sensors/poll", payload=b"{}"
-    )
+    msg = types.SimpleNamespace(topic=f"hubs/{c.client_id}/v1/cmd/sensors/poll", payload=b"{}")
     c.on_message(None, None, msg)
 
     # after handling, preferred sensors topic should have been published

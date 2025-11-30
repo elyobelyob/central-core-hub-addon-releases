@@ -58,6 +58,4 @@ def test_versions_aligned_across_manifests():
 
     # Ensure it's a simple semver (no leading 'v')
     assert not v_repo.startswith("v"), "version should not start with 'v'"
-    assert re.match(r"^\d+\.\d+\.\d+$", v_repo), (
-        f"version '{v_repo}' is not a MAJOR.MINOR.PATCH numeric semver"
-    )
+    assert re.match(r"^\d+\.\d+\.\d+$", v_repo), f"version '{v_repo}' is not a MAJOR.MINOR.PATCH numeric semver"

@@ -123,8 +123,6 @@ def test_mqtt_shim_and_tls_exception(monkeypatch):
     fake_mqtt = types.SimpleNamespace(Client=FakeClient)
     monkeypatch.setattr(mod, "mqtt", fake_mqtt)
     # enable tls to hit tls_set path
-    c2 = mod.CentralCoreClient(
-        {"client_id": "u2", "mqtt_tls": True, "mqtt_ca_cert": "x"}
-    )
+    c2 = mod.CentralCoreClient({"client_id": "u2", "mqtt_tls": True, "mqtt_ca_cert": "x"})
     # should have created _client even if tls_set failed
     assert hasattr(c2, "_client")

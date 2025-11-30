@@ -86,9 +86,7 @@ def test_on_message_handler_imports_fail_silently(monkeypatch):
 
     try:
         # call on_message with a buffer payload; should not raise
-        msg = types.SimpleNamespace(
-            topic=f"hubs/{c.client_id}/v1/cmd/sensors/poll", payload=b"{}"
-        )
+        msg = types.SimpleNamespace(topic=f"hubs/{c.client_id}/v1/cmd/sensors/poll", payload=b"{}")
         c.on_message(None, None, msg)
     finally:
         monkeypatch.setattr(importlib.util, "spec_from_file_location", real_spec)
