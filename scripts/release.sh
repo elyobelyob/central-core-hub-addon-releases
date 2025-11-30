@@ -122,8 +122,32 @@ else
   echo "version: \"$NEW_VERSION\"" >> "$ADDON_YAML"
 fi
 
-# Run tests
-echo "Running test suite..."
+# Run linters and tests
+echo "Running linters and test suite..."
+
+# Run ruff if available (prefer venv)
+if [[ -x "$ROOT_DIR/.venv/bin/ruff" ]]; then
+  echo "Running ruff (venv) ..."
+  "$ROOT_DIR/.venv/bin/ruff" check .
+elif command -v ruff >/dev/null 2>&1; then
+  echo "Running ruff ..."
+  ruff check .
+else
+  echo "Warning: ruff not found, skipping lint check"
+fi
+
+# Run pyright if available (prefer npx)
+if command -v npx >/dev/null 2>&1; then
+  echo "Running pyright via npx..."
+  npx pyright || { echo 'pyright failed' >&2; exit 1; }
+elif command -v pyright >/dev/null 2>&1; then
+  echo "Running pyright..."
+  pyright || { echo 'pyright failed' >&2; exit 1; }
+else
+  echo "Warning: pyright not found, skipping type check"
+fi
+
+# Run pytest
 if [[ -x "$PYTHON" ]]; then
   "$PYTHON" -m pytest -q
 else
