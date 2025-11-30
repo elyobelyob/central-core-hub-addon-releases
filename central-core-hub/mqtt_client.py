@@ -74,8 +74,37 @@ except Exception:
 OPTIONS_PATH = "/data/options.json"
 MQTT_OPTIONS_ENV = "MQTT_OPTIONS_PATH"
 SENSOR_REGISTRY = pathlib.Path(__file__).parent / "SENSOR_REGISTRY.yaml"
-# File to persist the vault-selected sensors so selections survive restarts
-SELECTED_SENSORS_FILE = pathlib.Path(__file__).parent / "SELECTED_SENSORS.json"
+# File to persist the vault-selected sensors so selections survive restarts.
+# Default to the add-on data directory (`/data`) so the file survives
+# add-on upgrades. Allow overriding via the `SELECTED_SENSORS_FILE`
+# environment variable for testing or alternate deployments.
+_PACKAGE_SELECTED = pathlib.Path(__file__).parent / "SELECTED_SENSORS.json"
+_DATA_SELECTED = pathlib.Path(os.environ.get("SELECTED_SENSORS_FILE") or "/data/SELECTED_SENSORS.json")
+SELECTED_SENSORS_FILE = _DATA_SELECTED
+
+# If an older selected-sensors file exists in the package directory (e.g.
+# from a previous runtime where the file was created next to the code),
+# migrate it into the add-on data directory so selections survive upgrades.
+try:
+    if _PACKAGE_SELECTED.exists() and not SELECTED_SENSORS_FILE.exists():
+        d = SELECTED_SENSORS_FILE.parent
+        d.mkdir(parents=True, exist_ok=True)
+        try:
+            # Copy contents to a temp file and atomically replace target
+            with open(_PACKAGE_SELECTED, "r") as pf:
+                content = pf.read()
+            import tempfile as _temp
+
+            with _temp.NamedTemporaryFile(mode="w", dir=str(d), delete=False) as tf:
+                tf.write(content)
+                tmpname = tf.name
+            pathlib.Path(tmpname).replace(SELECTED_SENSORS_FILE)
+        except Exception:
+            # Best-effort migration; do not fail import if we can't copy
+            pass
+except Exception:
+    # Defensive: never raise during module import
+    pass
 # In-memory cache for the parsed SENSOR_REGISTRY to avoid repeated disk
 # reads during tight publish loops. Calls to `reload_sensor_registry()` will
 # clear the cache so handlers can update the file at runtime.
