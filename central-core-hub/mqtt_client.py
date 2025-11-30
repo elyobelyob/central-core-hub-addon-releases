@@ -1059,7 +1059,37 @@ class CentralCoreClient:
                 rc = getattr(result, "rc", None)
             except Exception:
                 rc = None
-            _log(f"MQTT <- PUBLISH result for {topic} rc={rc}")
+            # Prepare a sanitized, human-readable payload for logging
+            try:
+                if payload is None:
+                    disp = "<none>"
+                elif isinstance(payload, (bytes, bytearray)):
+                    try:
+                        disp = payload.decode("utf-8", errors="replace")
+                    except Exception:
+                        disp = str(payload)
+                else:
+                    disp = str(payload)
+
+                # Redact certificate/private key blocks to avoid leaking secrets
+                import re
+
+                disp = re.sub(
+                    r"-----BEGIN CERTIFICATE-----[^-]*-----END CERTIFICATE-----",
+                    "[CERTIFICATE REDACTED]",
+                    disp,
+                    flags=re.DOTALL,
+                )
+                disp = re.sub(
+                    r"-----BEGIN PRIVATE KEY-----[^-]*-----END PRIVATE KEY-----",
+                    "[PRIVATE KEY REDACTED]",
+                    disp,
+                    flags=re.DOTALL,
+                )
+            except Exception:
+                disp = "<unserializable>"
+
+            _log(f"MQTT <- PUBLISH result for {topic} rc={rc} payload={disp}")
             return result
         except Exception:
             _log(f"MQTT ERROR publishing to {topic}", sys.stderr)
