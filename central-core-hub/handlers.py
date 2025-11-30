@@ -306,6 +306,68 @@ def handle_message(
                             pass
                         # make a stable 'selected' value for reminder/persist
                         selected = getattr(client, "selected_sensors", None) or list(s)
+                        # Immediately publish current values for the selected sensors
+                        try:
+                            sensors = fetch_sensors(client.ha_api_url, client.ha_api_token) or []
+                            sensors = [
+                                si
+                                for si in sensors
+                                if si.get("entity_id") in selected and _is_entity_allowed(si.get("entity_id"))
+                            ]
+                            data_map = {}
+                            names_map = {}
+                            enabled_map = {}
+                            for si in sensors:
+                                ent = si.get("entity_id")
+                                if not ent:
+                                    continue
+                                st = si.get("state")
+                                val = st
+                                try:
+                                    if isinstance(st, str):
+                                        low = st.lower()
+                                        if low in ("on", "true"):
+                                            val = True
+                                        elif low in ("off", "false"):
+                                            val = False
+                                        else:
+                                            if "." in st:
+                                                val = float(st)
+                                            else:
+                                                val = int(st)
+                                except Exception:
+                                    val = st
+                                data_map[ent] = val
+                            for si in sensors:
+                                ent = si.get("entity_id")
+                                if not ent:
+                                    continue
+                                attrs = si.get("attributes", {}) or {}
+                                names_map[ent] = attrs.get("friendly_name") or si.get("name") or ent
+                                enabled_map[ent] = not bool(attrs.get("disabled_by"))
+                            now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                            telemetry_payload = {
+                                "data": data_map,
+                                "names": names_map,
+                                "enabled": enabled_map,
+                                "timestamp": now_iso,
+                            }
+                            try:
+                                client._publish(client.preferred_sensors_topic, json.dumps(telemetry_payload), qos=0)
+                            except Exception:
+                                pass
+                            try:
+                                import mqtt_client as _mc
+
+                                sent_list = list(data_map.keys())
+                                if sent_list:
+                                    _mc._log(f"Sensors monitor -> Sent sensors: {', '.join(sent_list)}")
+                                else:
+                                    _mc._log("Sensors monitor -> Sent sensors: none")
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
                         # Publish reminder to vault if configured
                         now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                         try:
