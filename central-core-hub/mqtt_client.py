@@ -138,6 +138,31 @@ def reload_sensor_registry():
     _SENSOR_REGISTRY_CACHE = None
     _SENSOR_REGISTRY_MTIME = None
 
+    # Immediately reload and log what we're monitoring so operators can see
+    # the active sensor set when a runtime update occurs.
+    try:
+        entries = _load_sensor_registry() or []
+        provided = [e.get("entity_id") for e in entries if e.get("entity_id") and e.get("provide")]
+        if provided:
+            _log(f"Monitored sensors: {', '.join(provided)}")
+        else:
+            _log("Monitored sensors: none")
+    except Exception:
+        _log("Monitored sensors: none")
+
+
+def list_monitored_sensors():
+    """Return a list of entity_ids that are currently configured to be provided.
+
+    This consults the in-disk `SENSOR_REGISTRY` and filters entries with
+    `provide` truthy. An empty list means no sensors are being monitored.
+    """
+    try:
+        entries = _load_sensor_registry() or []
+        return [e.get("entity_id") for e in entries if e.get("entity_id") and e.get("provide")]
+    except Exception:
+        return []
+
 
 def is_entity_allowed(entity_id: str) -> bool:
     """Return True if the given entity_id is allowed by the registry.
@@ -649,6 +674,8 @@ class CentralCoreClient:
         # payloads will be published to both topics.
         self.vault_topic = options.get("vault_topic") or ""
         self.telemetry_interval = int(options.get("telemetry_interval", 30))
+        # Track when we last logged monitored sensors (epoch seconds)
+        self._last_monitor_log = 0
         # Use the authoritative `central_core_mqtt_shared` package for topic
         # templates. The shared package is required in production; fail fast
         # if expected templates are missing so deployments do not run with
@@ -790,6 +817,16 @@ class CentralCoreClient:
                             )
                         started = self._ha_ws_listener.start()
                         _log(f"HA WS listener started={started}")
+                        # Log which sensors the websocket is currently monitoring
+                        try:
+                            if self._selected_sensors_set:
+                                _log(
+                                    f"HA WS monitoring sensors: {', '.join(sorted(self._selected_sensors_set))}"
+                                )
+                            else:
+                                _log("HA WS monitoring sensors: none")
+                        except Exception:
+                            pass
                     except Exception:
                         _log("Failed to start HA WS listener")
                         traceback.print_exc()
@@ -1053,6 +1090,10 @@ class CentralCoreClient:
                 json.dumps(telemetry_payload),
                 qos=0,
             )
+            try:
+                _log(f"HA WS -> Sent sensor update for {entity_id}: {normalized}")
+            except Exception:
+                pass
         except Exception:
             _log("Failed to publish selected sensor change via HA WS", sys.stderr)
         return
@@ -1658,6 +1699,33 @@ class CentralCoreClient:
             self.publish_selected_sensor_changes()
         except Exception:
             _log("Selected sensor change publish exception", sys.stderr)
+        # Every 5 minutes, log which sensors the HA websocket is currently
+        # monitoring (selectors) and which sensors the registry provides.
+        try:
+            now_ts = int(time.time())
+            if now_ts - getattr(self, "_last_monitor_log", 0) >= 300:
+                self._last_monitor_log = now_ts
+                try:
+                    # Websocket-selected sensors
+                    if self._selected_sensors_set:
+                        _log(
+                            f"Periodic: HA WS monitoring sensors: {', '.join(sorted(self._selected_sensors_set))}"
+                        )
+                    else:
+                        _log("Periodic: HA WS monitoring sensors: none")
+                except Exception:
+                    _log("Periodic: HA WS monitoring sensors: none")
+                try:
+                    # Registry-provided sensors (those marked provide=True)
+                    provided = list_monitored_sensors()
+                    if provided:
+                        _log(f"Periodic: Registry provided sensors: {', '.join(provided)}")
+                    else:
+                        _log("Periodic: Registry provided sensors: none")
+                except Exception:
+                    _log("Periodic: Registry provided sensors: none")
+        except Exception:
+            pass
         # send telemetry every 30s; send sensors every hour
         now = int(time.time())
         try:

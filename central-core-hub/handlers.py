@@ -204,6 +204,17 @@ def handle_message(
             except Exception:
                 pass  # pragma: no cover
 
+            # Log the sensors we just published for operator visibility
+            try:
+                import mqtt_client as _mc
+
+                sent_list = list(data_map.keys())
+                if sent_list:
+                    _mc._log(f"Sensors poll -> Sent sensors: {', '.join(sent_list)}")
+                else:
+                    _mc._log("Sensors poll -> Sent sensors: none")
+            except Exception:
+                pass
             # If a vault topic is configured, remind the Vault server which
             # sensors were selected/reported by publishing a short payload
             # containing the selected sensor IDs. The Vault-authoritative
