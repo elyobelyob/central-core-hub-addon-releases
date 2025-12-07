@@ -1,6 +1,23 @@
 import json
+import importlib.util
+import pathlib
 
-from handlers import handle_message
+
+def _load_handlers():
+    base = pathlib.Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("handlers", str(base / "handlers.py"))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load handlers spec")
+    mod = importlib.util.module_from_spec(spec)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(mod)
+    return mod
+
+
+# load handlers implementation dynamically so tests work from any CWD
+_handlers = _load_handlers()
+handle_message = getattr(_handlers, "handle_message")
 
 
 class Msg:
