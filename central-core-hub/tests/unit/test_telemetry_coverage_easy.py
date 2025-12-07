@@ -1,11 +1,13 @@
 import importlib.util
 import sys
 import types
+import pathlib
 import json
 
 
 def load_telemetry():
-    spec = importlib.util.spec_from_file_location("telemetry", "./central-core-hub/telemetry.py")
+    base = pathlib.Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("telemetry", str(base / "telemetry.py"))
     if spec is None or getattr(spec, "loader", None) is None:
         raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
@@ -35,7 +37,7 @@ def test_external_get_cpu_percent_exception_and_sys_module_fallback():
     # add dummy mqtt_client module to sys.modules
     mod = types.ModuleType("mqtt_client")
     setattr(mod, "get_cpu_percent", lambda: 7)
-    sys.modules.setdefault("mqtt_client", mod)
+    sys.modules["mqtt_client"] = mod
     try:
         # external raises, so fallback to mqtt_client.get_cpu_percent should return 7
         assert t._get_cpu_percent() == 7
@@ -58,7 +60,7 @@ def test_build_telemetry_get_cpu_callable_raises_uses_fallback():
     # add dummy module for fallback
     mod = types.ModuleType("mqtt_client")
     setattr(mod, "get_cpu_percent", lambda: 5)
-    sys.modules.setdefault("mqtt_client", mod)
+    sys.modules["mqtt_client"] = mod
     try:
 
         def raiseer():
