@@ -1,6 +1,5 @@
 import json
 import pathlib
-import os
 
 from handlers import handle_message
 
