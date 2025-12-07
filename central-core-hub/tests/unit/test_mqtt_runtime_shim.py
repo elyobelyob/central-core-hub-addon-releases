@@ -1,9 +1,11 @@
 import importlib.util
+import pathlib
 from types import SimpleNamespace
 
 
 def load_runtime():
-    spec = importlib.util.spec_from_file_location("mqtt_runtime", "./central-core-hub/mqtt_runtime.py")
+    base = pathlib.Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("mqtt_runtime", str(base / "mqtt_runtime.py"))
     if spec is None or getattr(spec, "loader", None) is None:
         raise ImportError("could not load spec")
     mod = importlib.util.module_from_spec(spec)
