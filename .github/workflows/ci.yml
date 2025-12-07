@@ -34,6 +34,8 @@ jobs:
           pip install -r requirements.txt
           pip install -r central-core-hub/requirements.txt || true
           pip install -r requirements-dev.txt
+          # Ensure PyYAML is available for tests that import `yaml`
+          pip install pyyaml
 
       - name: Run linters
         run: |
@@ -51,6 +53,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt || true
           pip install pytest-cov
+          # Ensure YAML is available in the test environment
+          pip install pyyaml
           pytest -q --cov=central-core-hub --cov-report=xml:coverage.xml --cov-report=term-missing
 
       - name: Upload coverage to Codecov (optional)
