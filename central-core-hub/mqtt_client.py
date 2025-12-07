@@ -168,30 +168,27 @@ except Exception:
 
 try:
     import central_core_mqtt_shared as mqtt_shared
+except Exception:
+    mqtt_shared = None
 
-    # The shared package may expose helpers as top-level attributes
-    # (e.g. `central_core_mqtt_shared.topics`) or as submodules
-    # (`central_core_mqtt_shared.topics`). Prefer a top-level attribute
-    # but fall back to importing the submodule when needed.
+# Attempt to resolve `topics` from the shared package when available.
+topics: typing.Any = None
+if mqtt_shared is not None:
     try:
-        topics: typing.Any = getattr(mqtt_shared, "topics")
+        topics = getattr(mqtt_shared, "topics")
     except Exception:
-        # Fallback to importing the `topics` submodule directly so that
-        # packages which provide `topics.py` but don't re-export it still
-        # work at runtime.
-        import importlib
+        try:
+            import importlib
 
-        topics = importlib.import_module("central_core_mqtt_shared.topics")
-except Exception as e:
-    # Do not raise at import-time — make the external package optional so
-    # unit tests and development environments without the shared package
-    # can import this module. When the package is missing, provide a
-    # minimal `topics` shim that exposes the constants and a `build_topic`
-    # helper used elsewhere in this module. At runtime (in the add-on)
-    # prefer installing `central_core_mqtt_shared` for full behavior.
+            topics = importlib.import_module("central_core_mqtt_shared.topics")
+        except Exception:
+            topics = None
+
+# If the shared package (or its topics submodule) isn't available, prefer
+# a local `mqtt_topics.py` shim next to this file (used by tests), and
+# finally fall back to a minimal in-module shim.
+if topics is None:
     try:
-        # Attempt to load a local `mqtt_topics.py` placed next to this
-        # module (used in tests and development environments).
         import importlib.util as _il
 
         _local = pathlib.Path(__file__).parent / "mqtt_topics.py"
@@ -203,9 +200,17 @@ except Exception as e:
             spec.loader.exec_module(lm)  # type: ignore
 
             class _LocalTopics:
-                TELEMETRY_SYSTEM = getattr(lm, "TELEMETRY_SYSTEM", getattr(lm, "TELEMETRY_TOPIC_TMPL", "telemetry/{client_id}"))
-                TELEMETRY_SENSORS = getattr(lm, "TELEMETRY_SENSORS", getattr(lm, "PREFERRED_SENSORS_TOPIC_TMPL", "hubs/{hub_id}/telemetry/sensors"))
-                CMD_GENERIC = getattr(lm, "CMD_GENERIC", getattr(lm, "CMD_BASE_TMPL", "hubs/{hub_id}/v{version}/cmd/{domain}/{action}"))
+                TELEMETRY_SYSTEM = getattr(
+                    lm, "TELEMETRY_SYSTEM", getattr(lm, "TELEMETRY_TOPIC_TMPL", "telemetry/{client_id}")
+                )
+                TELEMETRY_SENSORS = getattr(
+                    lm,
+                    "TELEMETRY_SENSORS",
+                    getattr(lm, "PREFERRED_SENSORS_TOPIC_TMPL", "hubs/{hub_id}/telemetry/sensors"),
+                )
+                CMD_GENERIC = getattr(
+                    lm, "CMD_GENERIC", getattr(lm, "CMD_BASE_TMPL", "hubs/{hub_id}/v{version}/cmd/{domain}/{action}")
+                )
                 ACK_GENERIC = getattr(lm, "ACK_GENERIC", "hubs/{hub_id}/v{version}/ack/{command_name}/{command_id}")
 
                 @staticmethod
@@ -219,7 +224,6 @@ except Exception as e:
                         return str(tpl)
 
             topics = _LocalTopics()
-            mqtt_shared = None
         else:
             # Final fallback: provide a tiny shim with sensible defaults
             class _FallbackTopics:
@@ -238,10 +242,8 @@ except Exception as e:
                         return str(tpl)
 
             topics = _FallbackTopics()
-            mqtt_shared = None
     except Exception:
-        # As a last resort ensure import doesn't fail; leave `topics`
-        # as a minimal object so callers can import this module during tests.
+        # As a last-resort shim that never fails import.
         class _EmptyTopics:
             TELEMETRY_SYSTEM = "telemetry/{client_id}"
             TELEMETRY_SENSORS = "hubs/{hub_id}/telemetry/sensors"
@@ -258,16 +260,13 @@ except Exception as e:
                     return str(tpl)
 
         topics = _EmptyTopics()
-        mqtt_shared = None
 
-    # If the environment requests strict enforcement, fail import when the
-    # shared package is not available. This lets CI or production environments
-    # opt into a strict policy while leaving development/tests permissive by
-    # default. Set `STRICT_SHARED=1` or `REQUIRE_SHARED=1` to enable.
-    if not mqtt_shared and os.environ.get("STRICT_SHARED", os.environ.get("REQUIRE_SHARED", "")):
-        raise ImportError(
-            "`central_core_mqtt_shared` is required in strict mode; install it or unset STRICT_SHARED"
-        )
+# If the environment requests strict enforcement, fail import when the
+# shared package is not available. This lets CI or production environments
+# opt into a strict policy while leaving development/tests permissive by
+# default. Set `STRICT_SHARED=1` or `REQUIRE_SHARED=1` to enable.
+if topics is None and os.environ.get("STRICT_SHARED", os.environ.get("REQUIRE_SHARED", "")):
+    raise ImportError("`central_core_mqtt_shared` is required in strict mode; install it or unset STRICT_SHARED")
 
 try:
     import paho.mqtt.client as mqtt
