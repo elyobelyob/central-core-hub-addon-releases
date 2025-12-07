@@ -516,21 +516,6 @@ def handle_message(
                     results["failed"].append({"entity_id": ent, "reason": str(e)})
 
             now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-            if command_id:
-                # Publish versioned completion only
-                try:
-                    v1_comp = client.build_ack_topic(action, command_id)
-                except Exception:
-                    v1_comp = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
-                comp_payload = {
-                    "status": "completed",
-                    "result": results,
-                    "timestamp": now_iso,
-                }
-                try:
-                    client._publish(v1_comp, json.dumps(comp_payload), qos=1)
-                except Exception:
-                    pass
 
             try:
                 data_map = {}
@@ -596,6 +581,36 @@ def handle_message(
                             client._publish(client.vault_topic, json.dumps(reminder), qos=0)
                     except Exception:
                         pass  # pragma: no cover
+                    # Also publish an enhanced completion ACK including the
+                    # readback telemetry so callers receive immediate context
+                    # about the set operation when readback produced data.
+                    try:
+                        if command_id and data_map:
+                            try:
+                                v1_comp = client.build_ack_topic(action, command_id)
+                            except Exception:
+                                v1_comp = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
+                            comp_payload = {
+                                "status": "completed",
+                                "result": {
+                                    "set": results.get("set", []),
+                                    "failed": results.get("failed", []),
+                                    "sensors_reported": list(data_map.keys()),
+                                    "count": len(data_map),
+                                    "data": data_map,
+                                    "names": names_map,
+                                    "enabled": enabled_map,
+                                    "attributes": attrs_map,
+                                    "observed": readback_observed,
+                                },
+                                "timestamp": now_iso,
+                            }
+                            try:
+                                client._publish(v1_comp, json.dumps(comp_payload), qos=1)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
             except Exception:  # pragma: no cover - defensive branch hard to reproduce in tests
                 traceback.print_exc()  # pragma: no cover
             # Ensure we attempt to publish telemetry and vault reminder even
@@ -633,6 +648,27 @@ def handle_message(
                             "selected_sensors": list(selected),
                         }
                         client._publish(client.vault_topic, json.dumps(reminder), qos=0)
+                except Exception:
+                    pass
+                # If we did not publish an enhanced completion earlier (i.e.
+                # there was no readback data), ensure we still publish a
+                # simple completion ACK with the results so callers receive
+                # an outcome for the set operation.
+                try:
+                    if command_id and not (locals().get("data_map", None)):
+                        try:
+                            v1_comp = client.build_ack_topic(action, command_id)
+                        except Exception:
+                            v1_comp = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
+                        comp_payload = {
+                            "status": "completed",
+                            "result": results,
+                            "timestamp": now_iso,
+                        }
+                        try:
+                            client._publish(v1_comp, json.dumps(comp_payload), qos=1)
+                        except Exception:
+                            pass
                 except Exception:
                     pass
             except Exception:
