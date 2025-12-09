@@ -131,9 +131,10 @@ def test_handle_poll_boolean_and_numeric_coercion():
             break
     assert tele is not None
     data = tele.get("data")
-    assert data["sensor.a"] is True
-    assert data["sensor.b"] is False
-    assert data["sensor.c"] is True
-    assert data["sensor.d"] is False
-    assert isinstance(data["sensor.e"], float)
-    assert isinstance(data["sensor.f"], int)
+    # Preserve raw HA-provided values (no coercion)
+    assert data["sensor.a"] == "on"
+    assert data["sensor.b"] == "off"
+    assert data["sensor.c"] == "true"
+    assert data["sensor.d"] == "false"
+    assert data["sensor.e"] == "3.14"
+    assert data["sensor.f"] == "7"

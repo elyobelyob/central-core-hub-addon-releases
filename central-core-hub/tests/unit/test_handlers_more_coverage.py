@@ -281,6 +281,6 @@ def test_set_readback_off_converts_to_false_and_publishes():
     for topic, body, qos in client.publishes:
         if topic == client.preferred_sensors_topic and isinstance(body, dict):
             data = body.get("data") or {}
-            assert data.get("sensor.off") is False
+            assert data.get("sensor.off") == "off"
             found = True
     assert found

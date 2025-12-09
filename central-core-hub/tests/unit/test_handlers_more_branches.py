@@ -60,10 +60,11 @@ def test_poll_data_type_parsing(monkeypatch):
 
     tele_payload = json.loads(next(p["payload"] for p in dummy.published if p["topic"] == c.preferred_sensors_topic))
     data = tele_payload.get("data")
-    assert data["sensor.on"] is True
-    assert data["sensor.off"] is False
-    assert isinstance(data["sensor.int"], int)
-    assert isinstance(data["sensor.float"], float)
+    # Preserve raw HA-provided values (no coercion)
+    assert data["sensor.on"] == "on"
+    assert data["sensor.off"] == "off"
+    assert data["sensor.int"] == "42"
+    assert data["sensor.float"] == "3.14"
     assert data["sensor.text"] == "n/a"
 
 
