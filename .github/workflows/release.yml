@@ -16,9 +16,7 @@ jobs:
       matrix:
         platform:
           - linux/amd64
-          - linux/arm/v7
           - linux/arm64
-          - linux/386
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,12 +42,8 @@ jobs:
         run: |
           if [ "${{ matrix.platform }}" = "linux/amd64" ]; then
             echo "BUILD_FROM=ghcr.io/home-assistant/amd64-base:latest" >> $GITHUB_ENV
-          elif [ "${{ matrix.platform }}" = "linux/arm/v7" ]; then
-            echo "BUILD_FROM=ghcr.io/home-assistant/armv7-base:latest" >> $GITHUB_ENV
           elif [ "${{ matrix.platform }}" = "linux/arm64" ]; then
             echo "BUILD_FROM=ghcr.io/home-assistant/aarch64-base:latest" >> $GITHUB_ENV
-          elif [ "${{ matrix.platform }}" = "linux/386" ]; then
-            echo "BUILD_FROM=ghcr.io/home-assistant/i386-base:latest" >> $GITHUB_ENV
           fi
 
       - name: Build and push
