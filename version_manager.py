@@ -147,14 +147,14 @@ class VersionManager:
                 out = subprocess.check_output(["git", "log", "--pretty=format:%s", range_ref], cwd=self.repo_root)
                 lines = out.decode("utf-8").strip().splitlines()
                 if lines and lines != [""]:
-                    return [f"- {l}" for l in lines]
+                    return [f"- {line}" for line in lines]
         except Exception:
             pass
 
         try:
             out = subprocess.check_output(["git", "log", "--pretty=format:%s", "-n", "20", "HEAD"], cwd=self.repo_root)
             lines = out.decode("utf-8").strip().splitlines()
-            return [f"- {l}" for l in lines if l]
+            return [f"- {line}" for line in lines if line]
         except Exception:
             return []
 
@@ -320,8 +320,8 @@ class VersionManager:
                     previous = None
 
                 commits = self._git_commits_between(prev_tag=previous, new_tag=new_version)
-                # pass the previous tag string (empty or real) to update_changelogs
-                self.update_changelogs(previous or "", new_version)
+                # pass the previous tag string (empty or real) and commits to update_changelogs
+                self.update_changelogs(previous or "", new_version, commits=commits)
             except Exception as exc:  # pragma: no cover - best-effort
                 print(f"Warning: changelog update failed: {exc}")
 
