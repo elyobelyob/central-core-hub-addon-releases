@@ -75,11 +75,13 @@ try:
     from websocket._exceptions import (
         WebSocketAddressException,
         WebSocketTimeoutException,
+        WebSocketConnectionClosedException,
     )
 except Exception:
     websocket = None
     WebSocketAddressException = None
     WebSocketTimeoutException = None
+    WebSocketConnectionClosedException = None
 
 
 def fetch_sensors(ha_api_url, ha_api_token, requests_mod=None):
@@ -367,8 +369,14 @@ class HAWebSocketListener:
         addr_exc_cls = WebSocketAddressException or (
             websocket and getattr(websocket, "WebSocketAddressException", None)
         )
+        closed_exc_cls = WebSocketConnectionClosedException or (
+            websocket and getattr(websocket, "WebSocketConnectionClosedException", None)
+        )
 
-        try:
+        # Reconnect loop with backoff: keep attempting to connect until stopped
+        backoff = 1.0
+        max_backoff = 30.0
+        while not self._stop.is_set():
             ws_url = self._ws_url()
             if not ws_url:
                 return
@@ -376,96 +384,131 @@ class HAWebSocketListener:
             if websocket is None or getattr(websocket, "create_connection", None) is None:
                 self._log("websocket client not available")
                 return
-            self._ws = websocket.create_connection(ws_url, timeout=15)
-            # Expect auth_required, then send auth
-            ha_version_written = False
-            hello_raw = self._ws.recv()
-            hello = json.loads(hello_raw or "{}")
-            if hello.get("type") != "auth_required":
-                self._log("HA WS unexpected hello")
-                return
-            if hello.get("ha_version"):
-                ha_version_written = self._persist_ha_version(hello.get("ha_version"))
-            self._send_json(self._ws, {"type": "auth", "access_token": self.ha_api_token})
-            auth_resp = json.loads(self._ws.recv() or "{}")
-            if auth_resp.get("type") != "auth_ok":
-                self._log("HA WS auth failed")
-                return
-            # Subscribe to state_changed events
-            self._send_json(
-                self._ws,
-                {"id": 1, "type": "subscribe_events", "event_type": "state_changed"},
-            )
-            # Request HA config/version once after auth. Some HA installations
-            # expose version information only via the websocket API. We send a
-            # `get_config` request (id=2) and handle the `result` message below.
             try:
-                self._send_json(self._ws, {"id": 2, "type": "get_config"})
-            except Exception:
-                pass
-            last_ping = time.time()
-            while not self._stop.is_set():
-                now = time.time()
-                if now - last_ping > 20:
-                    self._send_json(self._ws, {"type": "ping"})
-                    last_ping = now
-                try:
-                    raw = self._ws.recv()
-                except Exception as exc:
-                    if timeout_exc_cls and isinstance(exc, timeout_exc_cls):
-                        continue
+                self._ws = websocket.create_connection(ws_url, timeout=15)
+                # successful connect -> reset backoff
+                backoff = 1.0
+            except Exception as exc:
+                if addr_exc_cls and isinstance(exc, addr_exc_cls):
+                    self._log(f"HA WS connection error: {exc}")
+                else:
                     traceback.print_exc()
+                # Wait with backoff before retrying
+                if self._stop.wait(backoff):
                     break
-                if not raw:
+                backoff = min(backoff * 2, max_backoff)
+                continue
+
+            try:
+                # Expect auth_required, then send auth
+                ha_version_written = False
+                hello_raw = self._ws.recv()
+                hello = json.loads(hello_raw or "{}")
+                if hello.get("type") != "auth_required":
+                    self._log("HA WS unexpected hello")
+                    # close and attempt reconnect
+                    try:
+                        self._ws.close()
+                    except Exception:
+                        pass
+                    self._ws = None
+                    if self._stop.wait(1.0):
+                        break
                     continue
+                if hello.get("ha_version"):
+                    ha_version_written = self._persist_ha_version(hello.get("ha_version"))
+                self._send_json(self._ws, {"type": "auth", "access_token": self.ha_api_token})
+                auth_resp = json.loads(self._ws.recv() or "{}")
+                if auth_resp.get("type") != "auth_ok":
+                    self._log("HA WS auth failed")
+                    try:
+                        self._ws.close()
+                    except Exception:
+                        pass
+                    self._ws = None
+                    if self._stop.wait(1.0):
+                        break
+                    continue
+                # Subscribe to state_changed events
+                self._send_json(
+                    self._ws,
+                    {"id": 1, "type": "subscribe_events", "event_type": "state_changed"},
+                )
                 try:
-                    msg = json.loads(raw)
+                    self._send_json(self._ws, {"id": 2, "type": "get_config"})
                 except Exception:
-                    continue
-                if msg.get("type") == "pong":
-                    continue
-                # Handle result responses such as the get_config reply (id=2)
-                if msg.get("type") == "result":
-                    req_id = msg.get("id")
-                    if req_id == 2 and not ha_version_written:
+                    pass
+
+                last_ping = time.time()
+                while not self._stop.is_set():
+                    now = time.time()
+                    if now - last_ping > 20:
+                        self._send_json(self._ws, {"type": "ping"})
+                        last_ping = now
+                    try:
+                        raw = self._ws.recv()
+                    except Exception as exc:
+                        # Ignore timeouts; attempt reconnect for closed connection
+                        if timeout_exc_cls and isinstance(exc, timeout_exc_cls):
+                            continue
+                        if closed_exc_cls and isinstance(exc, closed_exc_cls):
+                            self._log(f"HA WS connection closed: {exc}")
+                            break
+                        # For address errors, log and break to reconnect
+                        if addr_exc_cls and isinstance(exc, addr_exc_cls):
+                            self._log(f"HA WS connection error: {exc}")
+                            break
+                        traceback.print_exc()
+                        break
+                    if not raw:
+                        continue
+                    try:
+                        msg = json.loads(raw)
+                    except Exception:
+                        continue
+                    if msg.get("type") == "pong":
+                        continue
+                    if msg.get("type") == "result":
+                        req_id = msg.get("id")
+                        if req_id == 2 and not ha_version_written:
+                            try:
+                                res = msg.get("result") or {}
+                                ha_version = None
+                                if isinstance(res, dict):
+                                    ha_version = (
+                                        res.get("version")
+                                        or res.get("homeassistant_version")
+                                        or (res.get("config") or {}).get("version")
+                                    )
+                                if ha_version:
+                                    ha_version_written = self._persist_ha_version(ha_version)
+                            except Exception:
+                                pass
+                            continue
+                        self._set_pending_result(req_id, msg)
+                        continue
+                    if msg.get("type") != "event":
+                        continue
+                    data = msg.get("event", {}).get("data", {}) or {}
+                    ent_id = data.get("entity_id")
+                    if self.selectors and ent_id not in self.selectors:
+                        continue
+                    new_state = data.get("new_state") or {}
+                    if self.on_event:
                         try:
-                            res = msg.get("result") or {}
-                            ha_version = None
-                            if isinstance(res, dict):
-                                ha_version = (
-                                    res.get("version")
-                                    or res.get("homeassistant_version")
-                                    or (res.get("config") or {}).get("version")
-                                )
-                            if ha_version:
-                                ha_version_written = self._persist_ha_version(ha_version)
+                            self.on_event(ent_id, new_state)
+                        except Exception:
+                            traceback.print_exc()
+            finally:
+                try:
+                    if self._ws:
+                        try:
+                            self._ws.close()
                         except Exception:
                             pass
-                        # continue so we do not treat get_config as pending request
-                        continue
-                    self._set_pending_result(req_id, msg)
-                    continue
-                if msg.get("type") != "event":
-                    continue
-                data = msg.get("event", {}).get("data", {}) or {}
-                ent_id = data.get("entity_id")
-                if self.selectors and ent_id not in self.selectors:
-                    continue
-                new_state = data.get("new_state") or {}
-                if self.on_event:
-                    try:
-                        self.on_event(ent_id, new_state)
-                    except Exception:
-                        traceback.print_exc()
-        except Exception as exc:
-            if addr_exc_cls and isinstance(exc, addr_exc_cls):
-                self._log(f"HA WS connection error: {exc}")
-            else:
-                traceback.print_exc()
-        finally:
-            try:
-                if self._ws:
-                    self._ws.close()
-            except Exception:
-                pass
-            self._ws = None
+                except Exception:
+                    pass
+                self._ws = None
+                # Small backoff before reconnect attempt
+                if self._stop.wait(1.0):
+                    break

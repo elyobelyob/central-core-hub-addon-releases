@@ -19,8 +19,10 @@ Usage:
 import json
 import re
 import sys
+import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
 
 
 class VersionManager:
@@ -126,7 +128,173 @@ class VersionManager:
             with open(file_path, "w") as f:
                 f.write(content)
 
-    def set_version(self, new_version: str, validate: bool = True) -> None:
+    def _git_commits_between(self, prev_tag: str = None, new_tag: str = None) -> List[str]:
+        """Return commit summary lines between prev_tag and new_tag or HEAD.
+
+        - If both tags provided, attempt `git log --pretty=format:%s prev_tag..new_tag`.
+        - If only prev_tag provided, use `prev_tag..HEAD`.
+        - If prev_tag not provided or git fails, fall back to last 20 commits on HEAD.
+        """
+        try:
+            if prev_tag and new_tag:
+                range_ref = f"v{prev_tag}..v{new_tag}"
+            elif prev_tag:
+                range_ref = f"v{prev_tag}..HEAD"
+            else:
+                range_ref = None
+
+            if range_ref:
+                out = subprocess.check_output(["git", "log", "--pretty=format:%s", range_ref], cwd=self.repo_root)
+                lines = out.decode("utf-8").strip().splitlines()
+                if lines and lines != [""]:
+                    return [f"- {l}" for l in lines]
+        except Exception:
+            pass
+
+        try:
+            out = subprocess.check_output(["git", "log", "--pretty=format:%s", "-n", "20", "HEAD"], cwd=self.repo_root)
+            lines = out.decode("utf-8").strip().splitlines()
+            return [f"- {l}" for l in lines if l]
+        except Exception:
+            return []
+
+    def _find_previous_tag(self, new_version: str) -> str:
+        """Return the most recent tag (by tag creation date) that is not new_version.
+
+        Returns empty string if none found.
+        """
+        try:
+            out = subprocess.check_output([
+                "git",
+                "for-each-ref",
+                "--sort=-taggerdate",
+                "--format=%(refname:short)",
+                "refs/tags",
+            ], cwd=self.repo_root)
+            tags = [t.strip() for t in out.decode("utf-8").splitlines() if t.strip()]
+            # strip leading 'v' if present
+            tags = [t[1:] if t.startswith("v") else t for t in tags]
+            for t in tags:
+                if t != new_version:
+                    return t
+        except Exception:
+            pass
+        return ""
+
+    def backfill_missing_tags(self) -> None:
+        """Backfill changelog entries for any git tags not already present.
+
+        Walks tags in chronological order (taggerdate ascending) and for each
+        tag that does not have a `## [<tag>]` entry in the changelogs, inserts
+        a release section with commits between the previous tag and the tag.
+        """
+        try:
+            out = subprocess.check_output([
+                "git",
+                "for-each-ref",
+                "--sort=taggerdate",
+                "--format=%(refname:short)",
+                "refs/tags",
+            ], cwd=self.repo_root)
+            tags = [t.strip() for t in out.decode("utf-8").splitlines() if t.strip()]
+            # strip leading 'v' if present
+            tags = [t[1:] if t.startswith("v") else t for t in tags]
+        except Exception as exc:
+            print(f"Warning: cannot list git tags: {exc}")
+            return
+
+        changelog_paths = [self.repo_root / "CHANGELOG.md", self.repo_root / "central-core-hub" / "CHANGELOG.md"]
+
+        prev_tag = None
+        for tag in tags:
+            # check if tag already present in any changelog
+            present = False
+            for path in changelog_paths:
+                if path.exists():
+                    content = path.read_text()
+                    if re.search(rf"^## \[{re.escape(tag)}\]", content, flags=re.MULTILINE):
+                        present = True
+                        break
+
+            if present:
+                prev_tag = tag
+                continue
+
+            # get tag date (try annotated tag date, fall back to commit date)
+            try:
+                out = subprocess.check_output(["git", "log", "-1", "--format=%aI", f"v{tag}"], cwd=self.repo_root)
+                tag_date = out.decode("utf-8").strip().split("T")[0]
+            except Exception:
+                tag_date = datetime.now(timezone.utc).date().isoformat()
+
+            # get commits between prev_tag and tag
+            commits = self._git_commits_between(prev_tag if prev_tag else None, tag)
+
+            # update changelogs with explicit date and commits
+            self.update_changelogs(prev_tag or "", tag, date_str=tag_date, commits=commits)
+
+            prev_tag = tag
+
+    def update_changelogs(self, previous_version: str, new_version: str, date_str: str = None, commits: List[str] | None = None) -> None:
+        """Append a dated changelog entry to both top-level and add-on CHANGELOGs.
+
+        The entry includes the commit messages between the previous version tag
+        and HEAD as bullet points. If no commits are discovered, a single
+        bump line is added.
+        """
+        if date_str is None:
+            date_str = datetime.now(timezone.utc).date().isoformat()
+
+        # Build the release block
+        header = f"## [{new_version}] - {date_str}\n\n"
+
+        if commits is None:
+            commits = self._git_commits_between(previous_version, new_version)
+
+        if commits:
+            body = "\n".join(commits) + "\n\n"
+            commits_section = "### Commits included in this release\n\n" + "\n".join(commits) + "\n\n"
+        else:
+            body = f"- chore(release): bump version to {new_version}\n\n"
+            commits_section = ""
+
+        release_block = header + body + commits_section
+
+        # Files to update
+        changelog_paths = [self.repo_root / "CHANGELOG.md", self.repo_root / "central-core-hub" / "CHANGELOG.md"]
+
+        for path in changelog_paths:
+            try:
+                if not path.exists():
+                    # create a minimal changelog if missing
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(path, "w") as f:
+                        f.write("# Changelog\n\n")
+
+                content = path.read_text()
+
+                # If an entry for this version already exists, replace it
+                existing_pattern = rf"^## \[{re.escape(new_version)}\].*?(?=^## \[|\Z)"
+                if re.search(existing_pattern, content, flags=re.DOTALL | re.MULTILINE):
+                    new_content = re.sub(existing_pattern, release_block, content, flags=re.DOTALL | re.MULTILINE)
+                    path.write_text(new_content)
+                    print(f"Replaced existing changelog entry for {new_version}: {path}")
+                else:
+                    # Insert new release block after title (after first header line)
+                    parts = content.split("\n", 2)
+                    if len(parts) >= 2 and parts[0].startswith("#"):
+                        # preserve first header and an existing blank line if present
+                        remainder = content[len(parts[0]) + 1 :]
+                        new_content = parts[0] + "\n\n" + release_block + remainder.lstrip()
+                    else:
+                        new_content = release_block + content
+
+                    path.write_text(new_content)
+                    print(f"Updated changelog: {path}")
+            except Exception as exc:
+                print(f"Warning: failed to update changelog {path}: {exc}")
+
+    def set_version(self, new_version: str, validate: bool = True, update_changelog: bool = True) -> None:
         """Set version across all files."""
         if validate:
             # Validate new version format
@@ -142,6 +310,20 @@ class VersionManager:
 
         if validate:
             self.validate_versions()
+        # Optionally update changelogs when setting version
+        if update_changelog:
+            try:
+                # determine previous tag (by taggerdate) for a clean commit range
+                previous = self._find_previous_tag(new_version)
+                if not previous:
+                    # if no previous tag found, leave previous as None so we fallback to recent commits
+                    previous = None
+
+                commits = self._git_commits_between(prev_tag=previous, new_tag=new_version)
+                # pass the previous tag string (empty or real) to update_changelogs
+                self.update_changelogs(previous or "", new_version)
+            except Exception as exc:  # pragma: no cover - best-effort
+                print(f"Warning: changelog update failed: {exc}")
 
 
 def main():
@@ -189,6 +371,10 @@ def main():
 
         new_version = sys.argv[2]
         manager.set_version(new_version)
+
+    elif command == "backfill":
+        # Backfill changelogs for all tags
+        manager.backfill_missing_tags()
 
     else:
         print(f"Unknown command: {command}")
