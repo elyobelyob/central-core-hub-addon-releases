@@ -19,7 +19,7 @@ This is a Home Assistant Supervisor add-on for Central Core Hub.
 3. Find "Central Core Hub" in the Add-on Store and install it.
 
 ## Features
-- Multi-arch: amd64, armv7, aarch64
+- Multi-arch: amd64, aarch64
 - Host networking
 - Minimal permissions
 
