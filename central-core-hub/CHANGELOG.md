@@ -1,5 +1,51 @@
 # Changelog
 
+## [1.1.63] - 2025-12-09
+
+- chore(release): backfill changelogs from git tags; update version_manager (tz-aware dates, replace entries)
+- chore: bump version to 1.1.62
+- fix(telemetry): preserve raw HA states; stop normalizing; update tests
+- chore: bump version to 1.1.61
+- ci(release): drop armv7 and i386 builds from release matrix
+- Drop legacy architectures and bump to 1.1.60
+- chore: bump version to 1.1.59
+- handlers: include friendly names in sensors/set ACK; add test
+- chore(release): bump version to 1.1.58
+- ci: install pyyaml in CI workflow
+- chore(release): bump version to 1.1.57
+- chore: commit local changes before bump
+- chore(release): bump version to 1.1.56
+- chore: make central_core_mqtt_shared optional; add STRICT_SHARED guard
+- chore(release): bump version to 1.1.52
+- chore(release): bump version to 1.1.49
+- ci: strict linters + run pytest from central-core-hub + env-based codecov guard
+- test(ci): make sensors tests robust to CWD by loading handlers dynamically
+- ci: fix workflow (remove duplicate sections)
+- ci: add GitHub Actions workflow; tests: add focused sensors tests
+
+### Commits included in this release
+
+- chore(release): backfill changelogs from git tags; update version_manager (tz-aware dates, replace entries)
+- chore: bump version to 1.1.62
+- fix(telemetry): preserve raw HA states; stop normalizing; update tests
+- chore: bump version to 1.1.61
+- ci(release): drop armv7 and i386 builds from release matrix
+- Drop legacy architectures and bump to 1.1.60
+- chore: bump version to 1.1.59
+- handlers: include friendly names in sensors/set ACK; add test
+- chore(release): bump version to 1.1.58
+- ci: install pyyaml in CI workflow
+- chore(release): bump version to 1.1.57
+- chore: commit local changes before bump
+- chore(release): bump version to 1.1.56
+- chore: make central_core_mqtt_shared optional; add STRICT_SHARED guard
+- chore(release): bump version to 1.1.52
+- chore(release): bump version to 1.1.49
+- ci: strict linters + run pytest from central-core-hub + env-based codecov guard
+- test(ci): make sensors tests robust to CWD by loading handlers dynamically
+- ci: fix workflow (remove duplicate sections)
+- ci: add GitHub Actions workflow; tests: add focused sensors tests
+
 ## [1.1.61] - 2025-12-09
 
 - chore: bump version to 1.1.61
