@@ -509,6 +509,14 @@ class HAWebSocketListener:
                 except Exception:
                     pass
                 self._ws = None
-                # Small backoff before reconnect attempt
-                if self._stop.wait(1.0):
-                    break
+                # Small backoff before reconnect attempt; record the result
+                try:
+                    should_break = self._stop.wait(1.0)
+                except Exception:
+                    # if wait fails for some reason, do not break
+                    should_break = False
+
+            # break must occur outside of the finally block to satisfy static
+            # analyzers that forbid `break` inside `finally`.
+            if should_break:
+                break
