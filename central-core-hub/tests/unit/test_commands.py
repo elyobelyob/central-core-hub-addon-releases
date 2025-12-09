@@ -250,13 +250,12 @@ def test_handle_sensors_set_without_readback(monkeypatch):
     # GET should NOT have been called because readback is disabled
     assert get_called["count"] == 0
 
-    # Telemetry should be published using the requested state (coerced to float)
+    # Telemetry should be published using the requested state (preserve raw string)
     assert c.preferred_sensors_topic in [p["topic"] for p in dummy.published]
     tele = json.loads(next(p["payload"] for p in dummy.published if p["topic"] == c.preferred_sensors_topic))
     assert "data" in tele
-    # coerced value should be numeric 22.5
-    assert isinstance(tele["data"].get("sensor.temp"), float)
-    assert abs(tele["data"].get("sensor.temp") - 22.5) < 1e-6
+    # value should preserve raw string from the request
+    assert tele["data"].get("sensor.temp") == "22.5"
     # names and enabled should also be present
     assert "names" in tele and "sensor.temp" in tele["names"]
     assert "enabled" in tele and isinstance(tele["enabled"].get("sensor.temp"), bool)

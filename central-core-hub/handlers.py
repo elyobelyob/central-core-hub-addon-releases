@@ -146,26 +146,16 @@ def handle_message(
                 ]
 
             data_map = {}
+            raw_map = {}
             for s in sensors:  # pragma: no cover
                 ent = s.get("entity_id")  # pragma: no cover
                 if not ent or not _is_entity_allowed(ent):
                     continue
                 st = s.get("state")  # pragma: no cover
+                # preserve the raw state as reported by HA
+                raw_map[ent] = st
+                # Do not normalize — preserve the exact HA-provided state
                 val = st
-                try:
-                    if isinstance(st, str):
-                        low = st.lower()
-                        if low in ("on", "true"):
-                            val = True
-                        elif low in ("off", "false"):
-                            val = False
-                        else:
-                            if "." in st:
-                                val = float(st)
-                            else:
-                                val = int(st)
-                except Exception:
-                    val = st
                 data_map[ent] = val
             # also include friendly names and enabled status if available
             names_map = {}
@@ -200,6 +190,7 @@ def handle_message(
             now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             telemetry_payload = {
                 "data": data_map,
+                "raw": raw_map,
                 "names": names_map,
                 "attributes": attrs_map,
                 "enabled": enabled_map,
@@ -314,6 +305,7 @@ def handle_message(
                                 if si.get("entity_id") in selected and _is_entity_allowed(si.get("entity_id"))
                             ]
                             data_map = {}
+                            raw_map = {}
                             names_map = {}
                             enabled_map = {}
                             attrs_map = {}
@@ -322,21 +314,10 @@ def handle_message(
                                 if not ent:
                                     continue
                                 st = si.get("state")
+                                # preserve raw state
+                                raw_map[ent] = st
+                                # Do not normalize — preserve the exact HA-provided state
                                 val = st
-                                try:
-                                    if isinstance(st, str):
-                                        low = st.lower()
-                                        if low in ("on", "true"):
-                                            val = True
-                                        elif low in ("off", "false"):
-                                            val = False
-                                        else:
-                                            if "." in st:
-                                                val = float(st)
-                                            else:
-                                                val = int(st)
-                                except Exception:
-                                    val = st
                                 data_map[ent] = val
                             for si in sensors:
                                 ent = si.get("entity_id")
@@ -364,6 +345,7 @@ def handle_message(
                             now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                             telemetry_payload = {
                                 "data": data_map,
+                                "raw": raw_map,
                                 "names": names_map,
                                 "attributes": attrs_map,
                                 "enabled": enabled_map,
@@ -438,7 +420,8 @@ def handle_message(
                                         "selected": list(s),
                                         "sensors_reported": list(mt.get("data", {}).keys()),
                                         "count": len(mt.get("data", {})),
-                                        "data": mt.get("data", {}),
+                                                "data": mt.get("data", {}),
+                                                "raw": mt.get("raw", {}),
                                         "names": mt.get("names", {}),
                                         "enabled": mt.get("enabled", {}),
                                         "attributes": mt.get("attributes", {}),
@@ -519,26 +502,15 @@ def handle_message(
 
             try:
                 data_map = {}
+                raw_map = {}
                 attrs_map = {}
                 for item in sensors_to_set:
                     ent = item.get("entity_id")
                     if ent and ent in results.get("set", []):
                         st = readback_values.get(ent, item.get("state"))
+                        # preserve the raw state reported/readback; do not normalize
+                        raw_map[ent] = st
                         val = st
-                        try:
-                            if isinstance(st, str):
-                                low = st.lower()
-                                if low in ("on", "true"):
-                                    val = True
-                                elif low in ("off", "false"):
-                                    val = False
-                                else:
-                                    if "." in st:
-                                        val = float(st)
-                                    else:
-                                        val = int(st)
-                        except Exception:
-                            val = st
                         data_map[ent] = val
                         attrs_map[ent] = readback_attrs.get(ent, {})
                 # build friendly-name and enabled maps from readback attributes
@@ -552,6 +524,7 @@ def handle_message(
                 if data_map:  # pragma: no cover
                     telemetry_payload = {
                         "data": data_map,
+                        "raw": raw_map,
                         "attributes": attrs_map,
                         "names": names_map,
                         "enabled": enabled_map,
@@ -598,6 +571,7 @@ def handle_message(
                                     "sensors_reported": list(data_map.keys()),
                                     "count": len(data_map),
                                     "data": data_map,
+                                    "raw": raw_map,
                                     "names": names_map,
                                     "enabled": enabled_map,
                                     "attributes": attrs_map,
@@ -628,6 +602,7 @@ def handle_message(
                     enabled_map = locals().get("enabled_map", {}) or {}
                     telemetry_payload = {
                         "data": {},
+                        "raw": {},
                         "attributes": attrs_map,
                         "names": names_map,
                         "enabled": enabled_map,
