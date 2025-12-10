@@ -236,6 +236,9 @@ def build_vault_payload(raw_payload_json):
         "ip": data.get("ip"),
         "metrics": metrics,
     }
+    # Surface the telemetry interval so downstream services know the intended heartbeat cadence.
+    if "telemetry_interval" in data:
+        vault["telemetry_interval"] = data.get("telemetry_interval")
     ha_info = data.get("home_assistant")
     if ha_info is not None:
         try:
