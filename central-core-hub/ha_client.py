@@ -18,6 +18,10 @@ import typing
 # redirect writes to a temporary location.
 OPTIONS_PATH = "/data/options.json"
 
+# Allowed device classes for sensor filtering. Sensors with these device_class
+# values or no device_class attribute will be included.
+ALLOWED_DEVICE_CLASSES = ('motion', 'door', 'presence')
+
 # In-memory cache for the discovered Home Assistant version. Store a
 # small struct with the version string and the timestamp it was set so
 # consumers can apply a TTL without hitting the filesystem.
@@ -100,19 +104,25 @@ def fetch_sensors(ha_api_url, ha_api_token, requests_mod=None):
         sensors = []
         for ent in data:
             ent_id = ent.get("entity_id")
-            if ent_id and ent_id.startswith("sensor."):
-                sensors.append(
-                    {
-                        "entity_id": ent_id,
-                        "state": ent.get("state"),
-                        "name": ent.get("attributes", {}).get("friendly_name") or ent_id,
-                        "attributes": ent.get("attributes", {}) or {},
-                        # Preserve HA timestamps when present so downstream systems
-                        # can reason about data recency.
-                        "last_changed": ent.get("last_changed"),
-                        "last_updated": ent.get("last_updated"),
-                    }
-                )
+            # Include both sensor.* and binary_sensor.* entities
+            if ent_id and (ent_id.startswith("sensor.") or ent_id.startswith("binary_sensor.")):
+                # Check device_class attribute if present
+                attrs = ent.get("attributes", {})
+                device_class = attrs.get("device_class")
+                # Include sensors with allowed device_class or no device_class
+                if device_class is None or device_class in ALLOWED_DEVICE_CLASSES:
+                    sensors.append(
+                        {
+                            "entity_id": ent_id,
+                            "state": ent.get("state"),
+                            "name": attrs.get("friendly_name") or ent_id,
+                            "attributes": attrs,
+                            # Preserve HA timestamps when present so downstream systems
+                            # can reason about data recency.
+                            "last_changed": ent.get("last_changed"),
+                            "last_updated": ent.get("last_updated"),
+                        }
+                    )
         return sensors
     except Exception:
         return None
