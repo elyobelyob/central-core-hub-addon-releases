@@ -939,6 +939,30 @@ class CentralCoreClient:
                     "ensure the package is installed and up-to-date"
                 )
             ) from e
+
+    def _refresh_telemetry_interval_from_options(self) -> bool:
+        """Reload telemetry_interval from the HA options file when it changes."""
+        try:
+            latest = load_options()
+        except Exception:
+            return False
+        if not isinstance(latest, dict):
+            return False
+        if "telemetry_interval" not in latest:
+            return False
+        try:
+            new_interval = int(latest.get("telemetry_interval"))
+        except Exception:
+            return False
+        if new_interval <= 0 or new_interval == self.telemetry_interval:
+            return False
+        old_interval = self.telemetry_interval
+        self.telemetry_interval = new_interval
+        try:
+            _log(f"telemetry_interval updated via options: {old_interval} -> {new_interval}")
+        except Exception:
+            pass
+        return True
         # Delegate client creation and TLS setup to mqtt_runtime so it can
         # be unit-tested separately and to keep this class focused on
         # higher-level behavior.
@@ -1981,6 +2005,10 @@ class CentralCoreClient:
         """Single run loop iteration: reconnect if needed, publish telemetry
         and optionally publish sensors. Called every telemetry_interval seconds.
         """
+        try:
+            self._refresh_telemetry_interval_from_options()
+        except Exception:
+            pass
         if not self._connected:
             try:
                 _log("Not connected, attempting reconnect")
