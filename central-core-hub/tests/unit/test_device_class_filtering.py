@@ -35,12 +35,12 @@ def test_ha_client_filters_by_device_class():
                     "attributes": {"device_class": "motion", "friendly_name": "Motion 1"},
                 },
                 {
-                    "entity_id": "sensor.door1",
+                    "entity_id": "binary_sensor.door1",
                     "state": "off",
                     "attributes": {"device_class": "door", "friendly_name": "Door 1"},
                 },
                 {
-                    "entity_id": "sensor.presence1",
+                    "entity_id": "binary_sensor.presence1",
                     "state": "on",
                     "attributes": {"device_class": "presence", "friendly_name": "Presence 1"},
                 },
@@ -54,6 +54,11 @@ def test_ha_client_filters_by_device_class():
                     "state": "42",
                     "attributes": {"friendly_name": "No Class"},
                 },
+                {
+                    "entity_id": "binary_sensor.window",
+                    "state": "off",
+                    "attributes": {"device_class": "window", "friendly_name": "Window"},
+                },
             ]
 
     class RClient:
@@ -66,14 +71,15 @@ def test_ha_client_filters_by_device_class():
     # Check that motion, door, and presence sensors are included
     entity_ids = [s["entity_id"] for s in sensors]
     assert "sensor.motion1" in entity_ids
-    assert "sensor.door1" in entity_ids
-    assert "sensor.presence1" in entity_ids
+    assert "binary_sensor.door1" in entity_ids
+    assert "binary_sensor.presence1" in entity_ids
     
     # Check that sensors without device_class are included
     assert "sensor.no_device_class" in entity_ids
     
-    # Check that temperature sensor (non-allowed device_class) is excluded
+    # Check that non-allowed device_class sensors are excluded
     assert "sensor.temperature" not in entity_ids
+    assert "binary_sensor.window" not in entity_ids
 
 
 def test_mqtt_client_filters_by_device_class():

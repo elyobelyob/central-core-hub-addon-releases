@@ -284,6 +284,11 @@ except Exception:
 OPTIONS_PATH = "/data/options.json"
 MQTT_OPTIONS_ENV = "MQTT_OPTIONS_PATH"
 SENSOR_REGISTRY = pathlib.Path(__file__).parent / "SENSOR_REGISTRY.yaml"
+
+# Allowed device classes for sensor filtering. Sensors with these device_class
+# values or no device_class attribute will be included.
+ALLOWED_DEVICE_CLASSES = ['motion', 'door', 'presence']
+
 # File to persist the vault-selected sensors so selections survive restarts.
 # Default to the add-on data directory (`/data`) so the file survives
 # add-on upgrades. Allow overriding via the `SELECTED_SENSORS_FILE`
@@ -776,8 +781,6 @@ def fetch_sensors(ha_api_url, ha_api_token):
         r.raise_for_status()
         data = r.json()
         sensors = []
-        # Allowed device classes for filtering
-        allowed_device_classes = ['motion', 'door', 'presence']
         for ent in data:
             ent_id = ent.get("entity_id")
             if not ent_id:
@@ -788,7 +791,7 @@ def fetch_sensors(ha_api_url, ha_api_token):
             attrs = ent.get("attributes", {}) or {}
             device_class = attrs.get("device_class")
             # Include sensors with allowed device_class or no device_class
-            if device_class is None or device_class in allowed_device_classes:
+            if device_class is None or device_class in ALLOWED_DEVICE_CLASSES:
                 sensors.append(
                     {
                         "entity_id": ent_id,
