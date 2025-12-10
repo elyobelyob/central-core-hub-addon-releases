@@ -27,6 +27,70 @@ registry_mode: deny
 # - `sensor.*_battery`        -> matches sensors ending with _battery
 
 entries:
+  # Device class-based entries for safe sensor types
+  - entity_id: sensor.*
+    type: sensor
+    attributes:
+      device_class: temperature
+    provide: true
+    rationale: "Include temperature sensors."
+
+  - entity_id: sensor.*
+    type: sensor
+    attributes:
+      device_class: battery
+    provide: true
+    rationale: "Include battery sensors."
+
+  - entity_id: sensor.*
+    type: sensor
+    attributes:
+      device_class: aqi
+    provide: true
+    rationale: "Include air quality index sensors."
+
+  - entity_id: sensor.*
+    type: sensor
+    attributes:
+      device_class: energy
+    provide: true
+    rationale: "Include energy sensors."
+
+  - entity_id: binary_sensor.*
+    type: binary_sensor
+    attributes:
+      device_class: motion
+    provide: true
+    rationale: "Allow motion sensors."
+
+  - entity_id: binary_sensor.*
+    type: binary_sensor
+    attributes:
+      device_class: door
+    provide: true
+    rationale: "Allow door sensors."
+
+  - entity_id: binary_sensor.*
+    type: binary_sensor
+    attributes:
+      device_class: occupancy
+    provide: true
+    rationale: "Allow occupancy sensors."
+
+  - entity_id: binary_sensor.*
+    type: binary_sensor
+    attributes:
+      device_class: presence
+    provide: true
+    rationale: "Allow presence sensors."
+
+  - entity_id: binary_sensor.*
+    type: binary_sensor
+    attributes:
+      device_class: opening
+    provide: true
+    rationale: "Allow opening sensors."
+
   # Examples discovered in tests and code paths
   - entity_id: sensor.temp
     type: sensor
@@ -74,11 +138,16 @@ entries:
     provide: true
     rationale: "Used by sensors/set handler tests"
 
-  # Placeholder: Common binary sensors we may want to include
+  # Deny unsafe sensors by default
   - entity_id: binary_sensor.*
     type: binary_sensor
     provide: false
-    rationale: "Deny all binary_sensors by default; adjust patterns to fine-tune"
+    rationale: "Deny all other binary_sensors by default; only allow specific device_class types"
+
+  - entity_id: sensor.*
+    type: sensor
+    provide: false
+    rationale: "Deny all other sensors by default; only allow specific device_class types"
 
 # How to use
 # - Update entries to reflect real entity_ids your Home Assistant exposes.
