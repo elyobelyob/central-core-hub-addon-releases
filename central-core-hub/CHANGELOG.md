@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.68] - 2025-12-10
+
+- fix(mqtt): ensure mqtt_client reinitializes `_client` after the telemetry interval refresh refactor
+- docs(changelog): clarify 1.1.67 entry to only list interval-related work
+
+### Commits included in this release
+
+- fix(mqtt): ensure mqtt_client reinitializes `_client` after the telemetry interval refresh refactor
+- docs(changelog): clarify 1.1.67 entry to only list interval-related work
+
 ## [1.1.67] - 2025-12-10
 
 - feat(telemetry): refresh telemetry_interval from HA options before each publish
