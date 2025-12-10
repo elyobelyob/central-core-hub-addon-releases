@@ -787,19 +787,21 @@ def fetch_sensors(ha_api_url, ha_api_token):
                 continue
             if not (ent_id.startswith("sensor.") or ent_id.startswith("binary_sensor.")):
                 continue
-            # Filter by device_class if present
+            # Filter by device_class: only include if device_class is safe OR not present
             device_class = ent.get("attributes", {}).get("device_class")
-            if device_class in safe_device_classes:
-                sensors.append(
-                    {
-                        "entity_id": ent_id,
-                        "state": ent.get("state"),
-                        "name": ent.get("attributes", {}).get("friendly_name") or ent_id,
-                        "attributes": ent.get("attributes", {}) or {},
-                        "last_changed": ent.get("last_changed"),
-                        "last_updated": ent.get("last_updated"),
-                    }
-                )
+            if device_class and device_class not in safe_device_classes:
+                # Skip sensors with unsafe device_class
+                continue
+            sensors.append(
+                {
+                    "entity_id": ent_id,
+                    "state": ent.get("state"),
+                    "name": ent.get("attributes", {}).get("friendly_name") or ent_id,
+                    "attributes": ent.get("attributes", {}) or {},
+                    "last_changed": ent.get("last_changed"),
+                    "last_updated": ent.get("last_updated"),
+                }
+            )
 
         # Consult SENSOR_REGISTRY if present. Registry is the source-of-truth:
         # - If registry empty or unavailable, include all collected sensors

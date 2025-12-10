@@ -106,21 +106,23 @@ def fetch_sensors(ha_api_url, ha_api_token, requests_mod=None):
         for ent in data:
             ent_id = ent.get("entity_id")
             if ent_id and ent_id.startswith("sensor."):
-                # Filter by device_class if present
+                # Filter by device_class: only include if device_class is safe OR not present
                 device_class = ent.get("attributes", {}).get("device_class")
-                if device_class in safe_device_classes:
-                    sensors.append(
-                        {
-                            "entity_id": ent_id,
-                            "state": ent.get("state"),
-                            "name": ent.get("attributes", {}).get("friendly_name") or ent_id,
-                            "attributes": ent.get("attributes", {}) or {},
-                            # Preserve HA timestamps when present so downstream systems
-                            # can reason about data recency.
-                            "last_changed": ent.get("last_changed"),
-                            "last_updated": ent.get("last_updated"),
-                        }
-                    )
+                if device_class and device_class not in safe_device_classes:
+                    # Skip sensors with unsafe device_class
+                    continue
+                sensors.append(
+                    {
+                        "entity_id": ent_id,
+                        "state": ent.get("state"),
+                        "name": ent.get("attributes", {}).get("friendly_name") or ent_id,
+                        "attributes": ent.get("attributes", {}) or {},
+                        # Preserve HA timestamps when present so downstream systems
+                        # can reason about data recency.
+                        "last_changed": ent.get("last_changed"),
+                        "last_updated": ent.get("last_updated"),
+                    }
+                )
         return sensors
     except Exception:
         return None
