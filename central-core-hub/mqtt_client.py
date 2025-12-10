@@ -284,6 +284,11 @@ except Exception:
 OPTIONS_PATH = "/data/options.json"
 MQTT_OPTIONS_ENV = "MQTT_OPTIONS_PATH"
 SENSOR_REGISTRY = pathlib.Path(__file__).parent / "SENSOR_REGISTRY.yaml"
+
+# Allowed device classes for sensor filtering. Sensors with these device_class
+# values or no device_class attribute will be included.
+ALLOWED_DEVICE_CLASSES = ('motion', 'door', 'presence')
+
 # File to persist the vault-selected sensors so selections survive restarts.
 # Default to the add-on data directory (`/data`) so the file survives
 # add-on upgrades. Allow overriding via the `SELECTED_SENSORS_FILE`
@@ -782,16 +787,21 @@ def fetch_sensors(ha_api_url, ha_api_token):
                 continue
             if not (ent_id.startswith("sensor.") or ent_id.startswith("binary_sensor.")):
                 continue
-            sensors.append(
-                {
-                    "entity_id": ent_id,
-                    "state": ent.get("state"),
-                    "name": ent.get("attributes", {}).get("friendly_name") or ent_id,
-                    "attributes": ent.get("attributes", {}) or {},
-                    "last_changed": ent.get("last_changed"),
-                    "last_updated": ent.get("last_updated"),
-                }
-            )
+            # Check device_class attribute if present
+            attrs = ent.get("attributes", {})
+            device_class = attrs.get("device_class")
+            # Include sensors with allowed device_class or no device_class
+            if device_class is None or device_class in ALLOWED_DEVICE_CLASSES:
+                sensors.append(
+                    {
+                        "entity_id": ent_id,
+                        "state": ent.get("state"),
+                        "name": attrs.get("friendly_name") or ent_id,
+                        "attributes": attrs,
+                        "last_changed": ent.get("last_changed"),
+                        "last_updated": ent.get("last_updated"),
+                    }
+                )
 
         # Consult SENSOR_REGISTRY if present. Registry is the source-of-truth:
         # - If registry empty or unavailable, include all collected sensors
