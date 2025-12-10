@@ -24,6 +24,17 @@ import typing
 from datetime import datetime, timezone
 from typing import cast
 
+# Import safe device classes from ha_client to avoid duplication
+try:
+    import ha_client as _ha_module
+    SAFE_DEVICE_CLASSES = _ha_module.SAFE_DEVICE_CLASSES
+except Exception:
+    # Fallback if import fails
+    SAFE_DEVICE_CLASSES = {
+        "temperature", "motion", "door", "battery",
+        "occupancy", "presence", "opening", "aqi", "energy"
+    }
+
 # Outbox configuration: persistent file location and maximum queued items.
 # Default file is under the add-on data directory so it survives upgrades.
 OUTBOX_FILE = pathlib.Path(os.environ.get("MQTT_OUTBOX_FILE") or "/data/outbox.jsonl")
@@ -775,19 +786,6 @@ def fetch_sensors(ha_api_url, ha_api_token):
         r = requests.get(url, headers=headers, timeout=10)
         r.raise_for_status()
         data = r.json()
-        # Import safe device classes from ha_client to avoid duplication
-        try:
-            import ha_client as _ha
-            safe_device_classes = getattr(_ha, "SAFE_DEVICE_CLASSES", {
-                "temperature", "motion", "door", "battery",
-                "occupancy", "presence", "opening", "aqi", "energy"
-            })
-        except Exception:
-            # Fallback if import fails (shouldn't happen in production)
-            safe_device_classes = {
-                "temperature", "motion", "door", "battery",
-                "occupancy", "presence", "opening", "aqi", "energy"
-            }
         sensors = []
         for ent in data:
             ent_id = ent.get("entity_id")
@@ -797,7 +795,7 @@ def fetch_sensors(ha_api_url, ha_api_token):
                 continue
             # Filter by device_class: only include if device_class is safe OR not present
             device_class = ent.get("attributes", {}).get("device_class")
-            if device_class and device_class not in safe_device_classes:
+            if device_class and device_class not in SAFE_DEVICE_CLASSES:
                 # Skip sensors with unsafe device_class
                 continue
             sensors.append(
