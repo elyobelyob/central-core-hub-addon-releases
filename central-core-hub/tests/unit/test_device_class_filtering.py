@@ -16,19 +16,9 @@ def _load_module(name):
     return module
 
 
-def test_fetch_sensors_filters_by_safe_device_class(tmp_path, monkeypatch):
-    """Test that fetch_sensors only includes sensors with safe device_class values."""
-    mc = _load_module("mqtt_client.py")
-    
-    # Set up a minimal registry that doesn't interfere with device_class filtering
-    import json
-    reg = {
-        "apply_registry": False,  # Disable registry filtering to test device_class filtering in isolation
-        "entries": []
-    }
-    p = tmp_path / "reg.yaml"
-    p.write_text(json.dumps(reg))
-    monkeypatch.setattr(mc, "SENSOR_REGISTRY", p)
+def test_ha_client_filters_by_device_class():
+    """Test that ha_client.fetch_sensors filters sensors by device_class."""
+    ha_client = _load_module("ha_client.py")
 
     class Resp:
         def __init__(self):
@@ -40,71 +30,95 @@ def test_fetch_sensors_filters_by_safe_device_class(tmp_path, monkeypatch):
         def json(self):
             return [
                 {
-                    "entity_id": "sensor.temp_living_room",
+                    "entity_id": "sensor.motion1",
+                    "state": "on",
+                    "attributes": {"device_class": "motion", "friendly_name": "Motion 1"},
+                },
+                {
+                    "entity_id": "binary_sensor.door1",
+                    "state": "off",
+                    "attributes": {"device_class": "door", "friendly_name": "Door 1"},
+                },
+                {
+                    "entity_id": "binary_sensor.presence1",
+                    "state": "on",
+                    "attributes": {"device_class": "presence", "friendly_name": "Presence 1"},
+                },
+                {
+                    "entity_id": "sensor.temperature",
                     "state": "22.5",
-                    "attributes": {"friendly_name": "Living Room Temperature", "device_class": "temperature"},
+                    "attributes": {"device_class": "temperature", "friendly_name": "Temperature"},
                 },
-                {
-                    "entity_id": "binary_sensor.front_door",
-                    "state": "off",
-                    "attributes": {"friendly_name": "Front Door", "device_class": "door"},
-                },
-                {
-                    "entity_id": "binary_sensor.motion_kitchen",
-                    "state": "off",
-                    "attributes": {"friendly_name": "Kitchen Motion", "device_class": "motion"},
-                },
-                {
-                    "entity_id": "sensor.battery_phone",
-                    "state": "85",
-                    "attributes": {"friendly_name": "Phone Battery", "device_class": "battery"},
-                },
-                {
-                    "entity_id": "sensor.energy_meter",
-                    "state": "1250",
-                    "attributes": {"friendly_name": "Energy Meter", "device_class": "energy"},
-                },
-                {
-                    "entity_id": "binary_sensor.occupancy_bedroom",
-                    "state": "on",
-                    "attributes": {"friendly_name": "Bedroom Occupancy", "device_class": "occupancy"},
-                },
-                {
-                    "entity_id": "binary_sensor.presence_home",
-                    "state": "on",
-                    "attributes": {"friendly_name": "Home Presence", "device_class": "presence"},
-                },
-                {
-                    "entity_id": "binary_sensor.window_living_room",
-                    "state": "off",
-                    "attributes": {"friendly_name": "Living Room Window", "device_class": "opening"},
-                },
-                {
-                    "entity_id": "sensor.air_quality",
-                    "state": "42",
-                    "attributes": {"friendly_name": "Air Quality", "device_class": "aqi"},
-                },
-                # Unsafe sensors that should be filtered out
-                {
-                    "entity_id": "sensor.password_field",
-                    "state": "secret123",
-                    "attributes": {"friendly_name": "Password", "device_class": "password"},
-                },
-                {
-                    "entity_id": "sensor.credit_card",
-                    "state": "1234-5678-9012-3456",
-                    "attributes": {"friendly_name": "Credit Card", "device_class": "payment"},
-                },
-                # Sensors without device_class should pass through (subject to registry)
                 {
                     "entity_id": "sensor.no_device_class",
-                    "state": "some_value",
-                    "attributes": {"friendly_name": "No Device Class"},
+                    "state": "42",
+                    "attributes": {"friendly_name": "No Class"},
                 },
                 {
-                    "entity_id": "binary_sensor.no_class",
+                    "entity_id": "binary_sensor.window",
+                    "state": "off",
+                    "attributes": {"device_class": "window", "friendly_name": "Window"},
+                },
+            ]
+
+    class RClient:
+        def get(self, url, headers=None, timeout=None):
+            return Resp()
+
+    sensors = ha_client.fetch_sensors("http://ha", "tok", requests_mod=RClient())
+    assert isinstance(sensors, list)
+    
+    # Check that motion, door, and presence sensors are included
+    entity_ids = [s["entity_id"] for s in sensors]
+    assert "sensor.motion1" in entity_ids
+    assert "binary_sensor.door1" in entity_ids
+    assert "binary_sensor.presence1" in entity_ids
+    
+    # Check that sensors without device_class are included
+    assert "sensor.no_device_class" in entity_ids
+    
+    # Check that non-allowed device_class sensors are excluded
+    assert "sensor.temperature" not in entity_ids
+    assert "binary_sensor.window" not in entity_ids
+
+
+def test_mqtt_client_filters_by_device_class():
+    """Test that mqtt_client.fetch_sensors filters sensors by device_class."""
+    mc = _load_module("mqtt_client.py")
+
+    class Resp:
+        def __init__(self):
+            self.status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [
+                {
+                    "entity_id": "sensor.motion2",
                     "state": "on",
-                    "attributes": {"friendly_name": "Binary No Class"},
+                    "attributes": {"device_class": "motion", "friendly_name": "Motion 2"},
+                },
+                {
+                    "entity_id": "binary_sensor.door2",
+                    "state": "off",
+                    "attributes": {"device_class": "door", "friendly_name": "Door 2"},
+                },
+                {
+                    "entity_id": "binary_sensor.presence2",
+                    "state": "on",
+                    "attributes": {"device_class": "presence", "friendly_name": "Presence 2"},
+                },
+                {
+                    "entity_id": "sensor.humidity",
+                    "state": "65",
+                    "attributes": {"device_class": "humidity", "friendly_name": "Humidity"},
+                },
+                {
+                    "entity_id": "sensor.plain",
+                    "state": "value",
+                    "attributes": {"friendly_name": "Plain"},
                 },
             ]
 
@@ -116,38 +130,22 @@ def test_fetch_sensors_filters_by_safe_device_class(tmp_path, monkeypatch):
     sensors = mc.fetch_sensors("http://ha", "tok")
     assert isinstance(sensors, list)
     
-    # Verify safe sensors are included
-    assert any(s["entity_id"] == "sensor.temp_living_room" for s in sensors), "Temperature sensor should be included"
-    assert any(s["entity_id"] == "binary_sensor.front_door" for s in sensors), "Door sensor should be included"
-    assert any(s["entity_id"] == "binary_sensor.motion_kitchen" for s in sensors), "Motion sensor should be included"
-    assert any(s["entity_id"] == "sensor.battery_phone" for s in sensors), "Battery sensor should be included"
-    assert any(s["entity_id"] == "sensor.energy_meter" for s in sensors), "Energy sensor should be included"
-    assert any(s["entity_id"] == "binary_sensor.occupancy_bedroom" for s in sensors), "Occupancy sensor should be included"
-    assert any(s["entity_id"] == "binary_sensor.presence_home" for s in sensors), "Presence sensor should be included"
-    assert any(s["entity_id"] == "binary_sensor.window_living_room" for s in sensors), "Opening sensor should be included"
-    assert any(s["entity_id"] == "sensor.air_quality" for s in sensors), "AQI sensor should be included"
+    # Check that motion, door, and presence sensors are included
+    entity_ids = [s["entity_id"] for s in sensors]
+    assert "sensor.motion2" in entity_ids
+    assert "binary_sensor.door2" in entity_ids
+    assert "binary_sensor.presence2" in entity_ids
     
-    # Verify unsafe sensors are filtered out
-    assert not any(s["entity_id"] == "sensor.password_field" for s in sensors), "Password sensor should be filtered out"
-    assert not any(s["entity_id"] == "sensor.credit_card" for s in sensors), "Credit card sensor should be filtered out"
+    # Check that sensors without device_class are included
+    assert "sensor.plain" in entity_ids
     
-    # Sensors without device_class should pass through (they'll be subject to registry filtering later)
-    # Note: These will still be filtered by the registry if configured to deny them
-    # For now we just verify they pass the device_class filter
-    # The actual count depends on registry configuration
-    
-    # Verify that safe sensors are definitely included
-    safe_sensor_count = sum(1 for s in sensors if s["entity_id"] in [
-        "sensor.temp_living_room", "binary_sensor.front_door", "binary_sensor.motion_kitchen",
-        "sensor.battery_phone", "sensor.energy_meter", "binary_sensor.occupancy_bedroom",
-        "binary_sensor.presence_home", "binary_sensor.window_living_room", "sensor.air_quality"
-    ])
-    assert safe_sensor_count == 9, f"Expected 9 safe sensors, got {safe_sensor_count}"
+    # Check that humidity sensor (non-allowed device_class) is excluded
+    assert "sensor.humidity" not in entity_ids
 
 
-def test_ha_client_fetch_sensors_filters_by_device_class():
-    """Test that ha_client.fetch_sensors also filters by device_class."""
-    ha = _load_module("ha_client.py")
+def test_device_class_none_value_included():
+    """Test that sensors with device_class explicitly set to None are included."""
+    ha_client = _load_module("ha_client.py")
 
     class Resp:
         def __init__(self):
@@ -159,24 +157,9 @@ def test_ha_client_fetch_sensors_filters_by_device_class():
         def json(self):
             return [
                 {
-                    "entity_id": "sensor.temp_1",
-                    "state": "20",
-                    "attributes": {"device_class": "temperature"},
-                },
-                {
-                    "entity_id": "sensor.humidity_1",
-                    "state": "65",
-                    "attributes": {"device_class": "humidity"},
-                },
-                {
-                    "entity_id": "sensor.battery_1",
-                    "state": "90",
-                    "attributes": {"device_class": "battery"},
-                },
-                {
-                    "entity_id": "sensor.no_class",
-                    "state": "123",
-                    "attributes": {},
+                    "entity_id": "sensor.explicit_none",
+                    "state": "test",
+                    "attributes": {"device_class": None, "friendly_name": "Explicit None"},
                 },
             ]
 
@@ -184,14 +167,46 @@ def test_ha_client_fetch_sensors_filters_by_device_class():
         def get(self, url, headers=None, timeout=None):
             return Resp()
 
-    sensors = ha.fetch_sensors("http://ha", "tok", requests_mod=RClient())
+    sensors = ha_client.fetch_sensors("http://ha", "tok", requests_mod=RClient())
     assert isinstance(sensors, list)
+    assert len(sensors) == 1
+    assert sensors[0]["entity_id"] == "sensor.explicit_none"
+
+
+def test_device_class_mixed_with_registry():
+    """Test that device_class filtering works together with registry filtering."""
+    mc = _load_module("mqtt_client.py")
+
+    class Resp:
+        def __init__(self):
+            self.status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [
+                {
+                    "entity_id": "sensor.motion_allowed",
+                    "state": "on",
+                    "attributes": {"device_class": "motion"},
+                },
+                {
+                    "entity_id": "sensor.temp_excluded",
+                    "state": "20",
+                    "attributes": {"device_class": "temperature"},
+                },
+            ]
+
+    class RClient:
+        def get(self, url, headers=None, timeout=None):
+            return Resp()
+
+    cast(Any, mc).requests = RClient()
+    sensors = mc.fetch_sensors("http://ha", "tok")
     
-    # Temperature and battery should be included (safe device classes)
-    assert any(s["entity_id"] == "sensor.temp_1" for s in sensors), "Temperature sensor should be included"
-    assert any(s["entity_id"] == "sensor.battery_1" for s in sensors), "Battery sensor should be included"
-    # Humidity should be filtered out (unsafe device class)
-    assert not any(s["entity_id"] == "sensor.humidity_1" for s in sensors), "Humidity sensor should be filtered out"
-    # Sensor without device_class should pass through (subject to registry filtering)
-    assert any(s["entity_id"] == "sensor.no_class" for s in sensors), "Sensor without device_class should pass through"
-    assert len(sensors) == 3, f"Expected 3 sensors, got {len(sensors)}"
+    # Even without registry filtering, device_class should work
+    entity_ids = [s["entity_id"] for s in sensors]
+    assert "sensor.motion_allowed" in entity_ids
+    # temperature device_class should be filtered out
+    assert "sensor.temp_excluded" not in entity_ids
