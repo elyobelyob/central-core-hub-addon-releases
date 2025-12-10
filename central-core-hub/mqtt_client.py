@@ -28,8 +28,8 @@ from typing import cast
 try:
     import ha_client as _ha_module
     SAFE_DEVICE_CLASSES = _ha_module.SAFE_DEVICE_CLASSES
-except Exception:
-    # Fallback if import fails
+except (ImportError, ModuleNotFoundError, AttributeError):
+    # Fallback if import fails or module doesn't have the constant
     SAFE_DEVICE_CLASSES = {
         "temperature", "motion", "door", "battery",
         "occupancy", "presence", "opening", "aqi", "energy"
