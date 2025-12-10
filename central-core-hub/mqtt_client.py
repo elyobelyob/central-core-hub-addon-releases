@@ -284,6 +284,19 @@ except Exception:
 OPTIONS_PATH = "/data/options.json"
 MQTT_OPTIONS_ENV = "MQTT_OPTIONS_PATH"
 SENSOR_REGISTRY = pathlib.Path(__file__).parent / "SENSOR_REGISTRY.yaml"
+
+# Default list of safe device classes for sensor filtering
+DEFAULT_SAFE_DEVICE_CLASSES = [
+    "temperature",
+    "motion",
+    "door",
+    "battery",
+    "occupancy",
+    "presence",
+    "opening",
+    "aqi",
+    "energy",
+]
 # File to persist the vault-selected sensors so selections survive restarts.
 # Default to the add-on data directory (`/data`) so the file survives
 # add-on upgrades. Allow overriding via the `SELECTED_SENSORS_FILE`
@@ -759,12 +772,16 @@ def get_cpu_percent():  # noqa: F811
         return None
 
 
-def fetch_sensors(ha_api_url, ha_api_token):
+def fetch_sensors(ha_api_url, ha_api_token, safe_device_classes=None):
     if not ha_api_url or not ha_api_token or requests is None:
         return None
     # fetch_sensors historically included an internal registry loader. For
     # the larger change set we expose lightweight helpers so other publish
     # paths can ask whether an entity should be published.
+    
+    # Use default safe device classes if not provided
+    if safe_device_classes is None:
+        safe_device_classes = DEFAULT_SAFE_DEVICE_CLASSES
 
     try:
         url = ha_api_url.rstrip("/") + "/api/states"
@@ -782,12 +799,21 @@ def fetch_sensors(ha_api_url, ha_api_token):
                 continue
             if not (ent_id.startswith("sensor.") or ent_id.startswith("binary_sensor.")):
                 continue
+            
+            # Filter by device_class if present in attributes
+            attrs = ent.get("attributes", {}) or {}
+            device_class = attrs.get("device_class")
+            # If sensor has a device_class, it must be in the safe list
+            # If sensor has no device_class, allow it through (backward compatibility)
+            if device_class and device_class not in safe_device_classes:
+                continue
+            
             sensors.append(
                 {
                     "entity_id": ent_id,
                     "state": ent.get("state"),
-                    "name": ent.get("attributes", {}).get("friendly_name") or ent_id,
-                    "attributes": ent.get("attributes", {}) or {},
+                    "name": attrs.get("friendly_name") or ent_id,
+                    "attributes": attrs,
                     "last_changed": ent.get("last_changed"),
                     "last_updated": ent.get("last_updated"),
                 }
@@ -889,6 +915,10 @@ class CentralCoreClient:
         self.client_id = options.get("client_id") or socket.gethostname().lower().replace(" ", "-")
         self.ha_api_url = options.get("ha_api_url") or ""
         self.ha_api_token = options.get("ha_api_token") or ""
+        # Load safe device classes from options, with defaults
+        self.safe_device_classes = options.get("safe_device_classes") or DEFAULT_SAFE_DEVICE_CLASSES
+        if not isinstance(self.safe_device_classes, list):
+            self.safe_device_classes = DEFAULT_SAFE_DEVICE_CLASSES
         # Diagnostic: log whether HA options are present (do not print token)
         try:
             _log(
@@ -1847,7 +1877,7 @@ class CentralCoreClient:
         if not self.ha_api_url or not self.ha_api_token:
             # HA integration not configured
             return
-        sensors = fetch_sensors(self.ha_api_url, self.ha_api_token)
+        sensors = fetch_sensors(self.ha_api_url, self.ha_api_token, self.safe_device_classes)
         payload = {
             "schema_version": 1,
             "client_id": self.client_id,
@@ -1874,7 +1904,7 @@ class CentralCoreClient:
         # symbol when they intend to bypass network calls.
         if not self.ha_api_url or not self.ha_api_token or requests is None:
             return
-        sensors = fetch_sensors(self.ha_api_url, self.ha_api_token) or []
+        sensors = fetch_sensors(self.ha_api_url, self.ha_api_token, self.safe_device_classes) or []
         selected_set = set(self.selected_sensors)
         filtered = [s for s in sensors if s.get("entity_id") in selected_set and is_entity_allowed(s.get("entity_id"))]
 

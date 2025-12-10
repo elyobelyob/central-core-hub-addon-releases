@@ -58,7 +58,7 @@ def test_poll_updates_selected_and_publishes_reminder(monkeypatch):
             "attributes": {"friendly_name": "Humidity"},
         },
     ]
-    monkeypatch.setattr(mc, "fetch_sensors", lambda url, token: sample)
+    monkeypatch.setattr(mc, "fetch_sensors", lambda url, token, safe_classes=None: sample)
 
     options = {
         "client_id": "unit-hub",
