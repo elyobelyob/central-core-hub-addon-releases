@@ -782,6 +782,9 @@ def fetch_sensors(ha_api_url, ha_api_token, safe_device_classes=None):
     # Use default safe device classes if not provided
     if safe_device_classes is None:
         safe_device_classes = DEFAULT_SAFE_DEVICE_CLASSES
+    
+    # Convert to set for O(1) lookup performance when filtering many sensors
+    safe_classes_set = set(safe_device_classes) if safe_device_classes else set()
 
     try:
         url = ha_api_url.rstrip("/") + "/api/states"
@@ -805,7 +808,7 @@ def fetch_sensors(ha_api_url, ha_api_token, safe_device_classes=None):
             device_class = attrs.get("device_class")
             # If sensor has a device_class, it must be in the safe list
             # If sensor has no device_class, allow it through (backward compatibility)
-            if device_class and device_class not in safe_device_classes:
+            if device_class and device_class not in safe_classes_set:
                 continue
             
             sensors.append(
