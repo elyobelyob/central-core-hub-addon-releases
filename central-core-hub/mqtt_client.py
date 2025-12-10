@@ -1047,24 +1047,14 @@ class CentralCoreClient:
                         # listener implementation. Older test fakes may not accept
                         # the kwarg, so fall back to constructing without it.
                         cls = getattr(_ha, "HAWebSocketListener")
-                        try:
-                            self._ha_ws_listener = cls(
-                                self.ha_api_url,
-                                self.ha_api_token,
-                                on_event=self._on_ha_state_event,
-                                log_fn=_log,
-                                selectors=self._selected_sensors_set,
-                                on_ha_version=self._on_ha_version,
-                            )
-                        except TypeError:
-                            # Fallback for legacy listener implementations/fakes
-                            self._ha_ws_listener = cls(
-                                self.ha_api_url,
-                                self.ha_api_token,
-                                on_event=self._on_ha_state_event,
-                                log_fn=_log,
-                                selectors=self._selected_sensors_set,
-                            )
+                        self._ha_ws_listener = cls(
+                            self.ha_api_url,
+                            self.ha_api_token,
+                            on_event=self._on_ha_state_event,
+                            log_fn=_log,
+                            selectors=self._selected_sensors_set,
+                            on_ha_version=self._on_ha_version,
+                        )
                         started = self._ha_ws_listener.start()
                         _log(f"HA WS listener started={started}")
                         # Log which sensors the websocket is currently monitoring
@@ -1378,18 +1368,18 @@ class CentralCoreClient:
             pass
 
         raw_state = new_state.get("state")
-        normalized = self._normalize_sensor_value(raw_state)
         prev_value = self._selected_sensor_cache.get(entity_id)
-        if prev_value == normalized:
+        if prev_value == raw_state:
             return
-        self._selected_sensor_cache[entity_id] = normalized
+        self._selected_sensor_cache[entity_id] = raw_state
 
         attrs = new_state.get("attributes") or {}
         name = attrs.get("friendly_name") or new_state.get("name") or entity_id
         enabled = not bool(attrs.get("disabled_by"))
         now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         telemetry_payload = {
-            "data": {entity_id: normalized},
+            "data": {entity_id: raw_state},
+            "raw": {entity_id: raw_state},
             "names": {entity_id: name},
             "enabled": {entity_id: enabled},
             "attributes": {entity_id: dict(attrs)},
@@ -1402,7 +1392,7 @@ class CentralCoreClient:
                 qos=0,
             )
             try:
-                _log(f"HA WS -> Sent sensor update for {entity_id}: {normalized}")
+                _log(f"HA WS -> Sent sensor update for {entity_id}: {raw_state}")
             except Exception:
                 pass
         except Exception:
@@ -1874,24 +1864,6 @@ class CentralCoreClient:
             )
         self._last_sensors_sent = int(time.time())
 
-    def _normalize_sensor_value(self, state):
-        val = state
-        try:
-            if isinstance(state, str):
-                low = state.lower()
-                if low in ("on", "true"):
-                    val = True
-                elif low in ("off", "false"):
-                    val = False
-                else:
-                    if "." in state:
-                        val = float(state)
-                    else:
-                        val = int(state)
-        except Exception:
-            val = state
-        return val
-
     def publish_selected_sensor_changes(self):
         """Publish telemetry for selected sensors when their state changes."""
         if not self.selected_sensors:
@@ -1906,6 +1878,7 @@ class CentralCoreClient:
         filtered = [s for s in sensors if s.get("entity_id") in selected_set and is_entity_allowed(s.get("entity_id"))]
 
         data_map = {}
+        raw_map = {}
         names_map = {}
         enabled_map = {}
         attrs_map = {}
@@ -1915,7 +1888,8 @@ class CentralCoreClient:
                 continue
             raw_state = s.get("state")
             attrs = s.get("attributes", {}) or {}
-            data_map[ent] = self._normalize_sensor_value(raw_state)
+            data_map[ent] = raw_state
+            raw_map[ent] = raw_state
             names_map[ent] = attrs.get("friendly_name") or s.get("name") or ent
             enabled_map[ent] = not bool(attrs.get("disabled_by"))
             attrs_map[ent] = attrs
@@ -1931,6 +1905,7 @@ class CentralCoreClient:
         now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         telemetry_payload = {
             "data": data_map,
+            "raw": raw_map,
             "names": names_map,
             "enabled": enabled_map,
             "attributes": attrs_map,

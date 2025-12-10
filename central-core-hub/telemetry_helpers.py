@@ -3,25 +3,6 @@ import json
 from datetime import datetime, timezone
 
 
-def normalize_sensor_value(state):
-    """Coerce HA state strings to bool/float/int when possible."""
-    val = state
-    try:
-        if isinstance(state, str):
-            low = state.lower()
-            if low in ("on", "true"):
-                val = True
-            elif low in ("off", "false"):
-                val = False
-            else:
-                if "." in state:
-                    val = float(state)
-                else:
-                    val = int(state)
-    except Exception:
-        val = state
-    return val
-
 
 def attach_ha_timestamps(attrs, sensor):
     if sensor.get("last_changed") is not None:
@@ -43,7 +24,7 @@ def build_sensor_maps(filtered):
         attrs = s.get("attributes", {}) or {}
         attach_ha_timestamps(attrs, s)
         raw_state = s.get("state")
-        data_map[ent] = normalize_sensor_value(raw_state)
+        data_map[ent] = raw_state
         names_map[ent] = attrs.get("friendly_name") or s.get("name") or ent
         enabled_map[ent] = not bool(attrs.get("disabled_by"))
         attrs_map[ent] = attrs

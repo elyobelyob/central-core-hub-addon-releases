@@ -37,19 +37,6 @@ def test_mqtt_topics_prefers_shared_module(tmp_path, monkeypatch):
     assert mod.CMD_BASE_TMPL == "custom/cmd/{client_id}"
 
 
-def test_normalize_sensor_value_variants():
-    repo_root = Path(__file__).resolve().parents[3]
-    mod = _load_module(repo_root / "central-core-hub" / "telemetry_helpers.py", "th_test")
-    assert mod.normalize_sensor_value("on") is True
-    assert mod.normalize_sensor_value("true") is True
-    assert mod.normalize_sensor_value("off") is False
-    assert mod.normalize_sensor_value("false") is False
-    assert mod.normalize_sensor_value("12") == 12
-    assert mod.normalize_sensor_value("12.5") == 12.5
-    # Non-coercible value returns original
-    assert mod.normalize_sensor_value("not-a-number") == "not-a-number"
-
-
 def test_attach_timestamps_and_build_maps_and_event_payload():
     repo_root = Path(__file__).resolve().parents[3]
     mod = _load_module(repo_root / "central-core-hub" / "telemetry_helpers.py", "th_maps")
@@ -66,7 +53,7 @@ def test_attach_timestamps_and_build_maps_and_event_payload():
     assert attrs["last_updated"] == "2025-01-01T00:00:01Z"
 
     data_map, names_map, enabled_map, attrs_map = mod.build_sensor_maps([sensor])
-    assert data_map["sensor.temp"] == 22
+    assert data_map["sensor.temp"] == "22"
     assert names_map["sensor.temp"] == "Temp"
     assert enabled_map["sensor.temp"] is True
     assert "unit" in attrs_map["sensor.temp"]
