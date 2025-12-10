@@ -98,21 +98,28 @@ def fetch_sensors(ha_api_url, ha_api_token, requests_mod=None):
         r.raise_for_status()
         data = r.json()
         sensors = []
+        # Allowed device classes for filtering
+        allowed_device_classes = ['motion', 'door', 'presence']
         for ent in data:
             ent_id = ent.get("entity_id")
             if ent_id and ent_id.startswith("sensor."):
-                sensors.append(
-                    {
-                        "entity_id": ent_id,
-                        "state": ent.get("state"),
-                        "name": ent.get("attributes", {}).get("friendly_name") or ent_id,
-                        "attributes": ent.get("attributes", {}) or {},
-                        # Preserve HA timestamps when present so downstream systems
-                        # can reason about data recency.
-                        "last_changed": ent.get("last_changed"),
-                        "last_updated": ent.get("last_updated"),
-                    }
-                )
+                # Check device_class attribute if present
+                attrs = ent.get("attributes", {}) or {}
+                device_class = attrs.get("device_class")
+                # Include sensors with allowed device_class or no device_class
+                if device_class is None or device_class in allowed_device_classes:
+                    sensors.append(
+                        {
+                            "entity_id": ent_id,
+                            "state": ent.get("state"),
+                            "name": attrs.get("friendly_name") or ent_id,
+                            "attributes": attrs,
+                            # Preserve HA timestamps when present so downstream systems
+                            # can reason about data recency.
+                            "last_changed": ent.get("last_changed"),
+                            "last_updated": ent.get("last_updated"),
+                        }
+                    )
         return sensors
     except Exception:
         return None
