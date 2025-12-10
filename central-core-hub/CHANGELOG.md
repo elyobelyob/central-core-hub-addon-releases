@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.67] - 2025-12-10
+
+- feat(telemetry): refresh telemetry_interval from HA options before each publish
+- test(mqtt_client): add coverage for telemetry_interval refresh path
+
+### Commits included in this release
+
+- feat(telemetry): refresh telemetry_interval from HA options before each publish
+- test(mqtt_client): add coverage for telemetry_interval refresh path
+
 ## [1.1.66] - 2025-12-10
 
 - feat(telemetry): expose interval in telemetry payloads

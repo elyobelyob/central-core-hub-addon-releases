@@ -278,6 +278,38 @@ def test_run_iteration_handles_publish_and_sensors_exceptions(monkeypatch):
     c.run_iteration()
 
 
+def test_run_iteration_refreshes_interval_from_options(monkeypatch):
+    repo_root = Path(__file__).resolve().parents[3]
+    src = repo_root / "central-core-hub" / "mqtt_client.py"
+    spec = importlib.util.spec_from_file_location("mqtt_client_interval_refresh", str(src))
+    if spec is None or getattr(spec, "loader", None) is None:
+        raise ImportError("could not load spec")
+    mod = importlib.util.module_from_spec(spec)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(mod)
+    CentralCoreClient = mod.CentralCoreClient
+
+    c = CentralCoreClient({"client_id": "interval-refresh"})
+    c._connected = True
+    c.publish_telemetry = lambda: None
+    c.publish_selected_sensor_changes = lambda: None
+    c.publish_sensors = lambda: None
+    c._last_sensors_sent = int(mod.time.time())
+
+    state = {"value": 30}
+
+    def fake_load_options():
+        return {"telemetry_interval": state["value"]}
+
+    monkeypatch.setattr(mod, "load_options", fake_load_options)
+
+    state["value"] = 120
+    c.run_iteration()
+
+    assert c.telemetry_interval == 120
+
+
 def test_cert_content_handling():
     """Test that certificate content is written to temp files."""
     import os
