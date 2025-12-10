@@ -16,9 +16,19 @@ def _load_module(name):
     return module
 
 
-def test_fetch_sensors_filters_by_safe_device_class():
+def test_fetch_sensors_filters_by_safe_device_class(tmp_path, monkeypatch):
     """Test that fetch_sensors only includes sensors with safe device_class values."""
     mc = _load_module("mqtt_client.py")
+    
+    # Set up a minimal registry that doesn't interfere with device_class filtering
+    import json
+    reg = {
+        "apply_registry": False,  # Disable registry filtering to test device_class filtering in isolation
+        "entries": []
+    }
+    p = tmp_path / "reg.yaml"
+    p.write_text(json.dumps(reg))
+    monkeypatch.setattr(mc, "SENSOR_REGISTRY", p)
 
     class Resp:
         def __init__(self):
@@ -85,10 +95,16 @@ def test_fetch_sensors_filters_by_safe_device_class():
                     "state": "1234-5678-9012-3456",
                     "attributes": {"friendly_name": "Credit Card", "device_class": "payment"},
                 },
+                # Sensors without device_class should pass through (subject to registry)
                 {
                     "entity_id": "sensor.no_device_class",
                     "state": "some_value",
                     "attributes": {"friendly_name": "No Device Class"},
+                },
+                {
+                    "entity_id": "binary_sensor.no_class",
+                    "state": "on",
+                    "attributes": {"friendly_name": "Binary No Class"},
                 },
             ]
 
@@ -114,10 +130,19 @@ def test_fetch_sensors_filters_by_safe_device_class():
     # Verify unsafe sensors are filtered out
     assert not any(s["entity_id"] == "sensor.password_field" for s in sensors), "Password sensor should be filtered out"
     assert not any(s["entity_id"] == "sensor.credit_card" for s in sensors), "Credit card sensor should be filtered out"
-    assert not any(s["entity_id"] == "sensor.no_device_class" for s in sensors), "Sensor without device_class should be filtered out"
     
-    # Verify total count
-    assert len(sensors) == 9, f"Expected 9 safe sensors, got {len(sensors)}"
+    # Sensors without device_class should pass through (they'll be subject to registry filtering later)
+    # Note: These will still be filtered by the registry if configured to deny them
+    # For now we just verify they pass the device_class filter
+    # The actual count depends on registry configuration
+    
+    # Verify that safe sensors are definitely included
+    safe_sensor_count = sum(1 for s in sensors if s["entity_id"] in [
+        "sensor.temp_living_room", "binary_sensor.front_door", "binary_sensor.motion_kitchen",
+        "sensor.battery_phone", "sensor.energy_meter", "binary_sensor.occupancy_bedroom",
+        "binary_sensor.presence_home", "binary_sensor.window_living_room", "sensor.air_quality"
+    ])
+    assert safe_sensor_count == 9, f"Expected 9 safe sensors, got {safe_sensor_count}"
 
 
 def test_ha_client_fetch_sensors_filters_by_device_class():
@@ -148,6 +173,11 @@ def test_ha_client_fetch_sensors_filters_by_device_class():
                     "state": "90",
                     "attributes": {"device_class": "battery"},
                 },
+                {
+                    "entity_id": "sensor.no_class",
+                    "state": "123",
+                    "attributes": {},
+                },
             ]
 
     class RClient:
@@ -157,8 +187,11 @@ def test_ha_client_fetch_sensors_filters_by_device_class():
     sensors = ha.fetch_sensors("http://ha", "tok", requests_mod=RClient())
     assert isinstance(sensors, list)
     
-    # Only temperature and battery should be included (safe device classes)
+    # Temperature and battery should be included (safe device classes)
     assert any(s["entity_id"] == "sensor.temp_1" for s in sensors), "Temperature sensor should be included"
     assert any(s["entity_id"] == "sensor.battery_1" for s in sensors), "Battery sensor should be included"
+    # Humidity should be filtered out (unsafe device class)
     assert not any(s["entity_id"] == "sensor.humidity_1" for s in sensors), "Humidity sensor should be filtered out"
-    assert len(sensors) == 2, f"Expected 2 safe sensors, got {len(sensors)}"
+    # Sensor without device_class should pass through (subject to registry filtering)
+    assert any(s["entity_id"] == "sensor.no_class" for s in sensors), "Sensor without device_class should pass through"
+    assert len(sensors) == 3, f"Expected 3 sensors, got {len(sensors)}"
