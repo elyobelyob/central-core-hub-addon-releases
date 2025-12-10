@@ -109,7 +109,8 @@ def fetch_sensors(ha_api_url, ha_api_token, requests_mod=None):
         sensors = []
         for ent in data:
             ent_id = ent.get("entity_id")
-            if ent_id and ent_id.startswith("sensor."):
+            # Support both sensor.* and binary_sensor.* entities
+            if ent_id and (ent_id.startswith("sensor.") or ent_id.startswith("binary_sensor.")):
                 # Filter by device_class: only include if device_class is safe OR not present
                 device_class = ent.get("attributes", {}).get("device_class")
                 if device_class and device_class not in SAFE_DEVICE_CLASSES:
