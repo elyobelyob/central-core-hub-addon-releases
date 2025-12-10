@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.65] - 2025-12-10
+
+- fix(mqtt): remove legacy normalization paths and publish exact HA values (added raw maps for selected sensor telemetry + websocket events)
+- fix(telemetry): drop normalize helper so sensor maps remain raw-only
+- test(selected-sensors): update websocket fake + expectations to cover new raw payloads
+
+### Commits included in this release
+
+- fix(mqtt): remove legacy normalization paths and publish exact HA values (added raw maps for selected sensor telemetry + websocket events)
+- fix(telemetry): drop normalize helper so sensor maps remain raw-only
+- test(selected-sensors): update websocket fake + expectations to cover new raw payloads
+
 ## [1.1.64] - 2025-12-09
 
 - fix(ha): avoid break in finally; fix(version_manager): misc ruff fixes
