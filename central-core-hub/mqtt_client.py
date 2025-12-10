@@ -287,7 +287,7 @@ SENSOR_REGISTRY = pathlib.Path(__file__).parent / "SENSOR_REGISTRY.yaml"
 
 # Allowed device classes for sensor filtering. Sensors with these device_class
 # values or no device_class attribute will be included.
-ALLOWED_DEVICE_CLASSES = ['motion', 'door', 'presence']
+ALLOWED_DEVICE_CLASSES = ('motion', 'door', 'presence')
 
 # File to persist the vault-selected sensors so selections survive restarts.
 # Default to the add-on data directory (`/data`) so the file survives
@@ -788,7 +788,7 @@ def fetch_sensors(ha_api_url, ha_api_token):
             if not (ent_id.startswith("sensor.") or ent_id.startswith("binary_sensor.")):
                 continue
             # Check device_class attribute if present
-            attrs = ent.get("attributes", {}) or {}
+            attrs = ent.get("attributes", {})
             device_class = attrs.get("device_class")
             # Include sensors with allowed device_class or no device_class
             if device_class is None or device_class in ALLOWED_DEVICE_CLASSES:
