@@ -285,18 +285,10 @@ OPTIONS_PATH = "/data/options.json"
 MQTT_OPTIONS_ENV = "MQTT_OPTIONS_PATH"
 SENSOR_REGISTRY = pathlib.Path(__file__).parent / "SENSOR_REGISTRY.yaml"
 
-# Default list of safe device classes for sensor filtering
-DEFAULT_SAFE_DEVICE_CLASSES = [
-    "temperature",
-    "motion",
-    "door",
-    "battery",
-    "occupancy",
-    "presence",
-    "opening",
-    "aqi",
-    "energy",
-]
+# Allowed device classes for sensor filtering. Sensors with these device_class
+# values or no device_class attribute will be included.
+ALLOWED_DEVICE_CLASSES = ('motion', 'door', 'presence')
+
 # File to persist the vault-selected sensors so selections survive restarts.
 # Default to the add-on data directory (`/data`) so the file survives
 # add-on upgrades. Allow overriding via the `SELECTED_SENSORS_FILE`
@@ -803,25 +795,21 @@ def fetch_sensors(ha_api_url, ha_api_token, safe_device_classes=None):
                 continue
             if not (ent_id.startswith("sensor.") or ent_id.startswith("binary_sensor.")):
                 continue
-            
-            # Filter by device_class if present in attributes
-            attrs = ent.get("attributes", {}) or {}
+            # Check device_class attribute if present
+            attrs = ent.get("attributes", {})
             device_class = attrs.get("device_class")
-            # If sensor has a device_class, it must be in the safe list
-            # If sensor has no device_class, allow it through (backward compatibility)
-            if device_class and device_class not in safe_classes_set:
-                continue
-            
-            sensors.append(
-                {
-                    "entity_id": ent_id,
-                    "state": ent.get("state"),
-                    "name": attrs.get("friendly_name") or ent_id,
-                    "attributes": attrs,
-                    "last_changed": ent.get("last_changed"),
-                    "last_updated": ent.get("last_updated"),
-                }
-            )
+            # Include sensors with allowed device_class or no device_class
+            if device_class is None or device_class in ALLOWED_DEVICE_CLASSES:
+                sensors.append(
+                    {
+                        "entity_id": ent_id,
+                        "state": ent.get("state"),
+                        "name": attrs.get("friendly_name") or ent_id,
+                        "attributes": attrs,
+                        "last_changed": ent.get("last_changed"),
+                        "last_updated": ent.get("last_updated"),
+                    }
+                )
 
         # Consult SENSOR_REGISTRY if present. Registry is the source-of-truth:
         # - If registry empty or unavailable, include all collected sensors
