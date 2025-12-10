@@ -52,7 +52,7 @@ def test_publish_sensors_calls_publish_and_updates_timestamp(monkeypatch):
             "attributes": {"friendly_name": "Humidity"},
         },
     ]
-    monkeypatch.setattr(mod, "fetch_sensors", lambda url, token: sample)
+    monkeypatch.setattr(mod, "fetch_sensors", lambda url, token, safe_classes=None: sample)
 
     options = {
         "client_id": "unit-hub",
@@ -87,7 +87,7 @@ def test_handle_sensors_poll_command_ack_and_completion(monkeypatch):
             "attributes": {"friendly_name": "Temp"},
         },
     ]
-    monkeypatch.setattr(mod, "fetch_sensors", lambda url, token: sample)
+    monkeypatch.setattr(mod, "fetch_sensors", lambda url, token, safe_classes=None: sample)
 
     options = {
         "client_id": "unit-hub",
