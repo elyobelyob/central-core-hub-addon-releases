@@ -74,11 +74,29 @@ entries:
     provide: true
     rationale: "Used by sensors/set handler tests"
 
-  # Placeholder: Common binary sensors we may want to include
+  # Device class based filtering examples
+  # Note: device_class filtering is implemented in fetch_sensors code.
+  # The following entries document the expected behavior:
+  - entity_id: sensor.*
+    type: sensor
+    provide: true
+    attributes:
+      device_class: motion
+    rationale: "Include motion sensors based on device_class attribute"
+
   - entity_id: binary_sensor.*
     type: binary_sensor
-    provide: false
-    rationale: "Deny all binary_sensors by default; adjust patterns to fine-tune"
+    provide: true
+    attributes:
+      device_class: door
+    rationale: "Include door sensors based on device_class attribute"
+
+  - entity_id: binary_sensor.*
+    type: binary_sensor
+    provide: true
+    attributes:
+      device_class: presence
+    rationale: "Include presence sensors based on device_class attribute"
 
 # How to use
 # - Update entries to reflect real entity_ids your Home Assistant exposes.
