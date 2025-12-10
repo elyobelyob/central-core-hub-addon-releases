@@ -18,6 +18,10 @@ import typing
 # redirect writes to a temporary location.
 OPTIONS_PATH = "/data/options.json"
 
+# Allowed device classes for sensor filtering. Sensors with these device_class
+# values or no device_class attribute will be included.
+ALLOWED_DEVICE_CLASSES = ['motion', 'door', 'presence']
+
 # In-memory cache for the discovered Home Assistant version. Store a
 # small struct with the version string and the timestamp it was set so
 # consumers can apply a TTL without hitting the filesystem.
@@ -98,16 +102,15 @@ def fetch_sensors(ha_api_url, ha_api_token, requests_mod=None):
         r.raise_for_status()
         data = r.json()
         sensors = []
-        # Allowed device classes for filtering
-        allowed_device_classes = ['motion', 'door', 'presence']
         for ent in data:
             ent_id = ent.get("entity_id")
-            if ent_id and ent_id.startswith("sensor."):
+            # Include both sensor.* and binary_sensor.* entities
+            if ent_id and (ent_id.startswith("sensor.") or ent_id.startswith("binary_sensor.")):
                 # Check device_class attribute if present
                 attrs = ent.get("attributes", {}) or {}
                 device_class = attrs.get("device_class")
                 # Include sensors with allowed device_class or no device_class
-                if device_class is None or device_class in allowed_device_classes:
+                if device_class is None or device_class in ALLOWED_DEVICE_CLASSES:
                     sensors.append(
                         {
                             "entity_id": ent_id,
