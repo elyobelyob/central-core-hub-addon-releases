@@ -62,9 +62,9 @@ def test_fetch_sensors_parses_entities(monkeypatch, tmp_path):
     cast(Any, mc).requests = RClient()
     sensors = mc.fetch_sensors("http://ha", "tok")
     assert isinstance(sensors, list)
-    # sensor.* with safe device_class should be included
+    # sensor.* and binary_sensor.* without device_class should be included
     assert any(s["entity_id"] == "sensor.x" for s in sensors)
-    # binary_sensor with safe device_class should be included
+    # binary sensors without device_class attribute are now included
     assert any(s["entity_id"] == "binary_sensor.y" for s in sensors)
 
 
