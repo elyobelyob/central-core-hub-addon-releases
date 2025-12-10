@@ -784,7 +784,8 @@ def fetch_sensors(ha_api_url, ha_api_token, safe_device_classes=None):
         safe_device_classes = DEFAULT_SAFE_DEVICE_CLASSES
     
     # Convert to set for O(1) lookup performance when filtering many sensors
-    safe_classes_set = set(safe_device_classes) if safe_device_classes else set()
+    # Note: Empty list is a valid value indicating no device_class filtering
+    safe_classes_set = set(safe_device_classes) if isinstance(safe_device_classes, (list, tuple, set)) else set()
 
     try:
         url = ha_api_url.rstrip("/") + "/api/states"
