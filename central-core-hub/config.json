@@ -43,7 +43,7 @@
     "ha_api_url": "str?",
     "ha_api_token": "str?",
     "telemetry_interval": "int",
-    "safe_device_classes": ["str?"]
+    "safe_device_classes": ["str"]
   },
   "host_network": true
 }
