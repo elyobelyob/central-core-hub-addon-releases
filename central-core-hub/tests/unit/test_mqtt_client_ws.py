@@ -22,12 +22,13 @@ def test_ha_ws_listener_started_and_stop_called(tmp_path, monkeypatch):
     class FakeListener:
         _instances = []
 
-        def __init__(self, url, token, on_event=None, log_fn=None, selectors=None):
+        def __init__(self, url, token, on_event=None, log_fn=None, selectors=None, on_ha_version=None):
             self.url = url
             self.token = token
             self.on_event = on_event
             self.log_fn = log_fn
             self.selectors = selectors
+            self.on_ha_version = on_ha_version
             self.started = False
             self.stopped = False
             FakeListener._instances.append(self)
