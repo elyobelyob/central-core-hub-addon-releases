@@ -14,6 +14,15 @@ import traceback
 import typing
 # datetime/timezone not used in this module
 
+# Safe device classes allowed for sensor inclusion.
+# Sensors with device_class values in this set are considered safe for telemetry.
+# Sensors with device_class values NOT in this set are filtered out.
+# Sensors without a device_class attribute pass through (subject to registry filtering).
+SAFE_DEVICE_CLASSES = {
+    "temperature", "motion", "door", "battery",
+    "occupancy", "presence", "opening", "aqi", "energy"
+}
+
 # Path to the add-on options file. Tests can monkeypatch this variable to
 # redirect writes to a temporary location.
 OPTIONS_PATH = "/data/options.json"
@@ -97,18 +106,13 @@ def fetch_sensors(ha_api_url, ha_api_token, requests_mod=None):
         r = req.get(url, headers=headers, timeout=10)
         r.raise_for_status()
         data = r.json()
-        # Safe device classes allowed for inclusion
-        safe_device_classes = {
-            "temperature", "motion", "door", "battery", 
-            "occupancy", "presence", "opening", "aqi", "energy"
-        }
         sensors = []
         for ent in data:
             ent_id = ent.get("entity_id")
             if ent_id and ent_id.startswith("sensor."):
                 # Filter by device_class: only include if device_class is safe OR not present
                 device_class = ent.get("attributes", {}).get("device_class")
-                if device_class and device_class not in safe_device_classes:
+                if device_class and device_class not in SAFE_DEVICE_CLASSES:
                     # Skip sensors with unsafe device_class
                     continue
                 sensors.append(

@@ -775,11 +775,19 @@ def fetch_sensors(ha_api_url, ha_api_token):
         r = requests.get(url, headers=headers, timeout=10)
         r.raise_for_status()
         data = r.json()
-        # Safe device classes allowed for inclusion
-        safe_device_classes = {
-            "temperature", "motion", "door", "battery", 
-            "occupancy", "presence", "opening", "aqi", "energy"
-        }
+        # Import safe device classes from ha_client to avoid duplication
+        try:
+            import ha_client as _ha
+            safe_device_classes = getattr(_ha, "SAFE_DEVICE_CLASSES", {
+                "temperature", "motion", "door", "battery",
+                "occupancy", "presence", "opening", "aqi", "energy"
+            })
+        except Exception:
+            # Fallback if import fails (shouldn't happen in production)
+            safe_device_classes = {
+                "temperature", "motion", "door", "battery",
+                "occupancy", "presence", "opening", "aqi", "energy"
+            }
         sensors = []
         for ent in data:
             ent_id = ent.get("entity_id")
