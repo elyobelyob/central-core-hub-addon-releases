@@ -775,6 +775,11 @@ def fetch_sensors(ha_api_url, ha_api_token):
         r = requests.get(url, headers=headers, timeout=10)
         r.raise_for_status()
         data = r.json()
+        # Safe device classes allowed for inclusion
+        safe_device_classes = {
+            "temperature", "motion", "door", "battery", 
+            "occupancy", "presence", "opening", "aqi", "energy"
+        }
         sensors = []
         for ent in data:
             ent_id = ent.get("entity_id")
@@ -782,16 +787,19 @@ def fetch_sensors(ha_api_url, ha_api_token):
                 continue
             if not (ent_id.startswith("sensor.") or ent_id.startswith("binary_sensor.")):
                 continue
-            sensors.append(
-                {
-                    "entity_id": ent_id,
-                    "state": ent.get("state"),
-                    "name": ent.get("attributes", {}).get("friendly_name") or ent_id,
-                    "attributes": ent.get("attributes", {}) or {},
-                    "last_changed": ent.get("last_changed"),
-                    "last_updated": ent.get("last_updated"),
-                }
-            )
+            # Filter by device_class if present
+            device_class = ent.get("attributes", {}).get("device_class")
+            if device_class in safe_device_classes:
+                sensors.append(
+                    {
+                        "entity_id": ent_id,
+                        "state": ent.get("state"),
+                        "name": ent.get("attributes", {}).get("friendly_name") or ent_id,
+                        "attributes": ent.get("attributes", {}) or {},
+                        "last_changed": ent.get("last_changed"),
+                        "last_updated": ent.get("last_updated"),
+                    }
+                )
 
         # Consult SENSOR_REGISTRY if present. Registry is the source-of-truth:
         # - If registry empty or unavailable, include all collected sensors

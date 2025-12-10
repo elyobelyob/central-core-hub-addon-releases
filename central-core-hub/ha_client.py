@@ -97,22 +97,30 @@ def fetch_sensors(ha_api_url, ha_api_token, requests_mod=None):
         r = req.get(url, headers=headers, timeout=10)
         r.raise_for_status()
         data = r.json()
+        # Safe device classes allowed for inclusion
+        safe_device_classes = {
+            "temperature", "motion", "door", "battery", 
+            "occupancy", "presence", "opening", "aqi", "energy"
+        }
         sensors = []
         for ent in data:
             ent_id = ent.get("entity_id")
             if ent_id and ent_id.startswith("sensor."):
-                sensors.append(
-                    {
-                        "entity_id": ent_id,
-                        "state": ent.get("state"),
-                        "name": ent.get("attributes", {}).get("friendly_name") or ent_id,
-                        "attributes": ent.get("attributes", {}) or {},
-                        # Preserve HA timestamps when present so downstream systems
-                        # can reason about data recency.
-                        "last_changed": ent.get("last_changed"),
-                        "last_updated": ent.get("last_updated"),
-                    }
-                )
+                # Filter by device_class if present
+                device_class = ent.get("attributes", {}).get("device_class")
+                if device_class in safe_device_classes:
+                    sensors.append(
+                        {
+                            "entity_id": ent_id,
+                            "state": ent.get("state"),
+                            "name": ent.get("attributes", {}).get("friendly_name") or ent_id,
+                            "attributes": ent.get("attributes", {}) or {},
+                            # Preserve HA timestamps when present so downstream systems
+                            # can reason about data recency.
+                            "last_changed": ent.get("last_changed"),
+                            "last_updated": ent.get("last_updated"),
+                        }
+                    )
         return sensors
     except Exception:
         return None
