@@ -29,10 +29,14 @@ def test_registry_deny_multiple_patterns(tmp_path, monkeypatch):
 
         def json(self):
             return [
-                {"entity_id": "sensor.keep", "state": "1", "attributes": {}},
-                {"entity_id": "sensor.excluded1", "state": "2", "attributes": {}},
-                {"entity_id": "sensor.excluded2", "state": "3", "attributes": {}},
-                {"entity_id": "binary_sensor.bs1", "state": "on", "attributes": {}},
+                {"entity_id": "sensor.keep", "state": "1", "attributes": {"device_class": "motion"}},
+                {"entity_id": "sensor.excluded1", "state": "2", "attributes": {"device_class": "motion"}},
+                {"entity_id": "sensor.excluded2", "state": "3", "attributes": {"device_class": "motion"}},
+                {
+                    "entity_id": "binary_sensor.bs1",
+                    "state": "on",
+                    "attributes": {"device_class": "motion"},
+                },
             ]
 
     class RClient:
@@ -73,9 +77,9 @@ def test_registry_allow_prefix(tmp_path, monkeypatch):
 
         def json(self):
             return [
-                {"entity_id": "sensor.a1", "state": "1", "attributes": {}},
-                {"entity_id": "sensor.a2", "state": "2", "attributes": {}},
-                {"entity_id": "sensor.b1", "state": "3", "attributes": {}},
+                {"entity_id": "sensor.a1", "state": "1", "attributes": {"device_class": "motion"}},
+                {"entity_id": "sensor.a2", "state": "2", "attributes": {"device_class": "motion"}},
+                {"entity_id": "sensor.b1", "state": "3", "attributes": {"device_class": "motion"}},
             ]
 
     class RClient:

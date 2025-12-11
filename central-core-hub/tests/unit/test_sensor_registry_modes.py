@@ -29,8 +29,12 @@ def test_registry_deny_binary_sensor(tmp_path, monkeypatch):
 
         def json(self):
             return [
-                {"entity_id": "sensor.x", "state": "12", "attributes": {}},
-                {"entity_id": "binary_sensor.y", "state": "on", "attributes": {}},
+                {"entity_id": "sensor.x", "state": "12", "attributes": {"device_class": "motion"}},
+                {
+                    "entity_id": "binary_sensor.y",
+                    "state": "on",
+                    "attributes": {"device_class": "motion"},
+                },
             ]
 
     class RClient:
@@ -70,8 +74,8 @@ def test_registry_allow_only_sensor_x(tmp_path, monkeypatch):
 
         def json(self):
             return [
-                {"entity_id": "sensor.x", "state": "12", "attributes": {}},
-                {"entity_id": "sensor.z", "state": "3", "attributes": {}},
+                {"entity_id": "sensor.x", "state": "12", "attributes": {"device_class": "motion"}},
+                {"entity_id": "sensor.z", "state": "3", "attributes": {"device_class": "motion"}},
             ]
 
     class RClient:

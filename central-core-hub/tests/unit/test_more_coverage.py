@@ -163,7 +163,7 @@ def test_fetch_sensors_happy_path(monkeypatch):
                 {
                     "entity_id": "sensor.a",
                     "state": "1",
-                    "attributes": {"friendly_name": "A"},
+                    "attributes": {"friendly_name": "A", "device_class": "motion"},
                     "last_changed": "2025-01-01T00:00:00Z",
                     "last_updated": "2025-01-01T00:00:01Z",
                 },

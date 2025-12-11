@@ -97,9 +97,17 @@ def test_fetch_sensors_filters_non_sensor_entities(tmp_path):
     ha_mod = _load_module(repo_root / "central-core-hub" / "ha_client.py", "ha_client_extra")
 
     sensors_payload = [
-        {"entity_id": "sensor.motion", "state": "on", "attributes": {"friendly_name": "Motion Sensor"}},
+        {
+            "entity_id": "sensor.motion",
+            "state": "on",
+            "attributes": {"friendly_name": "Motion Sensor", "device_class": "motion"},
+        },
         {"entity_id": "light.lamp", "state": "off"},
-        {"entity_id": "sensor.temperature", "state": "22.5", "attributes": {"friendly_name": "Temp"}},
+        {
+            "entity_id": "sensor.temperature",
+            "state": "22.5",
+            "attributes": {"friendly_name": "Temp", "device_class": "motion"},
+        },
     ]
     fake_requests = _FakeRequests([sensors_payload])
     sensors = ha_mod.fetch_sensors("http://example.com", "token", requests_mod=fake_requests)
