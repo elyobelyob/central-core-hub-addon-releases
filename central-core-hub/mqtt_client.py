@@ -24,16 +24,17 @@ import typing
 from datetime import datetime, timezone
 from typing import cast
 
-# Import safe device classes from ha_client to avoid duplication
+# Import safe device classes from ha_client when available so defaults stay aligned.
 try:
     import ha_client as _ha_module
-    SAFE_DEVICE_CLASSES = _ha_module.SAFE_DEVICE_CLASSES
+    _default_safe_classes = getattr(_ha_module, "ALLOWED_DEVICE_CLASSES", None)
+    if _default_safe_classes is None:
+        _default_safe_classes = ("motion", "door", "presence")
 except (ImportError, ModuleNotFoundError, AttributeError):
-    # Fallback if import fails or module doesn't have the constant
-    SAFE_DEVICE_CLASSES = {
-        "temperature", "motion", "door", "battery",
-        "occupancy", "presence", "opening", "aqi", "energy"
-    }
+    _default_safe_classes = ("motion", "door", "presence")
+
+# Preserve a list version for configuration defaults (unique and sorted for determinism)
+DEFAULT_SAFE_DEVICE_CLASSES = sorted({str(cls).strip() for cls in _default_safe_classes if cls is not None and str(cls).strip()})
 
 # Outbox configuration: persistent file location and maximum queued items.
 # Default file is under the add-on data directory so it survives upgrades.
@@ -295,10 +296,6 @@ except Exception:
 OPTIONS_PATH = "/data/options.json"
 MQTT_OPTIONS_ENV = "MQTT_OPTIONS_PATH"
 SENSOR_REGISTRY = pathlib.Path(__file__).parent / "SENSOR_REGISTRY.yaml"
-
-# Allowed device classes for sensor filtering. Sensors with these device_class
-# values or no device_class attribute will be included.
-ALLOWED_DEVICE_CLASSES = ('motion', 'door', 'presence')
 
 # File to persist the vault-selected sensors so selections survive restarts.
 # Default to the add-on data directory (`/data`) so the file survives
@@ -782,13 +779,15 @@ def fetch_sensors(ha_api_url, ha_api_token, safe_device_classes=None):
     # the larger change set we expose lightweight helpers so other publish
     # paths can ask whether an entity should be published.
     
-    # Use default safe device classes if not provided
+    # Resolve the configured safe device classes. Accept lists/tuples/sets; any
+    # other type falls back to the baked-in defaults. Empty collections signal
+    # "allow all device classes".
     if safe_device_classes is None:
         safe_device_classes = DEFAULT_SAFE_DEVICE_CLASSES
-    
-    # Convert to set for O(1) lookup performance when filtering many sensors
-    # Note: Empty list is a valid value indicating no device_class filtering
-    safe_classes_set = set(safe_device_classes) if isinstance(safe_device_classes, (list, tuple, set)) else set()
+    if isinstance(safe_device_classes, (list, tuple, set)):
+        safe_classes_set = {str(cls).strip() for cls in safe_device_classes if cls is not None and str(cls).strip()}
+    else:
+        safe_classes_set = set(DEFAULT_SAFE_DEVICE_CLASSES)
 
     try:
         url = ha_api_url.rstrip("/") + "/api/states"
@@ -809,8 +808,20 @@ def fetch_sensors(ha_api_url, ha_api_token, safe_device_classes=None):
             # Check device_class attribute if present
             attrs = ent.get("attributes", {})
             device_class = attrs.get("device_class")
-            # Include sensors with allowed device_class or no device_class
-            if device_class is None or device_class in ALLOWED_DEVICE_CLASSES:
+            # Include sensors with allowed device_class or, when the filter is
+            # empty, allow everything.
+            include_sensor = False
+            if not safe_classes_set:
+                include_sensor = True
+            elif device_class is None:
+                include_sensor = True
+            else:
+                try:
+                    include_sensor = str(device_class).strip() in safe_classes_set
+                except Exception:
+                    include_sensor = False
+
+            if include_sensor:
                 sensors.append(
                     {
                         "entity_id": ent_id,
@@ -919,9 +930,12 @@ class CentralCoreClient:
         self.ha_api_url = options.get("ha_api_url") or ""
         self.ha_api_token = options.get("ha_api_token") or ""
         # Load safe device classes from options, with defaults
-        self.safe_device_classes = options.get("safe_device_classes") or DEFAULT_SAFE_DEVICE_CLASSES
-        if not isinstance(self.safe_device_classes, list):
-            self.safe_device_classes = DEFAULT_SAFE_DEVICE_CLASSES
+        configured_safe = options.get("safe_device_classes")
+        if isinstance(configured_safe, list):
+            cleaned_safe = [str(cls).strip() for cls in configured_safe if cls is not None and str(cls).strip()]
+        else:
+            cleaned_safe = list(DEFAULT_SAFE_DEVICE_CLASSES)
+        self.safe_device_classes = cleaned_safe
         # Diagnostic: log whether HA options are present (do not print token)
         try:
             _log(
