@@ -529,14 +529,25 @@ def _resolve_options_path():
 
 
 def load_options():
-    path = _resolve_options_path()
-    if not os.path.exists(path):
-        return {}
-    with open(path, "r") as f:
+    # Resolve primary path and fall back to the default add-on location.
+    candidates = []
+    primary = _resolve_options_path()
+    if primary:
+        candidates.append(primary)
+    if OPTIONS_PATH not in candidates:
+        candidates.append(OPTIONS_PATH)
+
+    for path in candidates:
+        if not path:
+            continue
+        if not os.path.exists(path):
+            continue
         try:
-            return json.load(f)
+            with open(path, "r") as f:
+                return json.load(f)
         except Exception:
-            return {}
+            continue
+    return {}
 
 
 # Prefer importing helpers/telemetry modules, but support file-local import
@@ -571,7 +582,7 @@ try:
             mem_info_fn=mem_info_fn,
             disk_info_fn=disk_info_fn,
             version=version or get_addon_version(),
-            telemetry_interval=telemetry_interval or 30,
+            telemetry_interval=telemetry_interval if telemetry_interval is not None else 30,
         )
 
     build_vault_payload = _tele_mod.build_vault_payload
@@ -1842,6 +1853,12 @@ class CentralCoreClient:
         return None
 
     def publish_telemetry(self):
+        # Reload telemetry_interval from HA options if it changed so the
+        # published payload reflects the user-defined cadence.
+        try:
+            self._refresh_telemetry_interval_from_options()
+        except Exception:
+            pass
         # Attempt to include Home Assistant core version learned via the
         # websocket listener. The websocket writes `ha_version` into the
         # add-on options file (path configurable via `ha_client.OPTIONS_PATH`).
@@ -1864,6 +1881,10 @@ class CentralCoreClient:
                 "home_assistant": ha_info,
             },
         )
+        try:
+            _log(f"Telemetry interval (effective): {self.telemetry_interval}")
+        except Exception:
+            pass
         try:
             self._publish(self.telemetry_topic, payload)
             _log(f"Published telemetry to {self.telemetry_topic}")
