@@ -68,10 +68,9 @@ def test_fetch_sensors_parses_entities(monkeypatch, tmp_path):
     cast(Any, mc).requests = RClient()
     sensors = mc.fetch_sensors("http://ha", "tok")
     assert isinstance(sensors, list)
-    # sensor.* and binary_sensor.* without device_class should be included
-    assert any(s["entity_id"] == "sensor.x" for s in sensors)
-    # binary sensors without device_class attribute are now included
-    assert any(s["entity_id"] == "binary_sensor.y" for s in sensors)
+    # Sensors lacking device_class should be excluded
+    assert not any(s["entity_id"] == "sensor.x" for s in sensors)
+    assert not any(s["entity_id"] == "binary_sensor.y" for s in sensors)
 
 
 def test_telemetry_get_cpu_from_mqtt_client_module(monkeypatch):

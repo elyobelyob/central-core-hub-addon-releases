@@ -30,7 +30,7 @@ entries: []
 # Device class-based filtering is now implemented in the fetch_sensors function.
 # Safe device classes: temperature, motion, door, battery, occupancy, presence, opening, aqi, energy
 # Sensors with unsafe device classes (e.g., password, payment, etc.) are automatically filtered out.
-# Sensors without a device_class attribute pass through and are subject to registry rules.
+# Sensors without a device_class attribute are excluded from telemetry.
 
 # Example registry entries (commented-out for documentation; copy into `entries` when ready)
 #

@@ -805,21 +805,22 @@ def fetch_sensors(ha_api_url, ha_api_token, safe_device_classes=None):
                 continue
             if not (ent_id.startswith("sensor.") or ent_id.startswith("binary_sensor.")):
                 continue
-            # Check device_class attribute if present
+            # Require device_class; include when safe list allows it.
             attrs = ent.get("attributes", {})
-            device_class = attrs.get("device_class")
-            # Include sensors with allowed device_class or, when the filter is
-            # empty, allow everything.
+            raw_device_class = attrs.get("device_class")
+            try:
+                device_class = str(raw_device_class).strip() if raw_device_class is not None else None
+            except Exception:
+                device_class = None
+
+            if not device_class:
+                continue
+
             include_sensor = False
             if not safe_classes_set:
                 include_sensor = True
-            elif device_class is None:
-                include_sensor = True
             else:
-                try:
-                    include_sensor = str(device_class).strip() in safe_classes_set
-                except Exception:
-                    include_sensor = False
+                include_sensor = device_class in safe_classes_set
 
             if include_sensor:
                 sensors.append(

@@ -1,84 +1,9 @@
 # Changelog
 
-## [1.1.68] - 2025-12-10
+## [1.1.71] - 2025-12-11
 
-- fix(mqtt): ensure mqtt_client reinitializes `_client` after the telemetry interval refresh refactor
-- docs(changelog): clarify 1.1.67 entry to only list interval-related work
-
-### Commits included in this release
-
-- fix(mqtt): ensure mqtt_client reinitializes `_client` after the telemetry interval refresh refactor
-- docs(changelog): clarify 1.1.67 entry to only list interval-related work
-
-## [1.1.67] - 2025-12-10
-
-- feat(telemetry): refresh telemetry_interval from HA options before each publish
-- test(mqtt_client): add coverage for telemetry_interval refresh path
-
-### Commits included in this release
-
-- feat(telemetry): refresh telemetry_interval from HA options before each publish
-- test(mqtt_client): add coverage for telemetry_interval refresh path
-
-## [1.1.66] - 2025-12-10
-
-- feat(telemetry): expose interval in telemetry payloads
-- chore(release): bump version to 1.1.65
-- fix(telemetry): publish raw HA sensor data
-- chore(release): bump version to 1.1.64
-- fix(ha): avoid break in finally; fix(version_manager): misc ruff fixes
-- chore(release): bump version to 1.1.63
-- chore(release): backfill changelogs from git tags; update version_manager (tz-aware dates, replace entries)
-- chore: bump version to 1.1.62
-- fix(telemetry): preserve raw HA states; stop normalizing; update tests
-- chore: bump version to 1.1.61
-- ci(release): drop armv7 and i386 builds from release matrix
-- Drop legacy architectures and bump to 1.1.60
-- chore: bump version to 1.1.59
-- handlers: include friendly names in sensors/set ACK; add test
-- chore(release): bump version to 1.1.58
-- ci: install pyyaml in CI workflow
-- chore(release): bump version to 1.1.57
-- chore: commit local changes before bump
-- chore(release): bump version to 1.1.56
-- chore: make central_core_mqtt_shared optional; add STRICT_SHARED guard
-
-### Commits included in this release
-
-- feat(telemetry): expose interval in telemetry payloads
-- chore(release): bump version to 1.1.65
-- fix(telemetry): publish raw HA sensor data
-- chore(release): bump version to 1.1.64
-- fix(ha): avoid break in finally; fix(version_manager): misc ruff fixes
-- chore(release): bump version to 1.1.63
-- chore(release): backfill changelogs from git tags; update version_manager (tz-aware dates, replace entries)
-- chore: bump version to 1.1.62
-- fix(telemetry): preserve raw HA states; stop normalizing; update tests
-- chore: bump version to 1.1.61
-- ci(release): drop armv7 and i386 builds from release matrix
-- Drop legacy architectures and bump to 1.1.60
-- chore: bump version to 1.1.59
-- handlers: include friendly names in sensors/set ACK; add test
-- chore(release): bump version to 1.1.58
-- ci: install pyyaml in CI workflow
-- chore(release): bump version to 1.1.57
-- chore: commit local changes before bump
-- chore(release): bump version to 1.1.56
-- chore: make central_core_mqtt_shared optional; add STRICT_SHARED guard
-
-## [1.1.65] - 2025-12-10
-
-- fix(mqtt): remove legacy normalization paths and publish exact HA values (added raw maps for selected sensor telemetry + websocket events)
-- fix(telemetry): drop normalize helper so sensor maps remain raw-only
-- feat(telemetry): pass configured telemetry_interval into both the heartbeat payload and the derived vault payload
-- test(selected-sensors): update websocket fake + expectations to cover new raw payloads
-
-### Commits included in this release
-
-- fix(mqtt): remove legacy normalization paths and publish exact HA values (added raw maps for selected sensor telemetry + websocket events)
-- fix(telemetry): drop normalize helper so sensor maps remain raw-only
-- feat(telemetry): pass configured telemetry_interval into both the heartbeat payload and the derived vault payload
-- test(selected-sensors): update websocket fake + expectations to cover new raw payloads
+- feat: exclude sensors missing device_class from telemetry/registry paths
+- test: align device_class filtering expectations
 
 ## [1.1.64] - 2025-12-09
 

@@ -74,8 +74,8 @@ def test_ha_client_filters_by_device_class():
     assert "binary_sensor.door1" in entity_ids
     assert "binary_sensor.presence1" in entity_ids
     
-    # Check that sensors without device_class are included
-    assert "sensor.no_device_class" in entity_ids
+    # Check that sensors without device_class are excluded
+    assert "sensor.no_device_class" not in entity_ids
     
     # Check that non-allowed device_class sensors are excluded
     assert "sensor.temperature" not in entity_ids
@@ -136,15 +136,15 @@ def test_mqtt_client_filters_by_device_class():
     assert "binary_sensor.door2" in entity_ids
     assert "binary_sensor.presence2" in entity_ids
     
-    # Check that sensors without device_class are included
-    assert "sensor.plain" in entity_ids
+    # Check that sensors without device_class are excluded
+    assert "sensor.plain" not in entity_ids
     
     # Check that humidity sensor (non-allowed device_class) is excluded
     assert "sensor.humidity" not in entity_ids
 
 
-def test_device_class_none_value_included():
-    """Test that sensors with device_class explicitly set to None are included."""
+def test_device_class_none_value_excluded():
+    """Test that sensors with device_class explicitly set to None are excluded."""
     ha_client = _load_module("ha_client.py")
 
     class Resp:
@@ -169,8 +169,7 @@ def test_device_class_none_value_included():
 
     sensors = ha_client.fetch_sensors("http://ha", "tok", requests_mod=RClient())
     assert isinstance(sensors, list)
-    assert len(sensors) == 1
-    assert sensors[0]["entity_id"] == "sensor.explicit_none"
+    assert len(sensors) == 0
 
 
 def test_device_class_mixed_with_registry():
