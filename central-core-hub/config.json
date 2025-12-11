@@ -1,6 +1,6 @@
 {
   "name": "Central Core Hub",
-  "version": "1.1.68",
+  "version": "1.1.69",
   "slug": "central-core-hub",
   "description": "Central Core Hub Add-on",
   "arch": ["aarch64", "amd64"],
@@ -21,15 +21,9 @@
     "ha_api_token": "",
     "telemetry_interval": 30,
     "safe_device_classes": [
-      "temperature",
       "motion",
       "door",
-      "battery",
-      "occupancy",
-      "presence",
-      "opening",
-      "aqi",
-      "energy"
+      "presence"
     ]
   },
   "schema": {

@@ -1,6 +1,6 @@
 name: "Central Core Hub"
 description: "Central Core Hub Add-on"
-version: "1.1.68"
+version: "1.1.69"
 slug: "central-core-hub"
 init: false
 arch:
@@ -23,6 +23,10 @@ options:
   ha_api_url: ""
   ha_api_token: ""
   telemetry_interval: 30
+  safe_device_classes:
+    - motion
+    - door
+    - presence
 schema:
   mqtt_host: str
   mqtt_port: int
@@ -34,3 +38,5 @@ schema:
   ha_api_url: str?
   ha_api_token: str?
   telemetry_interval: int
+  safe_device_classes:
+    - str

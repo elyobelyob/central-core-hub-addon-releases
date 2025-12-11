@@ -22,7 +22,7 @@ import sys
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 
 class VersionManager:
@@ -128,7 +128,7 @@ class VersionManager:
             with open(file_path, "w") as f:
                 f.write(content)
 
-    def _git_commits_between(self, prev_tag: str = None, new_tag: str = None) -> List[str]:
+    def _git_commits_between(self, prev_tag: Optional[str] = None, new_tag: Optional[str] = None) -> List[str]:
         """Return commit summary lines between prev_tag and new_tag or HEAD.
 
         - If both tags provided, attempt `git log --pretty=format:%s prev_tag..new_tag`.
@@ -235,7 +235,13 @@ class VersionManager:
 
             prev_tag = tag
 
-    def update_changelogs(self, previous_version: str, new_version: str, date_str: str = None, commits: List[str] | None = None) -> None:
+    def update_changelogs(
+        self,
+        previous_version: str,
+        new_version: str,
+        date_str: Optional[str] = None,
+        commits: List[str] | None = None,
+    ) -> None:
         """Append a dated changelog entry to both top-level and add-on CHANGELOGs.
 
         The entry includes the commit messages between the previous version tag

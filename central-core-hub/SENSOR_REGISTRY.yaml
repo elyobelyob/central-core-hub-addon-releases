@@ -26,82 +26,83 @@ registry_mode: deny
 # - `sensor.temperature_*`    -> matches any sensor starting with temperature_
 # - `sensor.*_battery`        -> matches sensors ending with _battery
 
-entries:
-  # Device class-based filtering is now implemented in the fetch_sensors function.
-  # Safe device classes: temperature, motion, door, battery, occupancy, presence, opening, aqi, energy
-  # Sensors with unsafe device classes (e.g., password, payment, etc.) are automatically filtered out.
-  # Sensors without a device_class attribute pass through and are subject to registry rules.
-  
-  # Examples discovered in tests and code paths
-  - entity_id: sensor.temp
-    type: sensor
-    provide: true
-    rationale: "Example temperature sensor used in tests; include numeric sensors by default"
-    preferred_name: Temperature
+entries: []
+# Device class-based filtering is now implemented in the fetch_sensors function.
+# Safe device classes: temperature, motion, door, battery, occupancy, presence, opening, aqi, energy
+# Sensors with unsafe device classes (e.g., password, payment, etc.) are automatically filtered out.
+# Sensors without a device_class attribute pass through and are subject to registry rules.
 
-  - entity_id: sensor.a
-    type: sensor
-    provide: true
-    rationale: "Test fixture: boolean-like values expected to normalize to True/False"
+# Example registry entries (commented-out for documentation; copy into `entries` when ready)
+#
+# - entity_id: sensor.temp
+#   type: sensor
+#   provide: true
+#   rationale: "Example temperature sensor used in tests; include numeric sensors by default"
+#   preferred_name: Temperature
+#
+# - entity_id: sensor.a
+#   type: sensor
+#   provide: true
+#   rationale: "Test fixture: boolean-like values expected to normalize to True/False"
+#
+# - entity_id: sensor.b
+#   type: sensor
+#   provide: true
+#   rationale: "Test fixture: included in selected sensors tests"
+#
+# - entity_id: sensor.c
+#   type: sensor
+#   provide: true
+#   rationale: "Test fixture: 'true'/'false' string values map to booleans"
+#
+# - entity_id: sensor.d
+#   type: sensor
+#   provide: true
+#   rationale: "Test fixture: 'false' string value"
+#
+# - entity_id: sensor.e
+#   type: sensor
+#   provide: true
+#   rationale: "Test fixture: floating point value"
+#
+# - entity_id: sensor.f
+#   type: sensor
+#   provide: true
+#   rationale: "Test fixture: integer value"
+#
+# - entity_id: sensor.x
+#   type: sensor
+#   provide: true
+#   rationale: "Used by sensors/set handler tests"
+#
+# - entity_id: sensor.y
+#   type: sensor
+#   provide: true
+#   rationale: "Used by sensors/set handler tests"
 
-  - entity_id: sensor.b
-    type: sensor
-    provide: true
-    rationale: "Test fixture: included in selected sensors tests"
+# Device class based filtering examples
+# Note: device_class filtering is implemented in fetch_sensors code.
+# The following entries document the expected behavior:
+# - entity_id: sensor.*
+#   type: sensor
+#   provide: true
+#   attributes:
+#     device_class: motion
+#   rationale: "Include motion sensors based on device_class attribute"
 
-  - entity_id: sensor.c
-    type: sensor
-    provide: true
-    rationale: "Test fixture: 'true'/'false' string values map to booleans"
+# - entity_id: binary_sensor.*
+#   type: binary_sensor
+#   provide: true
+#   attributes:
+#     device_class: door
+#   rationale: "Include door sensors based on device_class attribute"
 
-  - entity_id: sensor.d
-    type: sensor
-    provide: true
-    rationale: "Test fixture: 'false' string value"
-
-  - entity_id: sensor.e
-    type: sensor
-    provide: true
-    rationale: "Test fixture: floating point value"
-
-  - entity_id: sensor.f
-    type: sensor
-    provide: true
-    rationale: "Test fixture: integer value"
-
-  - entity_id: sensor.x
-    type: sensor
-    provide: true
-    rationale: "Used by sensors/set handler tests"
-
-  - entity_id: sensor.y
-    type: sensor
-    provide: true
-    rationale: "Used by sensors/set handler tests"
-
-  # Device class based filtering examples
-  # Note: device_class filtering is implemented in fetch_sensors code.
-  # The following entries document the expected behavior:
-  - entity_id: sensor.*
-    type: sensor
-    provide: true
-    attributes:
-      device_class: motion
-    rationale: "Include motion sensors based on device_class attribute"
-
-  - entity_id: binary_sensor.*
-    type: binary_sensor
-    provide: true
-    attributes:
-      device_class: door
-    rationale: "Include door sensors based on device_class attribute"
-
-  - entity_id: binary_sensor.*
-    type: binary_sensor
-    provide: true
-    attributes:
-      device_class: presence
-    rationale: "Include presence sensors based on device_class attribute"
+# - entity_id: binary_sensor.*
+#   type: binary_sensor
+#   provide: true
+#   attributes:
+#     device_class: presence
+#   rationale: "Include presence sensors based on device_class attribute"
 
 # How to use
 # - Update entries to reflect real entity_ids your Home Assistant exposes.

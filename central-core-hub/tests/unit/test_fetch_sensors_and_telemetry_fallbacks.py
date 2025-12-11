@@ -43,9 +43,15 @@ def test_fetch_sensors_parses_entities(monkeypatch, tmp_path):
                 {
                     "entity_id": "sensor.x",
                     "state": "12",
-                    "attributes": {"friendly_name": "X", "extra": 1, "device_class": "temperature"},
+                    # No device_class attribute to ensure sensors without metadata still pass the filter.
+                    "attributes": {"friendly_name": "X", "extra": 1},
                 },
-                {"entity_id": "binary_sensor.y", "state": "on", "attributes": {"device_class": "motion"}},
+                {
+                    "entity_id": "binary_sensor.y",
+                    "state": "on",
+                    # Explicitly omit device_class to cover the binary_sensor fallback path as well.
+                    "attributes": {"friendly_name": "Y"},
+                },
             ]
 
     class RClient:
