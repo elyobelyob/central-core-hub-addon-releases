@@ -159,7 +159,7 @@ def test_fetch_sensors_parses_http_response(monkeypatch):
                 {
                     "entity_id": "sensor.a",
                     "state": "1",
-                    "attributes": {"friendly_name": "A"},
+                    "attributes": {"friendly_name": "A", "device_class": "motion"},
                 },
                 {"entity_id": "light.b", "state": "on"},
             ]
