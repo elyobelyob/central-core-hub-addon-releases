@@ -17,7 +17,7 @@ import typing
 # Safe device classes allowed for sensor inclusion.
 # Sensors with device_class values in this set are considered safe for telemetry.
 # Sensors with device_class values NOT in this set are filtered out.
-# Sensors without a device_class attribute pass through (subject to registry filtering).
+# Sensors without a device_class attribute are excluded.
 SAFE_DEVICE_CLASSES = {
     "temperature", "motion", "door", "battery",
     "occupancy", "presence", "opening", "aqi", "energy"
@@ -28,7 +28,7 @@ SAFE_DEVICE_CLASSES = {
 OPTIONS_PATH = "/data/options.json"
 
 # Allowed device classes for sensor filtering. Sensors with these device_class
-# values or no device_class attribute will be included.
+# values are included; sensors missing a device_class are excluded.
 ALLOWED_DEVICE_CLASSES = ('motion', 'door', 'presence')
 
 # In-memory cache for the discovered Home Assistant version. Store a
@@ -115,11 +115,17 @@ def fetch_sensors(ha_api_url, ha_api_token, requests_mod=None):
             ent_id = ent.get("entity_id")
             # Include both sensor.* and binary_sensor.* entities
             if ent_id and (ent_id.startswith("sensor.") or ent_id.startswith("binary_sensor.")):
-                # Check device_class attribute if present
+                # Require device_class and include only when allowed
                 attrs = ent.get("attributes", {})
-                device_class = attrs.get("device_class")
-                # Include sensors with allowed device_class or no device_class
-                if device_class is None or device_class in ALLOWED_DEVICE_CLASSES:
+                raw_device_class = attrs.get("device_class")
+                device_class = None
+                if raw_device_class is not None:
+                    try:
+                        device_class = str(raw_device_class).strip()
+                    except Exception:
+                        device_class = None
+
+                if device_class and device_class in ALLOWED_DEVICE_CLASSES:
                     sensors.append(
                         {
                             "entity_id": ent_id,
