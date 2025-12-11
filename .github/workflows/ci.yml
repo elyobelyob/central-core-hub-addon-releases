@@ -56,9 +56,12 @@ jobs:
           pytest -q --cov=central-core-hub --cov-report=xml:coverage.xml --cov-report=term-missing
 
       - name: Upload coverage to Codecov (optional)
-        if: github.event.repository.private == false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        if: env.CODECOV_TOKEN != ''
         uses: codecov/codecov-action@v4
         with:
+          token: ${{ env.CODECOV_TOKEN }}
           files: central-core-hub/coverage.xml
           flags: unittests
           fail_ci_if_error: false
