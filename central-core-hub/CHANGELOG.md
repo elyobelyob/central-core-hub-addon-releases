@@ -1,10 +1,8 @@
 # Changelog
 
-## [1.1.69] - 2025-12-11
+## [1.1.70] - 2025-12-11
 
-- ci: fix release/ci workflows (docker login action, build args output) and remove invalid secret references
-- chore: clear SENSOR_REGISTRY placeholders while keeping examples commented
-- fix(mqtt/tests): align device-class filtering and fixtures; full suite passing
+- ci: guard Codecov upload for public repos and point to central-core-hub/coverage.xml
 
 ## [1.1.58] - 2025-12-07
 
