@@ -24,6 +24,17 @@ import typing
 from datetime import datetime, timezone
 from typing import cast
 
+# Import safe device classes from ha_client to avoid duplication
+try:
+    import ha_client as _ha_module
+    SAFE_DEVICE_CLASSES = _ha_module.SAFE_DEVICE_CLASSES
+except (ImportError, ModuleNotFoundError, AttributeError):
+    # Fallback if import fails or module doesn't have the constant
+    SAFE_DEVICE_CLASSES = {
+        "temperature", "motion", "door", "battery",
+        "occupancy", "presence", "opening", "aqi", "energy"
+    }
+
 # Outbox configuration: persistent file location and maximum queued items.
 # Default file is under the add-on data directory so it survives upgrades.
 OUTBOX_FILE = pathlib.Path(os.environ.get("MQTT_OUTBOX_FILE") or "/data/outbox.jsonl")

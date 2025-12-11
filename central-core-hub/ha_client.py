@@ -14,6 +14,15 @@ import traceback
 import typing
 # datetime/timezone not used in this module
 
+# Safe device classes allowed for sensor inclusion.
+# Sensors with device_class values in this set are considered safe for telemetry.
+# Sensors with device_class values NOT in this set are filtered out.
+# Sensors without a device_class attribute pass through (subject to registry filtering).
+SAFE_DEVICE_CLASSES = {
+    "temperature", "motion", "door", "battery",
+    "occupancy", "presence", "opening", "aqi", "energy"
+}
+
 # Path to the add-on options file. Tests can monkeypatch this variable to
 # redirect writes to a temporary location.
 OPTIONS_PATH = "/data/options.json"
