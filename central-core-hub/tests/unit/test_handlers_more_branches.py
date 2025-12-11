@@ -41,7 +41,7 @@ def test_poll_data_type_parsing(monkeypatch):
         {"entity_id": "sensor.float", "state": "3.14", "attributes": {}},
         {"entity_id": "sensor.text", "state": "n/a", "attributes": {}},
     ]
-    monkeypatch.setattr(mc, "fetch_sensors", lambda url, token: sample)
+    monkeypatch.setattr(mc, "fetch_sensors", lambda url, token, safe_classes=None: sample)
 
     options = {
         "client_id": "unit-hub",
@@ -76,7 +76,7 @@ def test_on_message_binary_payload_and_set_no_ha_config(monkeypatch):
     monkeypatch.setattr(
         mc,
         "fetch_sensors",
-        lambda url, token: [{"entity_id": "sensor.x", "state": "1", "attributes": {}}],
+        lambda url, token, safe_classes=None: [{"entity_id": "sensor.x", "state": "1", "attributes": {}}],
     )
 
     options = {"client_id": "unit-hub"}  # no HA config

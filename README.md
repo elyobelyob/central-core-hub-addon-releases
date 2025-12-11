@@ -117,9 +117,18 @@ The add-on subscribes to Vault-style command topics and supports the following c
 
 - **ha_api_url**: Base URL of the Home Assistant instance (e.g. `http://homeassistant.local:8123`).
 - **ha_api_token**: Long-Lived Access Token to call the REST API (`POST`/`GET` on `/api/states`).
+- **safe_device_classes**: (Optional) List of device class types that are considered safe for telemetry. Sensors with a `device_class` attribute that is not in this list will be filtered out. Sensors without a `device_class` attribute are allowed through for backward compatibility. Default: `["temperature", "motion", "door", "battery", "occupancy", "presence", "opening", "aqi", "energy"]`.
+
+  Example configuration:
+  ```json
+  {
+    "safe_device_classes": ["temperature", "humidity", "pressure", "battery"]
+  }
+  ```
 
 Security:
 - The add-on uses the provided token to call HA REST endpoints; protect it like any secret.
+- The `safe_device_classes` configuration provides a security layer by filtering which sensor types are included in telemetry based on their `device_class` attribute, preventing potentially sensitive sensor data from being transmitted.
 
 
 ### Vault integration and schema versions

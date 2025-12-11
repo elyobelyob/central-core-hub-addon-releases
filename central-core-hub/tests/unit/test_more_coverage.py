@@ -191,7 +191,7 @@ def test_sensors_poll_with_requested_subset(monkeypatch):
     monkeypatch.setattr(
         m,
         "fetch_sensors",
-        lambda url, token: [
+        lambda url, token, safe_classes=None: [
             {"entity_id": "sensor.a", "state": "on"},
             {"entity_id": "sensor.b", "state": "12"},
             {"entity_id": "sensor.c", "state": "7.5"},
