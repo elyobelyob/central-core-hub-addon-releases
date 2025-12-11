@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.72] - 2025-12-11
+
+- fix(telemetry): honor user-defined telemetry_interval by refreshing options before publish
+- chore: allow options loading to fall back to default path when env override is missing
+
 ## [1.1.71] - 2025-12-11
 
 - feat: exclude sensors missing device_class from telemetry/registry paths
