@@ -27,6 +27,11 @@ registry_mode: deny
 # - `sensor.*_battery`        -> matches sensors ending with _battery
 
 entries:
+  # Device class-based filtering is now implemented in the fetch_sensors function.
+  # Safe device classes: temperature, motion, door, battery, occupancy, presence, opening, aqi, energy
+  # Sensors with unsafe device classes (e.g., password, payment, etc.) are automatically filtered out.
+  # Sensors without a device_class attribute pass through and are subject to registry rules.
+  
   # Examples discovered in tests and code paths
   - entity_id: sensor.temp
     type: sensor

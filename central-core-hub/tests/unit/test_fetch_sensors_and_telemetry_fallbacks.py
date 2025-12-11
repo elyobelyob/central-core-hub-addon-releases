@@ -28,7 +28,7 @@ def test_fetch_sensors_handles_requests_get_exception(monkeypatch):
     assert mc.fetch_sensors("http://ha", "tok") is None
 
 
-def test_fetch_sensors_parses_entities(monkeypatch):
+def test_fetch_sensors_parses_entities(monkeypatch, tmp_path):
     mc = _load_module("mqtt_client.py")
 
     class Resp:
@@ -43,14 +43,21 @@ def test_fetch_sensors_parses_entities(monkeypatch):
                 {
                     "entity_id": "sensor.x",
                     "state": "12",
-                    "attributes": {"friendly_name": "X", "extra": 1},
+                    "attributes": {"friendly_name": "X", "extra": 1, "device_class": "temperature"},
                 },
-                {"entity_id": "binary_sensor.y", "state": "on", "attributes": {}},
+                {"entity_id": "binary_sensor.y", "state": "on", "attributes": {"device_class": "motion"}},
             ]
 
     class RClient:
         def get(self, url, headers=None, timeout=None):
             return Resp()
+
+    # Disable registry to test device_class filtering in isolation
+    import json
+    reg = {"apply_registry": False, "entries": []}
+    p = tmp_path / "reg.yaml"
+    p.write_text(json.dumps(reg))
+    monkeypatch.setattr(mc, "SENSOR_REGISTRY", p)
 
     cast(Any, mc).requests = RClient()
     sensors = mc.fetch_sensors("http://ha", "tok")
