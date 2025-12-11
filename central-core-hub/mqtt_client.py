@@ -1881,6 +1881,15 @@ class CentralCoreClient:
                 "home_assistant": ha_info,
             },
         )
+        # Ensure the emitted telemetry reflects the effective interval even if
+        # an upstream schema defaults to 30s when the field is missing or None.
+        try:
+            if isinstance(payload, str):
+                data = json.loads(payload)
+                data["telemetry_interval"] = self.telemetry_interval
+                payload = json.dumps(data)
+        except Exception:
+            pass
         try:
             _log(f"Telemetry interval (effective): {self.telemetry_interval}")
         except Exception:

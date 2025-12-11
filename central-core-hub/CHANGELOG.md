@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.1.73] - 2025-12-11
+
+- fix(telemetry): force telemetry_interval into published payload to avoid schema defaulting back to 30s
+
 ## [1.1.72] - 2025-12-11
 
 - fix(telemetry): honor user-defined telemetry_interval by refreshing options before publish
