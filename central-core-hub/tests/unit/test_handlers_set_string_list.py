@@ -54,7 +54,7 @@ def test_set_accepts_string_list_and_publishes_reminder(monkeypatch):
     monkeypatch.setattr(
         mc,
         "fetch_sensors",
-        lambda url, token: [
+        lambda url, token, safe_classes=None: [
             {
                 "entity_id": "sensor.sun_next_dawn",
                 "state": "2025-12-01T01:23:45Z",

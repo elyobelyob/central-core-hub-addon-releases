@@ -38,7 +38,7 @@ def test_poll_malformed_payload_no_ack(monkeypatch):
     monkeypatch.setattr(
         mc,
         "fetch_sensors",
-        lambda url, token: [{"entity_id": "sensor.x", "state": "1", "attributes": {}}],
+        lambda url, token, safe_classes=None: [{"entity_id": "sensor.x", "state": "1", "attributes": {}}],
     )
 
     options = {

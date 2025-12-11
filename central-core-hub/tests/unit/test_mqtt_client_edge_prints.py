@@ -68,7 +68,7 @@ def test_publish_sensors_handles_publish_exception(monkeypatch):
     monkeypatch.setattr(
         mc,
         "fetch_sensors",
-        lambda u, t: [{"entity_id": "sensor.z", "state": "1", "name": "z", "attributes": {}}],
+        lambda u, t, s=None: [{"entity_id": "sensor.z", "state": "1", "name": "z", "attributes": {}}],
     )
 
     # make _publish raise to hit exception path in publish_sensors

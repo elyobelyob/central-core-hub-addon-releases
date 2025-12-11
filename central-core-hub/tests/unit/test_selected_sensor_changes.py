@@ -45,7 +45,7 @@ def test_selected_sensor_changes_publish_on_change(monkeypatch):
         },
         {"entity_id": "sensor.c", "state": "99", "attributes": {}},
     ]
-    monkeypatch.setattr(mc, "fetch_sensors", lambda url, token: sensors_first)
+    monkeypatch.setattr(mc, "fetch_sensors", lambda url, token, safe_classes=None: sensors_first)
 
     c.publish_selected_sensor_changes()
     assert len(publishes) == 1
@@ -72,7 +72,7 @@ def test_selected_sensor_changes_publish_on_change(monkeypatch):
             "attributes": {"friendly_name": "B", "disabled_by": None},
         },
     ]
-    monkeypatch.setattr(mc, "fetch_sensors", lambda url, token: sensors_second)
+    monkeypatch.setattr(mc, "fetch_sensors", lambda url, token, safe_classes=None: sensors_second)
     c.publish_selected_sensor_changes()
     assert len(publishes) == 2
     payload2 = publishes[-1]["payload"]
