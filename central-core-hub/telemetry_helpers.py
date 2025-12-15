@@ -5,10 +5,19 @@ from datetime import datetime, timezone
 
 
 def attach_ha_timestamps(attrs, sensor):
-    if sensor.get("last_changed") is not None:
-        attrs["last_changed"] = sensor.get("last_changed")
-    if sensor.get("last_updated") is not None:
-        attrs["last_updated"] = sensor.get("last_updated")
+    """Attach Home Assistant timestamps to attributes, normalizing format."""
+    lc = sensor.get("last_changed")
+    if lc is not None:
+        # Normalize HA timestamps to match add-on format
+        if isinstance(lc, str):
+            lc = lc.replace("+00:00", "Z")
+        attrs["last_changed"] = lc
+    lu = sensor.get("last_updated")
+    if lu is not None:
+        # Normalize HA timestamps to match add-on format
+        if isinstance(lu, str):
+            lu = lu.replace("+00:00", "Z")
+        attrs["last_updated"] = lu
     return attrs
 
 
