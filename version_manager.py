@@ -146,12 +146,13 @@ class VersionManager:
             if range_ref:
                 out = subprocess.check_output(["git", "log", "--pretty=format:%s", range_ref], cwd=self.repo_root)
                 lines = out.decode("utf-8").strip().splitlines()
-                if lines and lines != [""]:
-                    return [f"- {line}" for line in lines]
+                # Return found lines (even if empty, do not fallback)
+                return [f"- {line}" for line in lines if line]
         except Exception:
             pass
 
         try:
+            # Fallback only if no prev_tag matched or git failed
             out = subprocess.check_output(["git", "log", "--pretty=format:%s", "-n", "20", "HEAD"], cwd=self.repo_root)
             lines = out.decode("utf-8").strip().splitlines()
             return [f"- {line}" for line in lines if line]
