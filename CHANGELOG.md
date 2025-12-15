@@ -1,5 +1,9 @@
 # Changelog
 
+## [2.0.3] - 2025-12-15
+
+- chore(release): bump version to 2.0.3
+
 ## [2.0.2] - 2025-12-15
 
 - fix(versioning): correct changelog generation logic and regenerate 2.0.1/1.1.77 entries; restore mqtt_trigger_update.py
