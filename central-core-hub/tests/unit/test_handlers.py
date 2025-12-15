@@ -43,11 +43,12 @@ class DummyClient:
     def _publish(self, topic, payload, qos=0):
         self.published.append({"topic": topic, "payload": payload, "qos": qos})
 
-    def trigger_addon_update(self):
+    def trigger_addon_update(self, version=None):
         return {
             "success": True,
             "check": {"domain": "supervisor"},
             "update": {"domain": "supervisor"},
+            "version": version or "latest",
         }
 
 

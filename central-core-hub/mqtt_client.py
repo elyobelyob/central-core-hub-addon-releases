@@ -27,6 +27,7 @@ from typing import cast
 # Import safe device classes from ha_client when available so defaults stay aligned.
 try:
     import ha_client as _ha_module
+
     _default_safe_classes = getattr(_ha_module, "ALLOWED_DEVICE_CLASSES", None)
     if _default_safe_classes is None:
         _default_safe_classes = ("motion", "door", "presence")
@@ -34,7 +35,9 @@ except (ImportError, ModuleNotFoundError, AttributeError):
     _default_safe_classes = ("motion", "door", "presence")
 
 # Preserve a list version for configuration defaults (unique and sorted for determinism)
-DEFAULT_SAFE_DEVICE_CLASSES = sorted({str(cls).strip() for cls in _default_safe_classes if cls is not None and str(cls).strip()})
+DEFAULT_SAFE_DEVICE_CLASSES = sorted(
+    {str(cls).strip() for cls in _default_safe_classes if cls is not None and str(cls).strip()}
+)
 
 # Outbox configuration: persistent file location and maximum queued items.
 # Default file is under the add-on data directory so it survives upgrades.
@@ -789,7 +792,7 @@ def fetch_sensors(ha_api_url, ha_api_token, safe_device_classes=None):
     # fetch_sensors historically included an internal registry loader. For
     # the larger change set we expose lightweight helpers so other publish
     # paths can ask whether an entity should be published.
-    
+
     # Resolve the configured safe device classes. Accept lists/tuples/sets; any
     # other type falls back to the baked-in defaults. Empty collections signal
     # "allow all device classes".
@@ -1527,7 +1530,16 @@ class CentralCoreClient:
         self._addon_slug = slug
         return slug
 
-    def trigger_addon_update(self):
+    def trigger_addon_update(self, version=None):
+        """Trigger add-on update to a specific version or latest.
+
+        Args:
+            version: Optional version string (e.g., "1.1.74").
+                    If None or "latest", updates to the latest available version.
+
+        Returns:
+            dict with success status, check result, and update result
+        """
         slug = self._resolve_addon_slug()
         if not slug:
             return {"success": False, "reason": "addon_slug_missing"}
@@ -1543,13 +1555,18 @@ class CentralCoreClient:
                 check_result = {"domain": domain, "result": res}
                 break
 
+        # Build update service data
+        update_data = {"addon": slug}
+        if version and version.lower() != "latest":
+            update_data["version"] = version
+
         update_domains = (
             ("supervisor", "addon_update"),
             ("hassio", "addon_update"),
         )
         update_result = None
         for domain, service in update_domains:
-            res = self._call_ha_service(domain, service, {"addon": slug})
+            res = self._call_ha_service(domain, service, update_data)
             if res is not None:
                 update_result = {"domain": domain, "result": res}
                 break
@@ -1558,6 +1575,7 @@ class CentralCoreClient:
             "success": update_result is not None,
             "check": check_result,
             "update": update_result,
+            "version": version or "latest",
         }
 
     def on_connect(self, client, userdata, *args, **kwargs):

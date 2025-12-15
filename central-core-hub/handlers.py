@@ -74,7 +74,16 @@ def handle_message(
                     pass
             upd_result = {}
             try:
-                upd_result = client.trigger_addon_update() or {}
+                # Extract version from payload if provided
+                version = None
+                try:
+                    payload_obj = cmd.get("payload") if isinstance(cmd, dict) else None
+                    if isinstance(payload_obj, dict):
+                        version = payload_obj.get("version")
+                except Exception:
+                    version = None
+
+                upd_result = client.trigger_addon_update(version=version) or {}
             except Exception:
                 upd_result = {"success": False, "error": "trigger_failed"}
 
@@ -426,8 +435,8 @@ def handle_message(
                                         "selected": list(s),
                                         "sensors_reported": list(mt.get("data", {}).keys()),
                                         "count": len(mt.get("data", {})),
-                                                "data": mt.get("data", {}),
-                                                "raw": mt.get("raw", {}),
+                                        "data": mt.get("data", {}),
+                                        "raw": mt.get("raw", {}),
                                         "names": mt.get("names", {}),
                                         "enabled": mt.get("enabled", {}),
                                         "attributes": mt.get("attributes", {}),
