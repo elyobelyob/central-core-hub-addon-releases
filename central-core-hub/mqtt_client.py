@@ -483,29 +483,29 @@ def is_entity_allowed(entity_id: str) -> bool:
 
 
 def get_addon_version():
-    """Get the add-on version from config.json."""
+    """Get the add-on version from config.json or metadata file."""
     # Allow an explicit override via environment variable. This is useful
     # for containers, CI, or test harnesses where the runtime-installed
     # `/config.json` may be out of date or intentionally different.
     env_v = os.environ.get("ADDON_VERSION")
     if env_v:
         return env_v
-    # Check add-on options (Home Assistant mounts `/data/options.json`).
-    # Some add-on installers surface the installed version in the add-on
-    # options or allow an `addon_version` field to be set; prefer that
-    # when present so the value matches what is shown on the Add-on UI.
+
+    # Check add-on metadata file (written by run.sh on startup)
     try:
-        if os.path.exists(OPTIONS_PATH):
-            with open(OPTIONS_PATH, "r") as f:
+        metadata_path = "/data/.addon_metadata.json"
+        if os.path.exists(metadata_path):
+            with open(metadata_path, "r") as f:
                 try:
-                    opts = json.load(f) or {}
-                    ver = opts.get("addon_version") or opts.get("version")
+                    metadata = json.load(f) or {}
+                    ver = metadata.get("addon_version")
                     if ver:
                         return ver
                 except Exception:
                     pass
     except Exception:
         pass
+
     # Try HA add-on location first
     try:
         with open("/config.json", "r") as f:

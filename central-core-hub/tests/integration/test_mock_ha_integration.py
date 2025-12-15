@@ -54,7 +54,6 @@ class MockHAHandler(BaseHTTPRequestHandler):
         return
 
 
-@pytest.mark.skipif(os.environ.get("RUN_INTEGRATION_TESTS") is None, reason="Integration tests disabled")
 def test_set_and_readback_with_mock_ha():
     """Integration-style test: start a mock HA HTTP server and exercise sensors/set flow."""
     mod = _load_client_module()
