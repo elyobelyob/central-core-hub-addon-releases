@@ -181,6 +181,9 @@ def handle_message(
                 obs = None
                 try:
                     obs = s.get("last_changed") or s.get("last_updated")
+                    # Normalize HA timestamps to match add-on format
+                    if obs and isinstance(obs, str):
+                        obs = obs.replace("+00:00", "Z")
                 except Exception:
                     obs = None
                 if not obs:
@@ -336,6 +339,9 @@ def handle_message(
                                 obs = None
                                 try:
                                     obs = si.get("last_changed") or si.get("last_updated")
+                                    # Normalize HA timestamps to match add-on format
+                                    if obs and isinstance(obs, str):
+                                        obs = obs.replace("+00:00", "Z")
                                 except Exception:
                                     obs = None
                                 if not obs:
@@ -479,6 +485,9 @@ def handle_message(
                                 # prefer HA-provided timestamps if available
                                 try:
                                     obs = data.get("last_changed") or data.get("last_updated")
+                                    # Normalize HA timestamps to match add-on format
+                                    if obs and isinstance(obs, str):
+                                        obs = obs.replace("+00:00", "Z")
                                 except Exception:
                                     obs = None
                                 if not obs:
