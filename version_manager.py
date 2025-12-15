@@ -325,7 +325,7 @@ class VersionManager:
                     # if no previous tag found, leave previous as None so we fallback to recent commits
                     previous = None
 
-                commits = self._git_commits_between(prev_tag=previous, new_tag=new_version)
+                commits = self._git_commits_between(prev_tag=previous)
                 # pass the previous tag string (empty or real) and commits to update_changelogs
                 self.update_changelogs(previous or "", new_version, commits=commits)
             except Exception as exc:  # pragma: no cover - best-effort
