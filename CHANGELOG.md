@@ -1,5 +1,51 @@
 # Changelog
 
+## [1.1.77] - 2025-12-15
+
+- fix(versioning): correct changelog generation and update 1.1.76 notes
+- Bump version to 1.1.76
+- fix: Store addon version in metadata file instead of options.json
+- Bump version to 1.1.75
+- Add version-targeted remote add-on upgrade via MQTT
+- Add timestamp normalization, 100% test coverage, and bump to v1.1.74
+- test: align sensor fixtures with device_class filtering
+- fix(telemetry): enforce telemetry_interval; bump 1.1.73
+- chore(release): bump version to 1.1.72
+- chore(release): bump to 1.1.71
+- ci: codecov token guard
+- chore(release): bump to 1.1.70
+- ci: guard codecov upload
+- chore(release): bump to 1.1.69
+- Merge pull request #8 from elyobelyob/copilot/fix-fetch-sensors-test-issue
+- Merge pull request #7 from elyobelyob/copilot/enhance-safe-device-classes
+- Merge pull request #6 from elyobelyob/copilot/update-sensor-management-logic
+- Initial plan
+- Merge branch 'main' into copilot/enhance-safe-device-classes
+- Fix config schema validation and safe_device_classes handling
+
+### Commits included in this release
+
+- fix(versioning): correct changelog generation and update 1.1.76 notes
+- Bump version to 1.1.76
+- fix: Store addon version in metadata file instead of options.json
+- Bump version to 1.1.75
+- Add version-targeted remote add-on upgrade via MQTT
+- Add timestamp normalization, 100% test coverage, and bump to v1.1.74
+- test: align sensor fixtures with device_class filtering
+- fix(telemetry): enforce telemetry_interval; bump 1.1.73
+- chore(release): bump version to 1.1.72
+- chore(release): bump to 1.1.71
+- ci: codecov token guard
+- chore(release): bump to 1.1.70
+- ci: guard codecov upload
+- chore(release): bump to 1.1.69
+- Merge pull request #8 from elyobelyob/copilot/fix-fetch-sensors-test-issue
+- Merge pull request #7 from elyobelyob/copilot/enhance-safe-device-classes
+- Merge pull request #6 from elyobelyob/copilot/update-sensor-management-logic
+- Initial plan
+- Merge branch 'main' into copilot/enhance-safe-device-classes
+- Fix config schema validation and safe_device_classes handling
+
 ## [1.1.76] - 2025-12-15
 
 - Bump version to 1.1.76
