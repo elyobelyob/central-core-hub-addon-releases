@@ -1,5 +1,9 @@
 # Changelog
 
+## [2.0.6] - 2025-12-15
+
+- chore(release): bump version to 2.0.6
+
 ## [2.0.5] - 2025-12-15
 
 - fix(tests): resolve remaining telemetry fallback test failures

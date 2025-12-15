@@ -160,12 +160,23 @@ def test_telemetry_cpu_and_vault(monkeypatch):
     )
     # Also ensure _get_cpu_percent returns None when helpers absent
     # Temporarily remove helpers if present
+    # Temporarily remove helpers if present
     old_helpers = sys.modules.get("helpers")
     sys.modules["helpers"] = None
+    
+    # Also ensure no mqtt_client module is found that might have get_cpu_percent
+    old_mqtt_client = sys.modules.get("mqtt_client")
+    sys.modules["mqtt_client"] = None
+    
     try:
         val = tele._get_cpu_percent()
         assert val is None
     finally:
+        if old_mqtt_client is not None:
+             sys.modules["mqtt_client"] = old_mqtt_client
+        else:
+             sys.modules.pop("mqtt_client", None)
+             
         if old_helpers is not None:
             sys.modules["helpers"] = old_helpers
 
