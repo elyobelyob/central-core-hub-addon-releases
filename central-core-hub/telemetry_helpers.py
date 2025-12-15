@@ -3,7 +3,6 @@ import json
 from datetime import datetime, timezone
 
 
-
 def attach_ha_timestamps(attrs, sensor):
     """Attach Home Assistant timestamps to attributes, normalizing format."""
     lc = sensor.get("last_changed")

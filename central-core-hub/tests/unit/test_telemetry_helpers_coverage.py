@@ -1,4 +1,5 @@
 """Test suite for telemetry_helpers.py to achieve 100% coverage."""
+
 import sys
 from pathlib import Path
 
@@ -16,7 +17,7 @@ def test_attach_ha_timestamps_with_plus_timezone():
     }
     attrs = {}
     result = telemetry_helpers.attach_ha_timestamps(attrs, sensor)
-    
+
     assert result["last_changed"] == "2025-01-01T00:00:00Z"
     assert result["last_updated"] == "2025-01-01T00:00:01Z"
 
@@ -29,7 +30,7 @@ def test_attach_ha_timestamps_with_z_format():
     }
     attrs = {}
     result = telemetry_helpers.attach_ha_timestamps(attrs, sensor)
-    
+
     assert result["last_changed"] == "2025-01-01T00:00:00Z"
     assert result["last_updated"] == "2025-01-01T00:00:01Z"
 
@@ -42,7 +43,7 @@ def test_attach_ha_timestamps_with_none_values():
     }
     attrs = {}
     result = telemetry_helpers.attach_ha_timestamps(attrs, sensor)
-    
+
     # When timestamps are None, they should not be added to attrs
     assert "last_changed" not in result
     assert "last_updated" not in result
@@ -53,7 +54,7 @@ def test_attach_ha_timestamps_missing_keys():
     sensor = {}
     attrs = {}
     result = telemetry_helpers.attach_ha_timestamps(attrs, sensor)
-    
+
     assert "last_changed" not in result
     assert "last_updated" not in result
 
@@ -65,7 +66,7 @@ def test_attach_ha_timestamps_only_last_changed():
     }
     attrs = {}
     result = telemetry_helpers.attach_ha_timestamps(attrs, sensor)
-    
+
     assert result["last_changed"] == "2025-01-01T00:00:00Z"
     assert "last_updated" not in result
 
@@ -77,7 +78,7 @@ def test_attach_ha_timestamps_only_last_updated():
     }
     attrs = {}
     result = telemetry_helpers.attach_ha_timestamps(attrs, sensor)
-    
+
     assert "last_changed" not in result
     assert result["last_updated"] == "2025-01-01T00:00:01Z"
 
@@ -90,7 +91,7 @@ def test_attach_ha_timestamps_non_string_values():
     }
     attrs = {}
     result = telemetry_helpers.attach_ha_timestamps(attrs, sensor)
-    
+
     # Non-string values should be added as-is
     assert result["last_changed"] == 12345
     assert result["last_updated"] == 67890
@@ -118,9 +119,9 @@ def test_build_sensor_maps_basic():
             "last_updated": "2025-01-01T00:00:01+00:00",
         },
     ]
-    
+
     data_map, names_map, enabled_map, attrs_map = telemetry_helpers.build_sensor_maps(sensors)
-    
+
     assert data_map["sensor.temp"] == "22.5"
     assert data_map["sensor.humidity"] == "55"
     assert names_map["sensor.temp"] == "Temperature"
@@ -143,9 +144,9 @@ def test_build_sensor_maps_disabled_sensor():
             },
         },
     ]
-    
+
     data_map, names_map, enabled_map, attrs_map = telemetry_helpers.build_sensor_maps(sensors)
-    
+
     assert enabled_map["sensor.disabled"] is False
 
 
@@ -157,9 +158,9 @@ def test_build_sensor_maps_no_entity_id():
             "attributes": {"friendly_name": "No ID"},
         },
     ]
-    
+
     data_map, names_map, enabled_map, attrs_map = telemetry_helpers.build_sensor_maps(sensors)
-    
+
     # Sensor without entity_id should be skipped
     assert len(data_map) == 0
 
@@ -173,9 +174,9 @@ def test_build_sensor_maps_empty_entity_id():
             "attributes": {"friendly_name": "Empty ID"},
         },
     ]
-    
+
     data_map, names_map, enabled_map, attrs_map = telemetry_helpers.build_sensor_maps(sensors)
-    
+
     # Sensor with empty entity_id should be skipped
     assert len(data_map) == 0
 
@@ -189,9 +190,9 @@ def test_build_sensor_maps_none_attributes():
             "attributes": None,
         },
     ]
-    
+
     data_map, names_map, enabled_map, attrs_map = telemetry_helpers.build_sensor_maps(sensors)
-    
+
     assert data_map["sensor.test"] == "value"
     # None attributes should be converted to empty dict
     assert attrs_map["sensor.test"] == {}
@@ -205,9 +206,9 @@ def test_build_sensor_maps_missing_attributes():
             "state": "value",
         },
     ]
-    
+
     data_map, names_map, enabled_map, attrs_map = telemetry_helpers.build_sensor_maps(sensors)
-    
+
     assert data_map["sensor.test"] == "value"
     assert attrs_map["sensor.test"] == {}
 
@@ -227,9 +228,9 @@ def test_build_sensor_maps_name_fallbacks():
             "attributes": {},
         },
     ]
-    
+
     data_map, names_map, enabled_map, attrs_map = telemetry_helpers.build_sensor_maps(sensors)
-    
+
     # Should fall back to "name" field
     assert names_map["sensor.no_friendly"] == "Name Field"
     # Should fall back to entity_id
@@ -247,9 +248,9 @@ def test_build_sensor_maps_timestamps_normalized():
             "last_updated": "2025-01-01T00:00:01+00:00",
         },
     ]
-    
+
     data_map, names_map, enabled_map, attrs_map = telemetry_helpers.build_sensor_maps(sensors)
-    
+
     assert attrs_map["sensor.test"]["last_changed"] == "2025-01-01T00:00:00Z"
     assert attrs_map["sensor.test"]["last_updated"] == "2025-01-01T00:00:01Z"
 
@@ -257,17 +258,17 @@ def test_build_sensor_maps_timestamps_normalized():
 def test_build_sensor_event_payload():
     """Test building a sensor event payload."""
     import json
-    
+
     entity_id = "sensor.temp"
     attrs = {
         "friendly_name": "Temperature",
         "unit": "°C",
     }
     state_value = "22.5"
-    
+
     payload_json = telemetry_helpers.build_sensor_event_payload(entity_id, attrs, state_value)
     payload = json.loads(payload_json)
-    
+
     assert payload["data"][entity_id] == state_value
     assert payload["names"][entity_id] == "Temperature"
     assert payload["enabled"][entity_id] is True
@@ -281,30 +282,30 @@ def test_build_sensor_event_payload():
 def test_build_sensor_event_payload_disabled_sensor():
     """Test event payload for a disabled sensor."""
     import json
-    
+
     entity_id = "sensor.disabled"
     attrs = {
         "friendly_name": "Disabled Sensor",
         "disabled_by": "user",
     }
     state_value = "value"
-    
+
     payload_json = telemetry_helpers.build_sensor_event_payload(entity_id, attrs, state_value)
     payload = json.loads(payload_json)
-    
+
     assert payload["enabled"][entity_id] is False
 
 
 def test_build_sensor_event_payload_no_friendly_name():
     """Test event payload when friendly_name is missing."""
     import json
-    
+
     entity_id = "sensor.test"
     attrs = {}
     state_value = "value"
-    
+
     payload_json = telemetry_helpers.build_sensor_event_payload(entity_id, attrs, state_value)
     payload = json.loads(payload_json)
-    
+
     # Should fall back to entity_id
     assert payload["names"][entity_id] == entity_id
