@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.0.4] - 2025-12-15
+
+- fix(tests): resolve integration and telemetry test failures
+- fix(tests): remove unused imports in integration test
+
+### Commits included in this release
+
+- fix(tests): resolve integration and telemetry test failures
+- fix(tests): remove unused imports in integration test
+
 ## [2.0.3] - 2025-12-15
 
 - chore(release): bump version to 2.0.3
