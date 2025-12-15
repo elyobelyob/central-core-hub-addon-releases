@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.5] - 2025-12-15
+
+- fix(tests): resolve remaining telemetry fallback test failures
+
+### Commits included in this release
+
+- fix(tests): resolve remaining telemetry fallback test failures
+
 ## [2.0.4] - 2025-12-15
 
 - fix(tests): resolve integration and telemetry test failures
