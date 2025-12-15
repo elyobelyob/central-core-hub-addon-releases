@@ -1,11 +1,8 @@
 import json
-import os
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 import importlib.util
-
-import pytest
 
 
 def _load_client_module():
