@@ -942,8 +942,13 @@ class CentralCoreClient:
         # Handle certificate content vs paths
         self._setup_cert_files()
         self.client_id = options.get("client_id") or socket.gethostname().lower().replace(" ", "-")
-        self.ha_api_url = options.get("ha_api_url") or ""
-        self.ha_api_token = options.get("ha_api_token") or ""
+        
+        # Try options first, then environment variables (standard HA add-on pattern)
+        # The Supervisor proxies HA Core API at http://supervisor/core
+        self.ha_api_token = options.get("ha_api_token") or os.environ.get("SUPERVISOR_TOKEN") or ""
+        
+        default_url = "http://supervisor/core" if self.ha_api_token else ""
+        self.ha_api_url = options.get("ha_api_url") or os.environ.get("HA_API_URL") or default_url
         # Load safe device classes from options, with defaults
         configured_safe = options.get("safe_device_classes")
         if isinstance(configured_safe, list):
