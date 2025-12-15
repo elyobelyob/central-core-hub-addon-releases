@@ -55,7 +55,16 @@ def test_fallback_mqtt_client_candidate(monkeypatch):
     mod = types.ModuleType("mqtt_client")
     setattr(mod, "get_cpu_percent", lambda: 3.3)
     sys.modules["mqtt_client"] = mod
-    # calling _get_cpu_percent directly should find it
-    val = t._get_cpu_percent()
-    assert val == 3.3
-    del sys.modules["mqtt_client"]
+    
+    old_helpers = sys.modules.get("helpers")
+    sys.modules["helpers"] = None
+    try:
+        # calling _get_cpu_percent directly should find it
+        val = t._get_cpu_percent()
+        assert val == 3.3
+    finally:
+        del sys.modules["mqtt_client"]
+        if old_helpers is not None:
+             sys.modules["helpers"] = old_helpers
+        else:
+             sys.modules.pop("helpers", None)

@@ -35,7 +35,7 @@ def handle_message(
     fetch_sensors,
     build_telemetry,
     build_vault_payload,
-    requests,
+    requests=None,
 ):
     """Handle an incoming MQTT message for Vault-style commands.
 
@@ -46,8 +46,13 @@ def handle_message(
         fetch_sensors: callable to fetch sensors from HA
         build_telemetry: callable to build telemetry payloads
         build_vault_payload: callable to build vault payloads
-        requests: requests module or None
+        requests: requests module or None. If None, attempts to import requests.
     """
+    if requests is None:
+        try:
+            import requests
+        except Exception:
+            requests = None
     try:
         topic = msg.topic
         # Accept recent versioned command topics (v1)
@@ -471,7 +476,7 @@ def handle_message(
             for item in sensors_to_set:
                 ent = item.get("entity_id")
                 st = item.get("state")
-                if not ent:  # pragma: no cover - unreachable via normal JSON input
+                if not ent:
                     continue
                 try:
                     if client.ha_api_url and client.ha_api_token and requests is not None:

@@ -1719,7 +1719,9 @@ class CentralCoreClient:
                         sys.modules[spec_h.name] = _hmod
                     spec_h.loader.exec_module(_hmod)
                     _hm = _hmod.handle_message
-                except Exception:
+                except Exception as e:
+                    _log(f"Failed to import handlers module: {e}", sys.stderr)
+                    traceback.print_exc()
                     _hm = None
 
             if _hm is not None:

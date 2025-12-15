@@ -38,6 +38,9 @@ def test_external_get_cpu_percent_exception_and_sys_module_fallback():
     mod = types.ModuleType("mqtt_client")
     setattr(mod, "get_cpu_percent", lambda: 7)
     sys.modules["mqtt_client"] = mod
+    # ensure helpers doesn't interfere
+    old_helpers = sys.modules.get("helpers")
+    sys.modules["helpers"] = None
     try:
         # external raises, so fallback to mqtt_client.get_cpu_percent should return 7
         assert t._get_cpu_percent() == 7
@@ -49,6 +52,10 @@ def test_external_get_cpu_percent_exception_and_sys_module_fallback():
         # remove our dummy module
         if sys.modules.get("mqtt_client") is mod:
             del sys.modules["mqtt_client"]
+        if old_helpers is not None:
+             sys.modules["helpers"] = old_helpers
+        else:
+             sys.modules.pop("helpers", None)
 
 
 def test_build_telemetry_get_cpu_callable_raises_uses_fallback():
@@ -61,6 +68,8 @@ def test_build_telemetry_get_cpu_callable_raises_uses_fallback():
     mod = types.ModuleType("mqtt_client")
     setattr(mod, "get_cpu_percent", lambda: 5)
     sys.modules["mqtt_client"] = mod
+    old_helpers = sys.modules.get("helpers")
+    sys.modules["helpers"] = None
     try:
 
         def raiseer():
@@ -72,6 +81,10 @@ def test_build_telemetry_get_cpu_callable_raises_uses_fallback():
     finally:
         if sys.modules.get("mqtt_client") is mod:
             del sys.modules["mqtt_client"]
+        if old_helpers is not None:
+             sys.modules["helpers"] = old_helpers
+        else:
+             sys.modules.pop("helpers", None)
 
 
 def test_build_telemetry_socket_connect_fails_results_in_unknown_ip():
