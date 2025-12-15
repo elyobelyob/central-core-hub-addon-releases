@@ -160,7 +160,8 @@ def test_telemetry_cpu_and_vault(monkeypatch):
     )
     # Also ensure _get_cpu_percent returns None when helpers absent
     # Temporarily remove helpers if present
-    old_helpers = sys.modules.pop("helpers", None)
+    old_helpers = sys.modules.get("helpers")
+    sys.modules["helpers"] = None
     try:
         val = tele._get_cpu_percent()
         assert val is None

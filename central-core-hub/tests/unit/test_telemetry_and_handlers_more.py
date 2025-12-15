@@ -2,6 +2,7 @@ import importlib.util
 from pathlib import Path
 import types
 import json
+import sys
 from typing import Any, cast
 
 
@@ -35,13 +36,15 @@ def test__get_cpu_percent_uses_helpers_if_present(monkeypatch):
     # create fake helpers module
     fake_helpers = types.ModuleType("helpers")
     cast(Any, fake_helpers).get_cpu_percent = lambda: 7.7
-    import sys
-
+    old_helpers = sys.modules.get("helpers")
     sys.modules["helpers"] = fake_helpers
     try:
         assert tele._get_cpu_percent() == 7.7
     finally:
-        del sys.modules["helpers"]
+        if old_helpers is not None and old_helpers is not fake_helpers:
+             sys.modules["helpers"] = old_helpers
+        else:
+             sys.modules.pop("helpers", None)
 
 
 def test_build_telemetry_with_injected_helpers():
