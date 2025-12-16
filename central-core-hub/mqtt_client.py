@@ -1885,11 +1885,16 @@ class CentralCoreClient:
 
         Publishes to `telemetry/<client_id>/sensors` as a JSON object:
         { schema_version: 1, client_id, timestamp, sensors: [...] }
+        
+        Note: This publishes the full list of available sensors to the Vault.
+        The Vault then requests specific sensors via device_class filtering.
+        The SENSOR_REGISTRY still applies as a security layer.
         """
         if not self.ha_api_url or not self.ha_api_token:
             # HA integration not configured
             return
-        sensors = fetch_sensors(self.ha_api_url, self.ha_api_token, self.safe_device_classes)
+        sensors = fetch_sensors(self.ha_api_url, self.ha_api_token) or []
+        # Note: fetch_sensors already applies SENSOR_REGISTRY filtering
         payload = {
             "schema_version": 1,
             "client_id": self.client_id,
@@ -1916,7 +1921,7 @@ class CentralCoreClient:
         # symbol when they intend to bypass network calls.
         if not self.ha_api_url or not self.ha_api_token or requests is None:
             return
-        sensors = fetch_sensors(self.ha_api_url, self.ha_api_token, self.safe_device_classes) or []
+        sensors = fetch_sensors(self.ha_api_url, self.ha_api_token) or []
         selected_set = set(self.selected_sensors)
         filtered = [s for s in sensors if s.get("entity_id") in selected_set and is_entity_allowed(s.get("entity_id"))]
 
