@@ -906,11 +906,13 @@ class CentralCoreClient:
         self.ha_api_url = options.get("ha_api_url") or ""
         self.ha_api_token = options.get("ha_api_token") or ""
         # Load safe device classes from options (vault is authoritative for filtering)
+        # Default to common safe device classes if not configured
         configured_safe = options.get("safe_device_classes")
         if isinstance(configured_safe, list):
-            cleaned_safe = [str(cls).strip() for cls in configured_safe if cls is not None and str(cls).strip()]
+            cleaned_safe = [str(cls).strip().lower() for cls in configured_safe if cls is not None and str(cls).strip()]
         else:
-            cleaned_safe = []
+            # Default safe device classes for initial sensor publish
+            cleaned_safe = ["battery", "door", "motion", "occupancy", "plug", "presence", "window"]
         self.safe_device_classes = cleaned_safe
         # Diagnostic: log whether HA options are present (do not print token)
         try:
@@ -1569,12 +1571,12 @@ class CentralCoreClient:
                         _log(f"Flushed {flushed} messages from outbox")
             except Exception:
                 pass
-            # Publish sensors list immediately on startup/connection
+            # Publish initial sensors with default device_class filtering on connect
             try:
-                self.publish_sensors()
+                self.publish_sensors_with_default_filter()
             except Exception:
-                # do not let sensor publish failures prevent client
-                _log("Failed to publish sensors on connect", sys.stderr)
+                _log("Failed to publish default sensors on connect", sys.stderr)
+            
             # Publish initial telemetry on connection
             try:
                 self.publish_telemetry()
@@ -1879,6 +1881,56 @@ class CentralCoreClient:
                     f"Failed to publish telemetry to vault topic {self.vault_topic}",
                     sys.stderr,
                 )
+
+    def _filter_sensors_by_device_class(self, sensors, device_classes):
+        """Filter sensors by device_class. If device_classes is empty, return all.
+        
+        Args:
+            sensors: List of sensor objects with 'attributes' containing 'device_class'
+            device_classes: List of allowed device classes (empty = return all)
+            
+        Returns:
+            Filtered sensor list
+        """
+        if not device_classes:
+            return sensors
+        allowed_set = set(device_classes)
+        filtered = []
+        for s in sensors:
+            attrs = s.get("attributes", {}) or {}
+            dc = attrs.get("device_class")
+            if dc in allowed_set or dc is None:
+                # Include sensors with matching device_class or no device_class
+                filtered.append(s)
+        return filtered
+
+    def publish_sensors_with_default_filter(self):
+        """Publish sensors filtered by safe_device_classes on initial connect.
+        
+        This provides the Vault with a safe default set of sensors without
+        broadcasting all available sensors at startup.
+        """
+        if not self.ha_api_url or not self.ha_api_token:
+            # HA integration not configured
+            return
+        sensors = fetch_sensors(self.ha_api_url, self.ha_api_token) or []
+        # Filter by safe_device_classes if configured
+        filtered = self._filter_sensors_by_device_class(sensors, self.safe_device_classes)
+        payload = {
+            "schema_version": 1,
+            "client_id": self.client_id,
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "sensors": filtered or [],
+        }
+        try:
+            self._publish(self.preferred_sensors_topic, json.dumps(payload), qos=0)
+            _log(f"Published default sensors to {self.preferred_sensors_topic} (count={len(filtered)})")
+        except Exception:
+            _log(
+                f"Failed to publish default sensors to {self.preferred_sensors_topic}",
+                sys.stderr,
+            )
+        self._last_sensors_sent = int(time.time())
 
     def publish_sensors(self):
         """Fetch sensors from Home Assistant (if configured) and publish to MQTT.

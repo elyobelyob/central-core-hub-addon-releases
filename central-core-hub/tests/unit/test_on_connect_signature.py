@@ -35,13 +35,13 @@ def test_on_connect_accepts_extra_args(monkeypatch):
 
     called = {"sensors": 0, "telemetry": 0}
 
-    def fake_publish_sensors():
+    def fake_publish_sensors_with_default_filter():
         called["sensors"] += 1
 
     def fake_publish_telemetry():
         called["telemetry"] += 1
 
-    monkeypatch.setattr(c, "publish_sensors", fake_publish_sensors)
+    monkeypatch.setattr(c, "publish_sensors_with_default_filter", fake_publish_sensors_with_default_filter)
     monkeypatch.setattr(c, "publish_telemetry", fake_publish_telemetry)
 
     # Standard call (positional args)

@@ -55,7 +55,8 @@ def test_on_connect_subscribes_and_publishes(monkeypatch):
     c.on_connect(c._client, None, None, 0)
     # should have subscribed to cmd_sub_topic
     assert any(s["topic"] == c.cmd_sub_topic for s in dummy_inner.subscribed)
-    assert called.get("sensors") is True
+    # on_connect no longer calls publish_sensors to avoid broadcasting at startup
+    assert called.get("sensors") is not True
 
 
 def test_on_disconnect_sets_flag():

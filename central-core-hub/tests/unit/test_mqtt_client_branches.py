@@ -111,8 +111,9 @@ def test_on_connect_subscribe_exception_calls_publish_sensors(monkeypatch):
     def fake_publish_sensors():
         called["sensors"] = True
 
-    monkeypatch.setattr(c, "publish_sensors", fake_publish_sensors)
+    monkeypatch.setattr(c, "publish_sensors_with_default_filter", fake_publish_sensors)
     # call on_connect with client object that raises on subscribe
     c.on_connect(bs, None, None, 0)
     assert c._connected is True
+    # on_connect now calls publish_sensors_with_default_filter to broadcast default sensors
     assert called.get("sensors") is True
