@@ -1,5 +1,45 @@
 # Changelog
 
+## [2.0.15] - 2025-12-16
+
+- test: update tests for device_class filtering by vault
+- chore: bump version to 2.0.14
+- fix: remove undefined DEFAULT_SAFE_DEVICE_CLASSES reference
+- chore: bump version to 2.0.13
+- fix: correct YAML syntax in GitHub Actions workflow
+- chore: bump version to 2.0.12
+- refactor: filter sensors by device_class instead of entity_id
+- chore: bump version to 2.0.11
+- refactor: filter sensors by vault request list
+- chore: bump version to 2.0.10
+- refactor: return all sensors regardless of vault request
+- chore: bump version to 2.0.9
+- refactor: remove device class filtering fallback
+- chore: bump version to 2.0.8
+- refactor: restore device class filtering as fallback
+- chore: bump version to 2.0.7
+- refactor: remove client-side sensor device class filtering
+
+### Commits included in this release
+
+- test: update tests for device_class filtering by vault
+- chore: bump version to 2.0.14
+- fix: remove undefined DEFAULT_SAFE_DEVICE_CLASSES reference
+- chore: bump version to 2.0.13
+- fix: correct YAML syntax in GitHub Actions workflow
+- chore: bump version to 2.0.12
+- refactor: filter sensors by device_class instead of entity_id
+- chore: bump version to 2.0.11
+- refactor: filter sensors by vault request list
+- chore: bump version to 2.0.10
+- refactor: return all sensors regardless of vault request
+- chore: bump version to 2.0.9
+- refactor: remove device class filtering fallback
+- chore: bump version to 2.0.8
+- refactor: restore device class filtering as fallback
+- chore: bump version to 2.0.7
+- refactor: remove client-side sensor device class filtering
+
 ## [2.0.14] - 2025-12-16
 
 - fix: remove undefined DEFAULT_SAFE_DEVICE_CLASSES reference
