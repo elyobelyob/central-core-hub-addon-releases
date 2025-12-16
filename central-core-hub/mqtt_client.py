@@ -24,10 +24,8 @@ import typing
 from datetime import datetime, timezone
 from typing import cast
 
-# Device class filtering: applied as fallback when vault doesn't provide sensor list.
-# When vault provides explicit sensors in payload.sensors, that list is authoritative.
-# When vault payload is empty, fetch_sensors() filters by device class as default.
-DEFAULT_SAFE_DEVICE_CLASSES = ('motion', 'door', 'presence', 'battery', 'occupancy', 'plug', 'window')
+# Device class filtering is handled by MQTT vault requests (authoritative source).
+# fetch_sensors() returns all sensors without client-side device class restrictions.
 
 # Outbox configuration: persistent file location and maximum queued items.
 # Default file is under the add-on data directory so it survives upgrades.
@@ -779,15 +777,8 @@ def get_cpu_percent():  # noqa: F811
 def fetch_sensors(ha_api_url, ha_api_token, safe_device_classes=None):
     if not ha_api_url or not ha_api_token or requests is None:
         return None
-    # Apply device class filtering as default when vault doesn't specify sensors.
-    # When vault provides explicit sensor list, handlers.py filters by that list instead.
-    
-    if safe_device_classes is None:
-        safe_device_classes = DEFAULT_SAFE_DEVICE_CLASSES
-    if isinstance(safe_device_classes, (list, tuple, set)):
-        safe_classes_set = {str(cls).strip() for cls in safe_device_classes if cls is not None and str(cls).strip()}
-    else:
-        safe_classes_set = set(DEFAULT_SAFE_DEVICE_CLASSES)
+    # Device class filtering is handled by MQTT vault requests.
+    # This function returns all available sensors without restrictions.
     
     try:
         url = ha_api_url.rstrip("/") + "/api/states"
@@ -805,34 +796,18 @@ def fetch_sensors(ha_api_url, ha_api_token, safe_device_classes=None):
                 continue
             if not (ent_id.startswith("sensor.") or ent_id.startswith("binary_sensor.")):
                 continue
-            # Filter by device class as fallback when vault doesn't provide explicit list.
+            # Return all sensors. Device class restrictions are applied by MQTT vault requests.
             attrs = ent.get("attributes", {})
-            raw_device_class = attrs.get("device_class")
-            try:
-                device_class = str(raw_device_class).strip() if raw_device_class is not None else None
-            except Exception:
-                device_class = None
-
-            if not device_class:
-                continue
-
-            include_sensor = False
-            if not safe_classes_set:
-                include_sensor = True
-            else:
-                include_sensor = device_class in safe_classes_set
-
-            if include_sensor:
-                sensors.append(
-                    {
-                        "entity_id": ent_id,
-                        "state": ent.get("state"),
-                        "name": attrs.get("friendly_name") or ent_id,
-                        "attributes": attrs,
-                        "last_changed": ent.get("last_changed"),
-                        "last_updated": ent.get("last_updated"),
-                    }
-                )
+            sensors.append(
+                {
+                    "entity_id": ent_id,
+                    "state": ent.get("state"),
+                    "name": attrs.get("friendly_name") or ent_id,
+                    "attributes": attrs,
+                    "last_changed": ent.get("last_changed"),
+                    "last_updated": ent.get("last_updated"),
+                }
+            )
 
         # Consult SENSOR_REGISTRY if present. Registry is the source-of-truth:
         # - If registry empty or unavailable, include all collected sensors
