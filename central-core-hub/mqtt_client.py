@@ -1403,12 +1403,18 @@ class CentralCoreClient:
         name = attrs.get("friendly_name") or new_state.get("name") or entity_id
         enabled = not bool(attrs.get("disabled_by"))
         now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        # Extract device_class if present
+        device_classes_map = {}
+        dc = attrs.get("device_class")
+        if dc:
+            device_classes_map[entity_id] = dc
         telemetry_payload = {
             "data": {entity_id: raw_state},
             "raw": {entity_id: raw_state},
             "names": {entity_id: name},
             "enabled": {entity_id: enabled},
             "attributes": {entity_id: dict(attrs)},
+            "device_classes": device_classes_map,
             "timestamp": now_iso,
         }
         try:
