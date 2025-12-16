@@ -139,7 +139,10 @@ def test_on_connect_calls_publish_sensors(monkeypatch):
     c.publish_sensors = fake_publish_sensors
     # simulate on_connect callback
     c.on_connect(None, None, None, 0)
-    assert called["publish_sensors"] >= 1
+    # Note: on_connect no longer calls publish_sensors to avoid broadcasting
+    # sensor info at startup without user action. Sensor metadata is published
+    # periodically in the run loop for the vault to discover available sensors.
+    assert called["publish_sensors"] == 0
 
 
 def test_fetch_sensors_happy_path(monkeypatch):
