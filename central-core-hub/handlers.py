@@ -141,27 +141,30 @@ def handle_message(
                         sensors_requested = srv
             except Exception:  # pragma: no cover - defensive branch hard to reproduce in tests
                 sensors_requested = None
+            
+            # Only publish telemetry if the Vault has requested specific sensors.
+            # Without a vault request, we don't know what the user wants.
+            if not sensors_requested:
+                return
+            
             sensors = fetch_sensors(client.ha_api_url, client.ha_api_token) or []
             # Always apply SENSOR_REGISTRY filtering at minimum
             sensors = [s for s in sensors if _is_entity_allowed(s.get("entity_id"))]
             
-            # If the Vault requested a specific set of sensors (device classes),
-            # filter to only those device classes.
+            # Store the selected sensors (vault-requested device classes) for reminder messages
             try:
-                if sensors_requested:
-                    # normalize to list of ids
-                    client.selected_sensors = list(sensors_requested)
+                client.selected_sensors = list(sensors_requested)
             except Exception:
                 # don't let selection storage failure stop command handling
                 pass
-            if sensors_requested:
-                # Filter sensors by device_class (vault sends device class names, not entity IDs)
-                requested_classes = {str(cls).lower().strip() for cls in sensors_requested if cls}
-                sensors = [
-                    s
-                    for s in sensors
-                    if s.get("attributes", {}).get("device_class", "").lower() in requested_classes
-                ]
+            
+            # Filter sensors by device_class (vault sends device class names, not entity IDs)
+            requested_classes = {str(cls).lower().strip() for cls in sensors_requested if cls}
+            sensors = [
+                s
+                for s in sensors
+                if s.get("attributes", {}).get("device_class", "").lower() in requested_classes
+            ]
 
             data_map = {}
             raw_map = {}

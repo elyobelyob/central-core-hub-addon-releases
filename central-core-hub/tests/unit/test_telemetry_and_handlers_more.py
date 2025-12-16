@@ -115,13 +115,13 @@ def test_handlers_poll_with_disabled_and_names(monkeypatch):
             "entity_id": "sensor.a",
             "state": "on",
             "name": "A",
-            "attributes": {"friendly_name": "Friendly A", "disabled_by": None},
+            "attributes": {"friendly_name": "Friendly A", "disabled_by": None, "device_class": "temperature"},
         },
         {
             "entity_id": "sensor.b",
             "state": "0",
             "name": "B",
-            "attributes": {"friendly_name": "Friendly B", "disabled_by": "user"},
+            "attributes": {"friendly_name": "Friendly B", "disabled_by": "user", "device_class": "temperature"},
         },
     ]
 
@@ -129,8 +129,8 @@ def test_handlers_poll_with_disabled_and_names(monkeypatch):
         return sensors
 
     # call handle_message for poll topic
-    msg = types.SimpleNamespace(topic="hubs/hub1/v1/cmd/sensors/poll", payload=b"{}")
-    handlers.handle_message(client, msg, "{}", fetch_sensors, lambda cid: "{}", lambda raw: None, None)
+    msg = types.SimpleNamespace(topic="hubs/hub1/v1/cmd/sensors/poll", payload=b'{"payload": {"sensors": ["temperature"]}}')
+    handlers.handle_message(client, msg, '{"payload": {"sensors": ["temperature"]}}', fetch_sensors, lambda cid: "{}", lambda raw: None, None)
 
     # find the published telemetry payload
     tele_msgs = [p for p in published if p["topic"] == client.preferred_sensors_topic]

@@ -99,14 +99,14 @@ def test_handle_poll_boolean_and_numeric_coercion():
     handlers = _load_handlers()
     c = DummyClient()
     sensors_list = [
-        {"entity_id": "sensor.a", "state": "on"},
-        {"entity_id": "sensor.b", "state": "off"},
-        {"entity_id": "sensor.c", "state": "true"},
-        {"entity_id": "sensor.d", "state": "false"},
-        {"entity_id": "sensor.e", "state": "3.14"},
-        {"entity_id": "sensor.f", "state": "7"},
+        {"entity_id": "sensor.a", "state": "on", "attributes": {"device_class": "temperature"}},
+        {"entity_id": "sensor.b", "state": "off", "attributes": {"device_class": "temperature"}},
+        {"entity_id": "sensor.c", "state": "true", "attributes": {"device_class": "temperature"}},
+        {"entity_id": "sensor.d", "state": "false", "attributes": {"device_class": "temperature"}},
+        {"entity_id": "sensor.e", "state": "3.14", "attributes": {"device_class": "temperature"}},
+        {"entity_id": "sensor.f", "state": "7", "attributes": {"device_class": "temperature"}},
     ]
-    cmd = {"command_id": "cb", "payload": {}}
+    cmd = {"command_id": "cb", "payload": {"sensors": ["temperature"]}}
     msg = type(
         "M",
         (),

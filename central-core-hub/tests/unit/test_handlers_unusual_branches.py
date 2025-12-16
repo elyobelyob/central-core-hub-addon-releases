@@ -73,15 +73,14 @@ def test_ack_publish_raises_but_processing_continues(monkeypatch):
     c = RecordingClient()
     # make _publish raise for ack_topic only
     # ack topic will be the v1 ack topic
-    cmd = {"command_id": "ack1", "action": "sensors/poll", "payload": {}}
+    cmd = {"command_id": "ack1", "action": "sensors/poll", "payload": {"sensors": ["temperature"]}}
     # ack topic will be the v1 ack topic; compute via shared helper
-    cmd = {"command_id": "ack1", "action": "sensors/poll", "payload": {}}
     ack_topic = build_ack_for_client_id(c.client_id, cmd["action"], cmd["command_id"])
     c.raise_on = [ack_topic]
 
     # fetch_sensors returns one sensor so telemetry publish occurs
     def fetch_sensors(url, token):
-        return [{"entity_id": "sensor.a", "state": "1", "attributes": {}}]
+        return [{"entity_id": "sensor.a", "state": "1", "attributes": {"device_class": "temperature"}}]
 
     msg = DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/poll", json.dumps(cmd).encode("utf-8"))
 

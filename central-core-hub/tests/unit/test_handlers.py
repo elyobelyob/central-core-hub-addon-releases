@@ -56,18 +56,18 @@ def test_handle_sensors_poll_no_ha():
     mqtt_mod, handlers = _load_modules()
     c = DummyClient()
     topic = f"hubs/{c.client_id}/v1/cmd/sensors/poll"
-    msg = DummyMsg(topic, b"{}")
+    msg = DummyMsg(topic, b'{"payload": {"sensors": ["temperature"]}}')
     # fetch_sensors is expected to be provided; pass a stub that returns empty
     handlers.handle_message(
         c,
         msg,
-        "{}",
+        '{"payload": {"sensors": ["temperature"]}}',
         fetch_sensors=lambda a, b: [],
         build_telemetry=mqtt_mod.build_telemetry,
         build_vault_payload=mqtt_mod.build_vault_payload,
         requests=None,
     )
-    # should publish telemetry (even if empty)
+    # should publish telemetry (even if empty) when vault requests sensors
     assert any(p["topic"] == c.preferred_sensors_topic for p in c.published)
 
 

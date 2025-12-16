@@ -142,7 +142,7 @@ def test_poll_prefers_client_selected_sensors_for_reminder():
             {"entity_id": "sensor.x", "state": "0", "attributes": {}},
         ]
 
-    payload = json.dumps({"command_id": "c4", "payload": {}})
+    payload = json.dumps({"command_id": "c4", "payload": {"sensors": ["temperature"]}})
     handlers.handle_message(
         client,
         make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/poll"),

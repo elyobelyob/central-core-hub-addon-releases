@@ -84,7 +84,7 @@ def test_handle_sensors_poll_command_ack_and_completion(monkeypatch):
         {
             "entity_id": "sensor.temp",
             "state": "21.5",
-            "attributes": {"friendly_name": "Temp"},
+            "attributes": {"friendly_name": "Temp", "device_class": "temperature"},
         },
     ]
     monkeypatch.setattr(mod, "fetch_sensors", lambda url, token, safe_classes=None: sample)
@@ -98,7 +98,7 @@ def test_handle_sensors_poll_command_ack_and_completion(monkeypatch):
     dummy = DummyClient()
     c._client = dummy
 
-    command = {"command_id": "abc123", "action": "sensors/poll", "payload": {}}
+    command = {"command_id": "abc123", "action": "sensors/poll", "payload": {"sensors": ["temperature"]}}
     topic = f"hubs/{c.client_id}/v1/cmd/sensors/poll"
     msg = DummyMsg(topic, json.dumps(command).encode("utf-8"))
 
