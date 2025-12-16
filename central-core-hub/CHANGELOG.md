@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.0.9] - 2025-12-16
+
+- refactor: remove device class filtering fallback
+- chore: bump version to 2.0.8
+- refactor: restore device class filtering as fallback
+- chore: bump version to 2.0.7
+- refactor: remove client-side sensor device class filtering
+
+### Commits included in this release
+
+- refactor: remove device class filtering fallback
+- chore: bump version to 2.0.8
+- refactor: restore device class filtering as fallback
+- chore: bump version to 2.0.7
+- refactor: remove client-side sensor device class filtering
+
 ## [2.0.8] - 2025-12-16
 
 - refactor: restore device class filtering as fallback
