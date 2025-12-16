@@ -1899,8 +1899,10 @@ class CentralCoreClient:
         for s in sensors:
             attrs = s.get("attributes", {}) or {}
             dc = attrs.get("device_class")
+            # Normalize to lowercase for case-insensitive comparison
+            dc_normalized = str(dc).lower() if dc else None
             # Only include sensors with matching device_class
-            if dc in allowed_set:
+            if dc_normalized in allowed_set:
                 filtered.append(s)
         return filtered
 
