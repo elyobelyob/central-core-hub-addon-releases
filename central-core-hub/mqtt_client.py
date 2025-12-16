@@ -905,12 +905,12 @@ class CentralCoreClient:
         self.client_id = options.get("client_id") or socket.gethostname().lower().replace(" ", "-")
         self.ha_api_url = options.get("ha_api_url") or ""
         self.ha_api_token = options.get("ha_api_token") or ""
-        # Load safe device classes from options, with defaults
+        # Load safe device classes from options (vault is authoritative for filtering)
         configured_safe = options.get("safe_device_classes")
         if isinstance(configured_safe, list):
             cleaned_safe = [str(cls).strip() for cls in configured_safe if cls is not None and str(cls).strip()]
         else:
-            cleaned_safe = list(DEFAULT_SAFE_DEVICE_CLASSES)
+            cleaned_safe = []
         self.safe_device_classes = cleaned_safe
         # Diagnostic: log whether HA options are present (do not print token)
         try:
