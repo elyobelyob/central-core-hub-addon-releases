@@ -142,6 +142,9 @@ def handle_message(
             except Exception:  # pragma: no cover - defensive branch hard to reproduce in tests
                 sensors_requested = None
             sensors = fetch_sensors(client.ha_api_url, client.ha_api_token) or []
+            # Always apply SENSOR_REGISTRY filtering at minimum
+            sensors = [s for s in sensors if _is_entity_allowed(s.get("entity_id"))]
+            
             # If the Vault requested a specific set of sensors (device classes),
             # filter to only those device classes.
             try:
@@ -158,14 +161,13 @@ def handle_message(
                     s
                     for s in sensors
                     if s.get("attributes", {}).get("device_class", "").lower() in requested_classes
-                    and _is_entity_allowed(s.get("entity_id"))
                 ]
 
             data_map = {}
             raw_map = {}
             for s in sensors:  # pragma: no cover
                 ent = s.get("entity_id")  # pragma: no cover
-                if not ent or not _is_entity_allowed(ent):
+                if not ent:
                     continue
                 st = s.get("state")  # pragma: no cover
                 # preserve the raw state as reported by HA
@@ -179,7 +181,7 @@ def handle_message(
             attrs_map = {}
             for s in sensors:
                 ent = s.get("entity_id")
-                if not ent or not _is_entity_allowed(ent):
+                if not ent:
                     continue
                 attrs = s.get("attributes", {}) or {}
                 names_map[ent] = attrs.get("friendly_name") or s.get("name") or ent
@@ -192,7 +194,7 @@ def handle_message(
             observed_map = {}
             for s in sensors:
                 ent = s.get("entity_id")
-                if not ent or not _is_entity_allowed(ent):
+                if not ent:
                     continue
                 obs = None
                 try:
