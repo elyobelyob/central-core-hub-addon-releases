@@ -1890,7 +1890,7 @@ class CentralCoreClient:
             device_classes: List of allowed device classes (empty = return all)
             
         Returns:
-            Filtered sensor list
+            Filtered sensor list (only includes sensors with matching device_class)
         """
         if not device_classes:
             return sensors
@@ -1899,8 +1899,8 @@ class CentralCoreClient:
         for s in sensors:
             attrs = s.get("attributes", {}) or {}
             dc = attrs.get("device_class")
-            if dc in allowed_set or dc is None:
-                # Include sensors with matching device_class or no device_class
+            # Only include sensors with matching device_class
+            if dc in allowed_set:
                 filtered.append(s)
         return filtered
 
