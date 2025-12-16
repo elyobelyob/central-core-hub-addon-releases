@@ -60,8 +60,7 @@ def test_poll_malformed_payload_no_ack(monkeypatch):
     # ensure no ack topic published (no command_id in payload)
     topics = [p["topic"] for p in dummy.published]
     assert not any("/cmd/" in t and t.endswith("/response") for t in topics)
-    # but preferred sensors topic should be published
-    assert c.preferred_sensors_topic in topics
+    # also no telemetry since payload is malformed (no vault request with sensors list)
 
 
 def test_set_with_sensors_as_dict_and_readback_failure(monkeypatch):

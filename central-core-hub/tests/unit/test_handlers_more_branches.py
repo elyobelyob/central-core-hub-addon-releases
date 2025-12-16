@@ -35,11 +35,11 @@ def test_poll_data_type_parsing(monkeypatch):
     CentralCoreClient = mc.CentralCoreClient
 
     sample = [
-        {"entity_id": "sensor.on", "state": "on", "attributes": {}},
-        {"entity_id": "sensor.off", "state": "off", "attributes": {}},
-        {"entity_id": "sensor.int", "state": "42", "attributes": {}},
-        {"entity_id": "sensor.float", "state": "3.14", "attributes": {}},
-        {"entity_id": "sensor.text", "state": "n/a", "attributes": {}},
+        {"entity_id": "sensor.on", "state": "on", "attributes": {"device_class": "temperature"}},
+        {"entity_id": "sensor.off", "state": "off", "attributes": {"device_class": "temperature"}},
+        {"entity_id": "sensor.int", "state": "42", "attributes": {"device_class": "temperature"}},
+        {"entity_id": "sensor.float", "state": "3.14", "attributes": {"device_class": "temperature"}},
+        {"entity_id": "sensor.text", "state": "n/a", "attributes": {"device_class": "temperature"}},
     ]
     monkeypatch.setattr(mc, "fetch_sensors", lambda url, token, safe_classes=None: sample)
 
@@ -53,7 +53,7 @@ def test_poll_data_type_parsing(monkeypatch):
     c._client = dummy
     c.vault_topic = ""
 
-    cmd = {"command_id": "cid1", "action": "sensors/poll", "payload": {}}
+    cmd = {"command_id": "cid1", "action": "sensors/poll", "payload": {"sensors": ["temperature"]}}
     msg = DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/poll", json.dumps(cmd).encode("utf-8"))
 
     c.on_message(None, None, msg)

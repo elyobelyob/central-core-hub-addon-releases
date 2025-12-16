@@ -41,7 +41,7 @@ def test_handle_message_poll_invalid_and_missing_entity(monkeypatch):
 
     c = FakeClient()
 
-    # payload is valid JSON with command_id to cover ack
+    # payload is valid JSON with command_id and vault sensor request
     msg = types.SimpleNamespace(topic=f"hubs/{c.client_id}/v1/cmd/sensors/poll")
 
     # fetch_sensors returns a sensor with no entity_id and one normal sensor
@@ -51,14 +51,14 @@ def test_handle_message_poll_invalid_and_missing_entity(monkeypatch):
             {
                 "entity_id": "sensor.foo",
                 "state": "123",
-                "attributes": {"friendly_name": "Foo"},
+                "attributes": {"friendly_name": "Foo", "device_class": "temperature"},
             },
         ]
 
     handlers.handle_message(
         c,
         msg,
-        '{"command_id": "poll_cmd"}',
+        '{"command_id": "poll_cmd", "payload": {"sensors": ["temperature"]}}',
         fetch_sensors,
         lambda *a, **k: None,
         lambda x: x,
