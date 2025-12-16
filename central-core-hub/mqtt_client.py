@@ -24,20 +24,8 @@ import typing
 from datetime import datetime, timezone
 from typing import cast
 
-# Import safe device classes from ha_client when available so defaults stay aligned.
-try:
-    import ha_client as _ha_module
-
-    _default_safe_classes = getattr(_ha_module, "ALLOWED_DEVICE_CLASSES", None)
-    if _default_safe_classes is None:
-        _default_safe_classes = ("motion", "door", "presence")
-except (ImportError, ModuleNotFoundError, AttributeError):
-    _default_safe_classes = ("motion", "door", "presence")
-
-# Preserve a list version for configuration defaults (unique and sorted for determinism)
-DEFAULT_SAFE_DEVICE_CLASSES = sorted(
-    {str(cls).strip() for cls in _default_safe_classes if cls is not None and str(cls).strip()}
-)
+# Device class filtering is handled by MQTT vault requests (authoritative source).
+# fetch_sensors() returns all sensors without client-side device class restrictions.
 
 # Outbox configuration: persistent file location and maximum queued items.
 # Default file is under the add-on data directory so it survives upgrades.
@@ -483,29 +471,29 @@ def is_entity_allowed(entity_id: str) -> bool:
 
 
 def get_addon_version():
-    """Get the add-on version from config.json or metadata file."""
+    """Get the add-on version from config.json."""
     # Allow an explicit override via environment variable. This is useful
     # for containers, CI, or test harnesses where the runtime-installed
     # `/config.json` may be out of date or intentionally different.
     env_v = os.environ.get("ADDON_VERSION")
     if env_v:
         return env_v
-
-    # Check add-on metadata file (written by run.sh on startup)
+    # Check add-on options (Home Assistant mounts `/data/options.json`).
+    # Some add-on installers surface the installed version in the add-on
+    # options or allow an `addon_version` field to be set; prefer that
+    # when present so the value matches what is shown on the Add-on UI.
     try:
-        metadata_path = "/data/.addon_metadata.json"
-        if os.path.exists(metadata_path):
-            with open(metadata_path, "r") as f:
+        if os.path.exists(OPTIONS_PATH):
+            with open(OPTIONS_PATH, "r") as f:
                 try:
-                    metadata = json.load(f) or {}
-                    ver = metadata.get("addon_version")
+                    opts = json.load(f) or {}
+                    ver = opts.get("addon_version") or opts.get("version")
                     if ver:
                         return ver
                 except Exception:
                     pass
     except Exception:
         pass
-
     # Try HA add-on location first
     try:
         with open("/config.json", "r") as f:
@@ -789,20 +777,9 @@ def get_cpu_percent():  # noqa: F811
 def fetch_sensors(ha_api_url, ha_api_token, safe_device_classes=None):
     if not ha_api_url or not ha_api_token or requests is None:
         return None
-    # fetch_sensors historically included an internal registry loader. For
-    # the larger change set we expose lightweight helpers so other publish
-    # paths can ask whether an entity should be published.
-
-    # Resolve the configured safe device classes. Accept lists/tuples/sets; any
-    # other type falls back to the baked-in defaults. Empty collections signal
-    # "allow all device classes".
-    if safe_device_classes is None:
-        safe_device_classes = DEFAULT_SAFE_DEVICE_CLASSES
-    if isinstance(safe_device_classes, (list, tuple, set)):
-        safe_classes_set = {str(cls).strip() for cls in safe_device_classes if cls is not None and str(cls).strip()}
-    else:
-        safe_classes_set = set(DEFAULT_SAFE_DEVICE_CLASSES)
-
+    # Device class filtering is handled by MQTT vault requests.
+    # This function returns all available sensors without restrictions.
+    
     try:
         url = ha_api_url.rstrip("/") + "/api/states"
         headers = {
@@ -819,34 +796,18 @@ def fetch_sensors(ha_api_url, ha_api_token, safe_device_classes=None):
                 continue
             if not (ent_id.startswith("sensor.") or ent_id.startswith("binary_sensor.")):
                 continue
-            # Require device_class; include when safe list allows it.
+            # Return all sensors. Device class restrictions are applied by MQTT vault requests.
             attrs = ent.get("attributes", {})
-            raw_device_class = attrs.get("device_class")
-            try:
-                device_class = str(raw_device_class).strip() if raw_device_class is not None else None
-            except Exception:
-                device_class = None
-
-            if not device_class:
-                continue
-
-            include_sensor = False
-            if not safe_classes_set:
-                include_sensor = True
-            else:
-                include_sensor = device_class in safe_classes_set
-
-            if include_sensor:
-                sensors.append(
-                    {
-                        "entity_id": ent_id,
-                        "state": ent.get("state"),
-                        "name": attrs.get("friendly_name") or ent_id,
-                        "attributes": attrs,
-                        "last_changed": ent.get("last_changed"),
-                        "last_updated": ent.get("last_updated"),
-                    }
-                )
+            sensors.append(
+                {
+                    "entity_id": ent_id,
+                    "state": ent.get("state"),
+                    "name": attrs.get("friendly_name") or ent_id,
+                    "attributes": attrs,
+                    "last_changed": ent.get("last_changed"),
+                    "last_updated": ent.get("last_updated"),
+                }
+            )
 
         # Consult SENSOR_REGISTRY if present. Registry is the source-of-truth:
         # - If registry empty or unavailable, include all collected sensors
@@ -942,13 +903,8 @@ class CentralCoreClient:
         # Handle certificate content vs paths
         self._setup_cert_files()
         self.client_id = options.get("client_id") or socket.gethostname().lower().replace(" ", "-")
-        
-        # Try options first, then environment variables (standard HA add-on pattern)
-        # The Supervisor proxies HA Core API at http://supervisor/core
-        self.ha_api_token = options.get("ha_api_token") or os.environ.get("SUPERVISOR_TOKEN") or ""
-        
-        default_url = "http://supervisor/core" if self.ha_api_token else ""
-        self.ha_api_url = options.get("ha_api_url") or os.environ.get("HA_API_URL") or default_url
+        self.ha_api_url = options.get("ha_api_url") or ""
+        self.ha_api_token = options.get("ha_api_token") or ""
         # Load safe device classes from options, with defaults
         configured_safe = options.get("safe_device_classes")
         if isinstance(configured_safe, list):
@@ -1535,16 +1491,7 @@ class CentralCoreClient:
         self._addon_slug = slug
         return slug
 
-    def trigger_addon_update(self, version=None):
-        """Trigger add-on update to a specific version or latest.
-
-        Args:
-            version: Optional version string (e.g., "1.1.74").
-                    If None or "latest", updates to the latest available version.
-
-        Returns:
-            dict with success status, check result, and update result
-        """
+    def trigger_addon_update(self):
         slug = self._resolve_addon_slug()
         if not slug:
             return {"success": False, "reason": "addon_slug_missing"}
@@ -1560,18 +1507,13 @@ class CentralCoreClient:
                 check_result = {"domain": domain, "result": res}
                 break
 
-        # Build update service data
-        update_data = {"addon": slug}
-        if version and version.lower() != "latest":
-            update_data["version"] = version
-
         update_domains = (
             ("supervisor", "addon_update"),
             ("hassio", "addon_update"),
         )
         update_result = None
         for domain, service in update_domains:
-            res = self._call_ha_service(domain, service, update_data)
+            res = self._call_ha_service(domain, service, {"addon": slug})
             if res is not None:
                 update_result = {"domain": domain, "result": res}
                 break
@@ -1580,7 +1522,6 @@ class CentralCoreClient:
             "success": update_result is not None,
             "check": check_result,
             "update": update_result,
-            "version": version or "latest",
         }
 
     def on_connect(self, client, userdata, *args, **kwargs):
@@ -1719,9 +1660,7 @@ class CentralCoreClient:
                         sys.modules[spec_h.name] = _hmod
                     spec_h.loader.exec_module(_hmod)
                     _hm = _hmod.handle_message
-                except Exception as e:
-                    _log(f"Failed to import handlers module: {e}", sys.stderr)
-                    traceback.print_exc()
+                except Exception:
                     _hm = None
 
             if _hm is not None:
