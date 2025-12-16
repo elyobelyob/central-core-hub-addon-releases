@@ -195,6 +195,7 @@ def handle_message(
             # build observed timestamps map (prefer HA-provided timestamps,
             # fall back to current time)
             observed_map = {}
+            device_classes_map = {}
             for s in sensors:
                 ent = s.get("entity_id")
                 if not ent:
@@ -210,6 +211,11 @@ def handle_message(
                 if not obs:
                     obs = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 observed_map[ent] = obs
+                # Extract device_class from attributes
+                attrs = s.get("attributes", {}) or {}
+                dc = attrs.get("device_class")
+                if dc:
+                    device_classes_map[ent] = dc
 
             now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             telemetry_payload = {
@@ -219,6 +225,7 @@ def handle_message(
                 "attributes": attrs_map,
                 "enabled": enabled_map,
                 "observed": observed_map,
+                "device_classes": device_classes_map,
                 "timestamp": now_iso,
             }
             try:
