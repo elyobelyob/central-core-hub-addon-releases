@@ -142,9 +142,9 @@ def handle_message(
             except Exception:  # pragma: no cover - defensive branch hard to reproduce in tests
                 sensors_requested = None
             sensors = fetch_sensors(client.ha_api_url, client.ha_api_token) or []
-            # If the Vault requested a specific set of sensors, treat that
-            # list as authoritative and remember it on the client for future
-            # reminder publications.
+            # If the Vault requested a specific set of sensors, remember it on the client
+            # for future reminder publications. But always return all fetched sensors
+            # since filtering is the vault's responsibility.
             try:
                 if sensors_requested:
                     # normalize to list of ids
@@ -152,12 +152,6 @@ def handle_message(
             except Exception:
                 # don't let selection storage failure stop command handling
                 pass
-            if sensors_requested:
-                sensors = [
-                    s
-                    for s in sensors
-                    if s.get("entity_id") in sensors_requested and _is_entity_allowed(s.get("entity_id"))
-                ]
 
             data_map = {}
             raw_map = {}
