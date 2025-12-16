@@ -49,18 +49,22 @@ class DummyClient:
 
 
 def fetch_sensors_dummy(ha_api_url, ha_api_token):
-    # return a few sensors with attributes and timestamps
+    # return a few sensors with device_class and timestamps
     return [
         {
             "entity_id": "sensor.temp",
             "state": "21.5",
-            "attributes": {"friendly_name": "Temp", "unit_of_measurement": "°C"},
+            "attributes": {
+                "device_class": "temperature",
+                "friendly_name": "Temp",
+                "unit_of_measurement": "°C",
+            },
             "last_changed": "2025-12-07T10:00:00Z",
         },
         {
             "entity_id": "sensor.a",
             "state": "on",
-            "attributes": {"friendly_name": "Switch A"},
+            "attributes": {"device_class": "motion", "friendly_name": "Switch A"},
             "last_updated": "2025-12-07T10:00:05Z",
         },
     ]
@@ -69,8 +73,8 @@ def fetch_sensors_dummy(ha_api_url, ha_api_token):
 def test_sensors_poll_prints_and_publishes():
     c = DummyClient()
     topic = f"hubs/{c.client_id}/v1/cmd/sensors/poll"
-    # request specific sensors
-    cmd = {"payload": {"sensors": ["sensor.temp", "sensor.a"]}}
+    # request specific device classes
+    cmd = {"payload": {"sensors": ["temperature", "motion"]}}
     msg = Msg(topic)
 
     handle_message(c, msg, json.dumps(cmd), fetch_sensors_dummy, None, None, None)

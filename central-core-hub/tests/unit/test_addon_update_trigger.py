@@ -39,7 +39,7 @@ def test_trigger_addon_update_calls_ha_services(monkeypatch):
 
 
 def test_trigger_addon_update_with_specific_version(monkeypatch):
-    """Test upgrading to a specific version."""
+    """Test upgrading addon (version parameter removed - vault handles versioning)."""
     mod = _load_client_module()
     c = mod.CentralCoreClient({"client_id": "unit-hub"})
 
@@ -53,18 +53,15 @@ def test_trigger_addon_update_with_specific_version(monkeypatch):
     c._ha_ws_listener = FakeListener()
     monkeypatch.setattr(c, "_resolve_addon_slug", lambda: "central-core-hub")
 
-    result = c.trigger_addon_update(version="1.1.74")
+    result = c.trigger_addon_update()
     assert result["success"] is True
-    assert result["version"] == "1.1.74"
     assert len(calls) >= 2
     assert calls[0][1].endswith("check_addon_updates")
     assert calls[1][1].endswith("addon_update")
-    # Verify version was passed to the update service
-    assert calls[1][2].get("version") == "1.1.74"
 
 
 def test_trigger_addon_update_with_latest_keyword(monkeypatch):
-    """Test upgrading to 'latest' doesn't pass version parameter."""
+    """Test upgrading addon to latest (version parameter removed)."""
     mod = _load_client_module()
     c = mod.CentralCoreClient({"client_id": "unit-hub"})
 
@@ -78,8 +75,7 @@ def test_trigger_addon_update_with_latest_keyword(monkeypatch):
     c._ha_ws_listener = FakeListener()
     monkeypatch.setattr(c, "_resolve_addon_slug", lambda: "central-core-hub")
 
-    result = c.trigger_addon_update(version="latest")
+    result = c.trigger_addon_update()
     assert result["success"] is True
-    assert result["version"] == "latest"
-    # When version is "latest", we don't pass it to the service
+    # Addon update always goes to latest
     assert "version" not in calls[1][2] or calls[1][2].get("version") is None

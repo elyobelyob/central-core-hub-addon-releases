@@ -182,19 +182,19 @@ def test_fetch_sensors_happy_path(monkeypatch):
 
 
 def test_sensors_poll_with_requested_subset(monkeypatch):
-    # test sensors/poll honoring requested sensors list and coercions
+    # test sensors/poll honoring requested device classes
     path = Path(__file__).resolve().parents[3] / "central-core-hub" / "mqtt_client.py"
     m = _load_named_module("m5", path)
     CentralCoreClient = m.CentralCoreClient
 
-    # stub fetch_sensors with varied states
+    # stub fetch_sensors with varied device classes
     monkeypatch.setattr(
         m,
         "fetch_sensors",
         lambda url, token, safe_classes=None: [
-            {"entity_id": "sensor.a", "state": "on"},
-            {"entity_id": "sensor.b", "state": "12"},
-            {"entity_id": "sensor.c", "state": "7.5"},
+            {"entity_id": "sensor.a", "state": "on", "attributes": {"device_class": "motion"}},
+            {"entity_id": "sensor.b", "state": "12", "attributes": {"device_class": "door"}},
+            {"entity_id": "sensor.c", "state": "7.5", "attributes": {"device_class": "temperature"}},
         ],
     )
 
@@ -202,8 +202,8 @@ def test_sensors_poll_with_requested_subset(monkeypatch):
     published = []
     c._publish = lambda topic, payload, qos=0: published.append((topic, json.loads(payload)))
 
-    # create poll command requesting only sensor.b
-    cmd = {"command_id": "p1", "payload": {"sensors": ["sensor.b"]}}
+    # create poll command requesting only door device class
+    cmd = {"command_id": "p1", "payload": {"sensors": ["door"]}}
     msg = type(
         "M",
         (),
