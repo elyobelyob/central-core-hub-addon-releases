@@ -27,10 +27,6 @@ SAFE_DEVICE_CLASSES = {
 # redirect writes to a temporary location.
 OPTIONS_PATH = "/data/options.json"
 
-# Default allowed device classes when vault doesn't specify sensors.
-# When vault provides explicit sensor list, it overrides this.
-ALLOWED_DEVICE_CLASSES = ('motion', 'door', 'presence', 'battery', 'occupancy', 'plug', 'window')
-
 # In-memory cache for the discovered Home Assistant version. Store a
 # small struct with the version string and the timestamp it was set so
 # consumers can apply a TTL without hitting the filesystem.
@@ -115,30 +111,20 @@ def fetch_sensors(ha_api_url, ha_api_token, requests_mod=None):
             ent_id = ent.get("entity_id")
             # Include both sensor.* and binary_sensor.* entities
             if ent_id and (ent_id.startswith("sensor.") or ent_id.startswith("binary_sensor.")):
-                # Filter by device_class. Device class restrictions apply as fallback
-                # when vault doesn't provide explicit sensor list.
+                # Return all sensors. Device class filtering is handled by vault/MQTT layer.
                 attrs = ent.get("attributes", {})
-                raw_device_class = attrs.get("device_class")
-                device_class = None
-                if raw_device_class is not None:
-                    try:
-                        device_class = str(raw_device_class).strip()
-                    except Exception:
-                        device_class = None
-
-                if device_class and device_class in ALLOWED_DEVICE_CLASSES:
-                    sensors.append(
-                        {
-                            "entity_id": ent_id,
-                            "state": ent.get("state"),
-                            "name": attrs.get("friendly_name") or ent_id,
-                            "attributes": attrs,
-                            # Preserve HA timestamps when present so downstream systems
-                            # can reason about data recency.
-                            "last_changed": ent.get("last_changed"),
-                            "last_updated": ent.get("last_updated"),
-                        }
-                    )
+                sensors.append(
+                    {
+                        "entity_id": ent_id,
+                        "state": ent.get("state"),
+                        "name": attrs.get("friendly_name") or ent_id,
+                        "attributes": attrs,
+                        # Preserve HA timestamps when present so downstream systems
+                        # can reason about data recency.
+                        "last_changed": ent.get("last_changed"),
+                        "last_updated": ent.get("last_updated"),
+                    }
+                )
         return sensors
     except Exception:
         return None
