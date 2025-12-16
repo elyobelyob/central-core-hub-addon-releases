@@ -32,14 +32,14 @@ class DummyClient:
 def test_poll_with_requested_sensors_filters(monkeypatch):
     handlers = _load_handlers()
     c = DummyClient()
-    # Create sensors list that includes three sensors
+    # Create sensors list with different device classes
     sensors_list = [
-        {"entity_id": "sensor.a", "state": "1"},
-        {"entity_id": "sensor.b", "state": "2"},
-        {"entity_id": "sensor.c", "state": "3"},
+        {"entity_id": "sensor.a", "state": "1", "attributes": {"device_class": "motion"}},
+        {"entity_id": "sensor.b", "state": "2", "attributes": {"device_class": "door"}},
+        {"entity_id": "sensor.c", "state": "3", "attributes": {"device_class": "temperature"}},
     ]
-    # Request only sensor.b
-    cmd = {"command_id": "cmdx", "payload": {"sensors": ["sensor.b"]}}
+    # Request only door device class
+    cmd = {"command_id": "cmdx", "payload": {"sensors": ["door"]}}
     msg_payload = json.dumps(cmd)
     msg = type(
         "M",
@@ -50,7 +50,7 @@ def test_poll_with_requested_sensors_filters(monkeypatch):
         },
     )
 
-    # fetch_sensors should return the full list; handler should filter
+    # fetch_sensors should return the full list; handler should filter by device_class
     handlers.handle_message(
         c,
         msg,
@@ -61,7 +61,7 @@ def test_poll_with_requested_sensors_filters(monkeypatch):
         requests=None,
     )
 
-    # find telemetry payload published to preferred topic and assert only sensor.b present
+    # find telemetry payload published to preferred topic and assert only door sensor present
     found = None
     for p in c.published:
         if p["topic"] == c.preferred_sensors_topic:

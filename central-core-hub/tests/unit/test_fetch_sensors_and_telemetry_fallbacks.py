@@ -68,9 +68,9 @@ def test_fetch_sensors_parses_entities(monkeypatch, tmp_path):
     cast(Any, mc).requests = RClient()
     sensors = mc.fetch_sensors("http://ha", "tok")
     assert isinstance(sensors, list)
-    # Sensors lacking device_class should be excluded
-    assert not any(s["entity_id"] == "sensor.x" for s in sensors)
-    assert not any(s["entity_id"] == "binary_sensor.y" for s in sensors)
+    # mqtt_client now returns all sensors (no device_class filtering)
+    assert any(s["entity_id"] == "sensor.x" for s in sensors)
+    assert any(s["entity_id"] == "binary_sensor.y" for s in sensors)
 
 
 def test_telemetry_get_cpu_from_mqtt_client_module(monkeypatch):
@@ -81,16 +81,10 @@ def test_telemetry_get_cpu_from_mqtt_client_module(monkeypatch):
     import sys
 
     sys.modules["mqtt_client"] = fake
-    old_helpers = sys.modules.get("helpers")
-    sys.modules["helpers"] = None
     try:
         assert tele._get_cpu_percent() == 4.4
     finally:
         del sys.modules["mqtt_client"]
-        if old_helpers is not None and old_helpers is not fake:
-             sys.modules["helpers"] = old_helpers
-        else:
-             sys.modules.pop("helpers", None)
 
 
 def test_on_message_falls_back_to_file_load(monkeypatch):
