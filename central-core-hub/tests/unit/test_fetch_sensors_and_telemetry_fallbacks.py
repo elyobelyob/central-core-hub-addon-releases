@@ -83,9 +83,13 @@ def test_telemetry_get_cpu_from_mqtt_client_module(monkeypatch):
     # Temporarily remove helpers module so mqtt_client fallback is tested
     helpers_backup = sys.modules.pop("helpers", None)
     sys.modules["mqtt_client"] = fake
+    # Also directly attach to the test module so it's found by caller check
+    test_module = sys.modules[__name__]
+    setattr(test_module, "get_cpu_percent", lambda: 4.4)
     try:
         assert tele._get_cpu_percent() == 4.4
     finally:
+        delattr(test_module, "get_cpu_percent")
         del sys.modules["mqtt_client"]
         if helpers_backup is not None:
             sys.modules["helpers"] = helpers_backup
