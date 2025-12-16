@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.7] - 2025-12-16
+
+- refactor: remove client-side sensor device class filtering
+
+### Commits included in this release
+
+- refactor: remove client-side sensor device class filtering
+
 ## [2.0.6] - 2025-12-15
 
 - chore(release): bump version to 2.0.6
