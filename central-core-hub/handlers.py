@@ -360,6 +360,7 @@ def handle_message(
                                 attrs_map[ent] = attrs
                             # build observed timestamps for selected sensors
                             observed_map = {}
+                            device_classes_map = {}
                             for si in sensors:
                                 ent = si.get("entity_id")
                                 if not ent:
@@ -375,6 +376,11 @@ def handle_message(
                                 if not obs:
                                     obs = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                                 observed_map[ent] = obs
+                                # Extract device_class from attributes
+                                attrs = si.get("attributes", {}) or {}
+                                dc = attrs.get("device_class")
+                                if dc:
+                                    device_classes_map[ent] = dc
 
                             now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                             telemetry_payload = {
@@ -384,6 +390,7 @@ def handle_message(
                                 "attributes": attrs_map,
                                 "enabled": enabled_map,
                                 "observed": observed_map,
+                                "device_classes": device_classes_map,
                                 "timestamp": now_iso,
                             }
                             # Do not publish this to the general telemetry topic here;
@@ -553,10 +560,14 @@ def handle_message(
                 # build friendly-name and enabled maps from readback attributes
                 names_map = {}
                 enabled_map = {}
+                device_classes_map = {}
                 for ent in data_map.keys():
                     attrs = readback_attrs.get(ent, {}) or {}  # pragma: no cover
                     names_map[ent] = attrs.get("friendly_name") or ent  # pragma: no cover
                     enabled_map[ent] = not bool(attrs.get("disabled_by"))  # pragma: no cover
+                    dc = attrs.get("device_class")  # pragma: no cover
+                    if dc:  # pragma: no cover
+                        device_classes_map[ent] = dc  # pragma: no cover
 
                 if data_map:  # pragma: no cover
                     telemetry_payload = {
@@ -566,6 +577,7 @@ def handle_message(
                         "names": names_map,
                         "enabled": enabled_map,
                         "observed": readback_observed,
+                        "device_classes": device_classes_map,
                         "timestamp": now_iso,
                     }
                     try:
