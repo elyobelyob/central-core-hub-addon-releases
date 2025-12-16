@@ -32,9 +32,11 @@ def _get_cpu_percent():
                 m = sys.modules.get(caller_mod_name)
                 if m and hasattr(m, "get_cpu_percent"):
                     try:
-                        return m.get_cpu_percent()
+                        result = m.get_cpu_percent()
+                        if result is not None:
+                            return result
                     except Exception:  # pragma: no cover - defensive fallback when caller module misbehaves
-                        return None
+                        pass
     except Exception:
         pass
 
