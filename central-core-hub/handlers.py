@@ -468,6 +468,7 @@ def handle_message(
                                         "enabled": mt.get("enabled", {}),
                                         "attributes": mt.get("attributes", {}),
                                         "observed": mt.get("observed", {}),
+                                        "device_classes": mt.get("device_classes", {}),
                                     },
                                     "timestamp": now_iso,
                                 }
