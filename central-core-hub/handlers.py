@@ -277,6 +277,7 @@ def handle_message(
                     "result": {
                         "sensors_reported": list(data_map.keys()),
                         "count": len(data_map),
+                        "device_classes": device_classes_map,
                     },
                     "timestamp": now_iso,
                 }
@@ -625,6 +626,7 @@ def handle_message(
                                     "enabled": enabled_map,
                                     "attributes": attrs_map,
                                     "observed": readback_observed,
+                                    "device_classes": device_classes_map,
                                 },
                                 "timestamp": now_iso,
                             }
