@@ -1,5 +1,33 @@
 # Changelog
 
+## [2.0.12] - 2025-12-16
+
+- refactor: filter sensors by device_class instead of entity_id
+- chore: bump version to 2.0.11
+- refactor: filter sensors by vault request list
+- chore: bump version to 2.0.10
+- refactor: return all sensors regardless of vault request
+- chore: bump version to 2.0.9
+- refactor: remove device class filtering fallback
+- chore: bump version to 2.0.8
+- refactor: restore device class filtering as fallback
+- chore: bump version to 2.0.7
+- refactor: remove client-side sensor device class filtering
+
+### Commits included in this release
+
+- refactor: filter sensors by device_class instead of entity_id
+- chore: bump version to 2.0.11
+- refactor: filter sensors by vault request list
+- chore: bump version to 2.0.10
+- refactor: return all sensors regardless of vault request
+- chore: bump version to 2.0.9
+- refactor: remove device class filtering fallback
+- chore: bump version to 2.0.8
+- refactor: restore device class filtering as fallback
+- chore: bump version to 2.0.7
+- refactor: remove client-side sensor device class filtering
+
 ## [2.0.11] - 2025-12-16
 
 - refactor: filter sensors by vault request list
