@@ -19,8 +19,7 @@ import typing
 # Sensors with device_class values NOT in this set are filtered out.
 # Sensors without a device_class attribute are excluded.
 SAFE_DEVICE_CLASSES = {
-    "temperature", "motion", "door", "battery",
-    "occupancy", "presence", "opening", "aqi", "energy"
+    "motion", "door", "battery", "occupancy", "presence", "opening"
 }
 
 # Path to the add-on options file. Tests can monkeypatch this variable to

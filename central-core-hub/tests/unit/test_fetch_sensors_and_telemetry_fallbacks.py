@@ -2,6 +2,7 @@ import importlib.util
 from pathlib import Path
 import types
 from typing import Any, cast
+import pytest
 
 
 def _load_module(name):
@@ -119,3 +120,9 @@ def test_on_message_falls_back_to_file_load(monkeypatch):
 
     # after handling, preferred sensors topic should have been published
     assert any(p["topic"].endswith("/telemetry/sensors") for p in published)
+
+
+def test__load_module_importerror(monkeypatch):
+    monkeypatch.setattr(importlib.util, "spec_from_file_location", lambda *a, **k: None)
+    with pytest.raises(ImportError):
+        _load_module("mqtt_client.py")

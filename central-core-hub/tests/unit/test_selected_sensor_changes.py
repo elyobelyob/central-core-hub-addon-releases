@@ -1,6 +1,7 @@
 import json
 import importlib.util
 from pathlib import Path
+import pytest
 
 
 def _load_client_module():
@@ -121,3 +122,9 @@ def test_selected_sensor_changes_streaming(monkeypatch):
     # events for sensors that are not selected should be ignored
     c._on_ha_state_event("sensor.other", {"state": "10", "attributes": {"friendly_name": "Other"}})
     assert len(publishes) == 2
+
+
+def test__load_client_module_importerror(monkeypatch):
+    monkeypatch.setattr(importlib.util, "spec_from_file_location", lambda *a, **k: None)
+    with pytest.raises(ImportError):
+        _load_client_module()
