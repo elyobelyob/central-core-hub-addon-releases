@@ -102,7 +102,7 @@ def _ensure_ha_module():
         loader = spec.loader
         assert loader is not None
         loader.exec_module(mod)
-        _sys.modules["ha_client"] = mod
+        sys.modules["ha_client"] = mod
         return mod
 
 
