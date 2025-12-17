@@ -6,6 +6,8 @@ import importlib.util as _importlib_util
 from pathlib import Path as _Path
 import pytest as _pytest
 import time as _time
+import io as _io
+import os as _os
 
 
 class _TopicsModule(types.ModuleType):
@@ -126,17 +128,31 @@ class _FakeWSModule:
 
 @_pytest.fixture(autouse=True)
 def _patch_ha_ws(monkeypatch):
-    """Autouse fixture: patch `ha_client.websocket` and silence HA WS logs."""
+    """Autouse fixture: patch `ha_client.websocket`, silence HA WS logs,
+    and temporarily suppress print output to avoid noisy connection errors.
+    """
     ha = _ensure_ha_module()
-    if ha is None:
-        return
     # Silence instance logging method to avoid noisy output
+    if ha is not None:
+        try:
+            monkeypatch.setattr(ha.HAWebSocketListener, "_log", lambda self, m: None)
+        except Exception:
+            pass
+        # Replace websocket implementation with a fake module that returns a harmless socket
+        try:
+            monkeypatch.setattr(ha, "websocket", _FakeWSModule())
+        except Exception:
+            pass
+
+    # Redirect stdout to devnull for the duration of the test to suppress prints
+    orig_stdout = sys.stdout
+    devnull = open(_os.devnull, "w")
+    sys.stdout = devnull
     try:
-        monkeypatch.setattr(ha.HAWebSocketListener, "_log", lambda self, m: None)
-    except Exception:
-        pass
-    # Replace websocket implementation with a fake module that returns a harmless socket
-    try:
-        monkeypatch.setattr(ha, "websocket", _FakeWSModule())
-    except Exception:
-        pass
+        yield
+    finally:
+        sys.stdout = orig_stdout
+        try:
+            devnull.close()
+        except Exception:
+            pass
