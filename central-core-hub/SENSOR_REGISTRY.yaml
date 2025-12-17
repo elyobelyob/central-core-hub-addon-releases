@@ -26,7 +26,20 @@ registry_mode: deny
 # - `sensor.temperature_*`    -> matches any sensor starting with temperature_
 # - `sensor.*_battery`        -> matches sensors ending with _battery
 
-entries: []
+entries:
+	- entity_id: binary_sensor.lumi_lumi_magnet_ac01
+		type: binary_sensor
+		provide: true
+		attributes:
+			device_class: door
+		rationale: "Provide device_class for front door sensor"
+
+	- entity_id: binary_sensor.unk_manufacturer_unk_model_back_door
+		type: binary_sensor
+		provide: true
+		attributes:
+			device_class: door
+		rationale: "Provide device_class for kitchen back door sensor"
 # Device class-based filtering is now implemented in the fetch_sensors function.
 # Safe device classes: temperature, motion, door, battery, occupancy, presence, opening, aqi, energy
 # Sensors with unsafe device classes (e.g., password, payment, etc.) are automatically filtered out.
