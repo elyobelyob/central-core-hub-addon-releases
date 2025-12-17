@@ -1,6 +1,7 @@
 import json
 import importlib.util
 from pathlib import Path
+import pytest
 
 
 def _load_client_module():
@@ -58,7 +59,9 @@ def test_poll_data_type_parsing(monkeypatch):
 
     c.on_message(None, None, msg)
 
-    tele_payload = json.loads(next(p["payload"] for p in dummy.published if p["topic"] == c.preferred_sensors_topic))
+    tele_payload = json.loads(
+        next(p["payload"] for p in dummy.published if p["topic"] == c.preferred_sensors_topic)
+    )
     data = tele_payload.get("data")
     # Preserve raw HA-provided values (no coercion)
     assert data["sensor.on"] == "on"
@@ -66,6 +69,12 @@ def test_poll_data_type_parsing(monkeypatch):
     assert data["sensor.int"] == "42"
     assert data["sensor.float"] == "3.14"
     assert data["sensor.text"] == "n/a"
+
+
+def test__load_client_module_importerror(monkeypatch):
+    monkeypatch.setattr(importlib.util, "spec_from_file_location", lambda *a, **k: None)
+    with pytest.raises(ImportError):
+        _load_client_module()
 
 
 def test_on_message_binary_payload_and_set_no_ha_config(monkeypatch):
