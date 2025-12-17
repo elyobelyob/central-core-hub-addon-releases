@@ -9,7 +9,7 @@ executed lines to the target files. It's a last-step booster to reach
 
 from pathlib import Path
 import importlib.util
-from typing import cast
+from typing import Any
 
 
 def _load_mod_from_path(path):
