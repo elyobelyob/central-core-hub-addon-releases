@@ -11,7 +11,7 @@
 #   - type: 'sensor' or 'binary_sensor'
 #   - provide: boolean (whether the add-on should include/publish this)
 #   - rationale: short reason for inclusion or exclusion
-#   - preferred_name: human-friendly name used in telemetry payloads (optional)
+#   - friendly_name: human-friendly name as provided by Home Assistant
 
 apply_registry: true
 registry_mode: deny
@@ -38,7 +38,7 @@ entries: []
 #   type: sensor
 #   provide: true
 #   rationale: "Example temperature sensor used in tests; include numeric sensors by default"
-#   preferred_name: Temperature
+#   # friendly_name: Temperature
 #
 # - entity_id: sensor.a
 #   type: sensor
