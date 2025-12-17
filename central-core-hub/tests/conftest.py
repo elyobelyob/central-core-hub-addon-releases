@@ -84,11 +84,6 @@ sys.modules["central_core_mqtt_shared.schemas"] = schemas_mod
 
 
 # Test-wide HA websocket shim to prevent real network attempts during unit tests.
-import importlib.util as _importlib_util
-import sys as _sys
-from pathlib import Path as _Path
-import pytest as _pytest
-import time as _time
 
 
 def _ensure_ha_module():
