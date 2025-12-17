@@ -6,7 +6,6 @@ import importlib.util as _importlib_util
 from pathlib import Path as _Path
 import pytest as _pytest
 import time as _time
-import io as _io
 import os as _os
 
 
