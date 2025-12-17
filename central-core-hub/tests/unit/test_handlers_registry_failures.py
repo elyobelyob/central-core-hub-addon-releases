@@ -2,11 +2,13 @@ import importlib.util
 import json
 import sys
 import pathlib
+from pathlib import Path
 from types import SimpleNamespace
 
 
 def load_handlers():
-    spec = importlib.util.spec_from_file_location("handlers", "./central-core-hub/handlers.py")
+    src = Path(__file__).resolve().parents[2] / "handlers.py"
+    spec = importlib.util.spec_from_file_location("handlers", str(src))
     mod = importlib.util.module_from_spec(spec)
     sys.modules["handlers"] = mod
     spec.loader.exec_module(mod)

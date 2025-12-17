@@ -1,10 +1,12 @@
 import importlib.util
 import json
 import sys
+from pathlib import Path
 
 
 def load_ha_client():
-    spec = importlib.util.spec_from_file_location("ha_client", "./central-core-hub/ha_client.py")
+    src = Path(__file__).resolve().parents[2] / "ha_client.py"
+    spec = importlib.util.spec_from_file_location("ha_client", str(src))
     mod = importlib.util.module_from_spec(spec)
     sys.modules["ha_client"] = mod
     spec.loader.exec_module(mod)

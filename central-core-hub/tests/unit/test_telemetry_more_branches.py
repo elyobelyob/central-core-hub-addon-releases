@@ -2,6 +2,7 @@ import importlib.util
 import pathlib
 import json
 import sys
+from types import SimpleNamespace
 
 
 def _load_module():
@@ -31,6 +32,8 @@ def test_get_cpu_percent_external_override_and_fallback():
         raise RuntimeError("boom")
 
     tel._external_get_cpu_percent = bad
+    helpers_orig = sys.modules.get("helpers")
+    sys.modules["helpers"] = SimpleNamespace(get_cpu_percent=lambda: None)
     try:
         # Remove any mqtt_client entries to avoid other fallbacks
         orig = sys.modules.pop("mqtt_client", None)
@@ -41,6 +44,10 @@ def test_get_cpu_percent_external_override_and_fallback():
                 sys.modules["mqtt_client"] = orig
     finally:
         tel._external_get_cpu_percent = None
+        if helpers_orig is not None:
+            sys.modules["helpers"] = helpers_orig
+        else:
+            sys.modules.pop("helpers", None)
 
 
 def test_build_telemetry_with_helpers_and_ha_info():
