@@ -77,3 +77,67 @@ central_mod.schemas = schemas_mod
 sys.modules["central_core_mqtt_shared"] = central_mod
 sys.modules["central_core_mqtt_shared.topics"] = topics_mod
 sys.modules["central_core_mqtt_shared.schemas"] = schemas_mod
+
+
+# Test-wide HA websocket shim to prevent real network attempts during unit tests.
+import importlib.util as _importlib_util
+import sys as _sys
+from pathlib import Path as _Path
+import pytest as _pytest
+import time as _time
+
+
+def _ensure_ha_module():
+    try:
+        import ha_client as _ha
+
+        return _ha
+    except Exception:
+        # Load the local `ha_client.py` module so we can patch it for tests
+        repo_root = _Path(__file__).resolve().parents[1]
+        ha_path = repo_root / "ha_client.py"
+        spec = _importlib_util.spec_from_file_location("ha_client", str(ha_path))
+        if spec is None or getattr(spec, "loader", None) is None:
+            return None
+        mod = _importlib_util.module_from_spec(spec)
+        loader = spec.loader
+        assert loader is not None
+        loader.exec_module(mod)
+        _sys.modules["ha_client"] = mod
+        return mod
+
+
+class _FakeSock:
+    def send(self, data):
+        return None
+
+    def recv(self):
+        # Short sleep to simulate non-blocking behavior in tests
+        _time.sleep(0.001)
+        return ""
+
+    def close(self):
+        return None
+
+
+class _FakeWSModule:
+    def create_connection(self, *args, **kwargs):
+        return _FakeSock()
+
+
+@_pytest.fixture(autouse=True)
+def _patch_ha_ws(monkeypatch):
+    """Autouse fixture: patch `ha_client.websocket` and silence HA WS logs."""
+    ha = _ensure_ha_module()
+    if ha is None:
+        return
+    # Silence instance logging method to avoid noisy output
+    try:
+        monkeypatch.setattr(ha.HAWebSocketListener, "_log", lambda self, m: None)
+    except Exception:
+        pass
+    # Replace websocket implementation with a fake module that returns a harmless socket
+    try:
+        monkeypatch.setattr(ha, "websocket", _FakeWSModule())
+    except Exception:
+        pass
