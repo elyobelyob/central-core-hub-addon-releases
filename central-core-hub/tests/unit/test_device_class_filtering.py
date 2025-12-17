@@ -1,6 +1,7 @@
 import importlib.util
 from pathlib import Path
 from typing import Any, cast
+import pytest
 
 
 def _load_module(name):
@@ -204,3 +205,10 @@ def test_device_class_mixed_with_registry():
     entity_ids = [s["entity_id"] for s in sensors]
     assert "sensor.motion_allowed" in entity_ids
     assert "sensor.temp_excluded" in entity_ids
+
+
+def test__load_module_importerror(monkeypatch):
+    # force spec_from_file_location to return None to hit the ImportError branch
+    monkeypatch.setattr(importlib.util, "spec_from_file_location", lambda *a, **k: None)
+    with pytest.raises(ImportError):
+        _load_module("ha_client.py")

@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import importlib.util
+import pytest
 
 
 def _load_client_module():
@@ -187,3 +188,10 @@ def test_on_message_non_sensor_topic_no_crash():
     c.on_message(None, None, Msg())
     # no publishes expected
     assert dummy.published == []
+
+
+def test__load_client_module_spec_missing(monkeypatch):
+    # Simulate spec_from_file_location returning None to hit the ImportError branch
+    monkeypatch.setattr(importlib.util, "spec_from_file_location", lambda *a, **k: None)
+    with pytest.raises(ImportError):
+        _load_client_module()

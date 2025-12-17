@@ -1,5 +1,6 @@
 import importlib.util
 from pathlib import Path
+import pytest
 
 
 def _load_module():
@@ -66,6 +67,12 @@ def test_connect_reports_failed_then_succeeds(monkeypatch):
 
     assert c.connect() is True
     assert seq["n"] >= 2
+
+
+def test__load_module_importerror(monkeypatch):
+    monkeypatch.setattr(importlib.util, "spec_from_file_location", lambda *a, **k: None)
+    with pytest.raises(ImportError):
+        _load_module()
 
 
 def test_on_disconnect_sets_connected_false():

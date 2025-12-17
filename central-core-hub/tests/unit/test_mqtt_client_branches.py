@@ -1,6 +1,7 @@
 import json
 import importlib.util
 from pathlib import Path
+import pytest
 
 
 def _load_module():
@@ -117,3 +118,10 @@ def test_on_connect_subscribe_exception_calls_publish_sensors(monkeypatch):
     assert c._connected is True
     # on_connect now calls publish_sensors_with_default_filter to broadcast default sensors
     assert called.get("sensors") is True
+
+
+def test__load_module_importerror(monkeypatch):
+    # force spec_from_file_location to return None to hit the ImportError branch
+    monkeypatch.setattr(importlib.util, "spec_from_file_location", lambda *a, **k: None)
+    with pytest.raises(ImportError):
+        _load_module()
