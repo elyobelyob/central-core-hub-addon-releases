@@ -370,6 +370,9 @@ def _load_sensor_registry():
                     "entity_id": e.get("entity_id"),
                     "type": e.get("type"),
                     "provide": e.get("provide"),
+                    # optional metadata which may include device_class
+                    "attributes": e.get("attributes") or {},
+                    "device_class": e.get("device_class"),
                 }
             )
         _SENSOR_REGISTRY_CACHE = results
@@ -396,6 +399,29 @@ def reload_sensor_registry():
             _log("Monitored sensors: none")
     except Exception:
         _log("Monitored sensors: none")
+
+
+def _device_class_from_registry(entity_id: str):
+    """Return a device_class for `entity_id` from the SENSOR_REGISTRY if present."""
+    try:
+        import fnmatch
+
+        entries = _load_sensor_registry() or []
+        for e in entries:
+            pat = e.get("entity_id")
+            if not isinstance(pat, str):
+                continue
+            try:
+                if fnmatch.fnmatch(entity_id, pat):
+                    # prefer explicit device_class field, then attributes.device_class
+                    dc = e.get("device_class") or (e.get("attributes") or {}).get("device_class")
+                    if dc:
+                        return dc
+            except Exception:
+                continue
+        return None
+    except Exception:
+        return None
 
 
 def list_monitored_sensors():
@@ -844,7 +870,7 @@ def fetch_sensors(ha_api_url, ha_api_token, safe_device_classes=None):
         # Collect patterns according to mode
         allow_patterns = []
         deny_patterns = []
-        for e in reg:
+            for ent in data:
             eid = e.get("entity_id")
             prov = e.get("provide")
             if not isinstance(eid, str):
@@ -852,17 +878,32 @@ def fetch_sensors(ha_api_url, ha_api_token, safe_device_classes=None):
             if active_mode == "allow":
                 # allow mode: collect patterns where provide is truthy
                 if prov:
-                    allow_patterns.append(eid)
-            else:
-                # deny mode: collect patterns where provide is explicitly False
-                if prov is False:
-                    deny_patterns.append(eid)
+                # Resolve device_class: prefer HA attribute, fallback to registry
+                try:
+                    dc = attrs.get("device_class") if isinstance(attrs, dict) else None
+                except Exception:
+                    dc = None
+                if not dc:
+                    try:
+                        dc = _device_class_from_registry(ent_id)
+                    except Exception:
+                        dc = None
 
-        if active_mode == "allow":
-            if not allow_patterns:
-                return sensors
-            filtered = []
-            for s in sensors:
+                # Enforce presence of device_class: exclude sensors without one
+                if not dc:
+                    continue
+
+                sensors.append(
+                    {
+                        "entity_id": ent_id,
+                        "state": ent.get("state"),
+                        "name": attrs.get("friendly_name") or ent_id,
+                        "attributes": attrs,
+                        "device_class": dc,
+                        "last_changed": ent.get("last_changed"),
+                        "last_updated": ent.get("last_updated"),
+                    }
+                )
                 ent = s.get("entity_id")
                 for p in allow_patterns:
                     if fnmatch.fnmatch(ent, p):
@@ -1403,9 +1444,14 @@ class CentralCoreClient:
         name = attrs.get("friendly_name") or new_state.get("name") or entity_id
         enabled = not bool(attrs.get("disabled_by"))
         now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        # Extract device_class if present
+        # Extract device_class if present; if missing, consult SENSOR_REGISTRY
         device_classes_map = {}
         dc = attrs.get("device_class")
+        if not dc:
+            try:
+                dc = _device_class_from_registry(entity_id)
+            except Exception:
+                dc = None
         if dc:
             device_classes_map[entity_id] = dc
         telemetry_payload = {
