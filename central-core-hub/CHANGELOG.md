@@ -1,5 +1,105 @@
 # Changelog
 
+## [2.0.28] - 2025-12-17
+
+- fix(fetch_sensors): only enforce device_class when registry present
+- fix(fetch_sensors): restore implementation and enforce device_class resolution
+- chore(release): bump version to 2.0.27 and update sensor registry/device_class handling
+- Bump to 2.0.26
+- Add device_classes to WebSocket state_changed events in _on_ha_state_event
+- Add device_classes to monitor telemetry ACK response
+- Bump to 2.0.25
+- Add device_classes to ACK response payloads
+- Bump to 2.0.24
+- Add device_classes to all sensor request response payloads
+- Add device_classes map to sensor response payloads
+- Fix device_class filtering to be case-insensitive
+- Bump to 2.0.23
+- Fix device_class filtering to exclude sensors without a device_class
+- Revert websockets.legacy deprecation warning suppression
+- Suppress websockets.legacy deprecation warning in tests
+- Bump to 2.0.22
+- chore: bump version to 2.0.21
+- fix: only publish telemetry when vault requests sensors via device_class filter
+- chore: bump version to 2.0.20
+- fix: remove safe_device_classes from publish_sensors methods, rely on SENSOR_REGISTRY filtering only
+- chore: bump version to 2.0.19
+- fix: always apply SENSOR_REGISTRY filtering to telemetry sensors, only vault device_class filtering on top
+- chore: bump version to 2.0.18
+- fix: directly attach get_cpu_percent to test module for caller check in _get_cpu_percent fallback
+- chore: bump version to 2.0.17
+- fix: ensure test_telemetry_get_cpu_from_mqtt_client_module removes helpers to test fallback
+- chore: bump version to 2.0.16
+- fix: allow _get_cpu_percent fallback chain to continue on caller module check failure
+- chore: bump version to 2.0.15
+- test: update tests for device_class filtering by vault
+- chore: bump version to 2.0.14
+- fix: remove undefined DEFAULT_SAFE_DEVICE_CLASSES reference
+- chore: bump version to 2.0.13
+- fix: correct YAML syntax in GitHub Actions workflow
+- chore: bump version to 2.0.12
+- refactor: filter sensors by device_class instead of entity_id
+- chore: bump version to 2.0.11
+- refactor: filter sensors by vault request list
+- chore: bump version to 2.0.10
+- refactor: return all sensors regardless of vault request
+- chore: bump version to 2.0.9
+- refactor: remove device class filtering fallback
+- chore: bump version to 2.0.8
+- refactor: restore device class filtering as fallback
+- chore: bump version to 2.0.7
+- refactor: remove client-side sensor device class filtering
+
+### Commits included in this release
+
+- fix(fetch_sensors): only enforce device_class when registry present
+- fix(fetch_sensors): restore implementation and enforce device_class resolution
+- chore(release): bump version to 2.0.27 and update sensor registry/device_class handling
+- Bump to 2.0.26
+- Add device_classes to WebSocket state_changed events in _on_ha_state_event
+- Add device_classes to monitor telemetry ACK response
+- Bump to 2.0.25
+- Add device_classes to ACK response payloads
+- Bump to 2.0.24
+- Add device_classes to all sensor request response payloads
+- Add device_classes map to sensor response payloads
+- Fix device_class filtering to be case-insensitive
+- Bump to 2.0.23
+- Fix device_class filtering to exclude sensors without a device_class
+- Revert websockets.legacy deprecation warning suppression
+- Suppress websockets.legacy deprecation warning in tests
+- Bump to 2.0.22
+- chore: bump version to 2.0.21
+- fix: only publish telemetry when vault requests sensors via device_class filter
+- chore: bump version to 2.0.20
+- fix: remove safe_device_classes from publish_sensors methods, rely on SENSOR_REGISTRY filtering only
+- chore: bump version to 2.0.19
+- fix: always apply SENSOR_REGISTRY filtering to telemetry sensors, only vault device_class filtering on top
+- chore: bump version to 2.0.18
+- fix: directly attach get_cpu_percent to test module for caller check in _get_cpu_percent fallback
+- chore: bump version to 2.0.17
+- fix: ensure test_telemetry_get_cpu_from_mqtt_client_module removes helpers to test fallback
+- chore: bump version to 2.0.16
+- fix: allow _get_cpu_percent fallback chain to continue on caller module check failure
+- chore: bump version to 2.0.15
+- test: update tests for device_class filtering by vault
+- chore: bump version to 2.0.14
+- fix: remove undefined DEFAULT_SAFE_DEVICE_CLASSES reference
+- chore: bump version to 2.0.13
+- fix: correct YAML syntax in GitHub Actions workflow
+- chore: bump version to 2.0.12
+- refactor: filter sensors by device_class instead of entity_id
+- chore: bump version to 2.0.11
+- refactor: filter sensors by vault request list
+- chore: bump version to 2.0.10
+- refactor: return all sensors regardless of vault request
+- chore: bump version to 2.0.9
+- refactor: remove device class filtering fallback
+- chore: bump version to 2.0.8
+- refactor: restore device class filtering as fallback
+- chore: bump version to 2.0.7
+- refactor: remove client-side sensor device class filtering
+
 ## [2.0.27] - 2025-12-17
 
 - Bump to 2.0.26
