@@ -823,28 +823,14 @@ def fetch_sensors(ha_api_url, ha_api_token, safe_device_classes=None):
                 continue
 
             attrs = ent.get("attributes", {}) or {}
-            # Resolve device_class: prefer HA attribute, fallback to registry
-            try:
-                dc = attrs.get("device_class") if isinstance(attrs, dict) else None
-            except Exception:
-                dc = None
-            if not dc:
-                try:
-                    dc = _device_class_from_registry(ent_id)
-                except Exception:
-                    dc = None
-
-            # Enforce presence of device_class: exclude sensors without one
-            if not dc:
-                continue
-
+            # Device class resolution deferred until after registry check
             sensors.append(
                 {
                     "entity_id": ent_id,
                     "state": ent.get("state"),
                     "name": attrs.get("friendly_name") or ent_id,
                     "attributes": attrs,
-                    "device_class": dc,
+                    "device_class": attrs.get("device_class") if isinstance(attrs, dict) else None,
                     "last_changed": ent.get("last_changed"),
                     "last_updated": ent.get("last_updated"),
                 }
@@ -854,6 +840,23 @@ def fetch_sensors(ha_api_url, ha_api_token, safe_device_classes=None):
         reg = _load_sensor_registry()
         if not reg:
             return sensors
+
+        # If registry is present, ensure sensors have device_class either from
+        # HA attributes or from the registry; exclude those without one.
+        resolved = []
+        for s in sensors:
+            ent_id = s.get("entity_id")
+            dc = s.get("device_class")
+            if not dc:
+                try:
+                    dc = _device_class_from_registry(ent_id)
+                except Exception:
+                    dc = None
+            if not dc:
+                continue
+            s["device_class"] = dc
+            resolved.append(s)
+        sensors = resolved
 
         import fnmatch
 
