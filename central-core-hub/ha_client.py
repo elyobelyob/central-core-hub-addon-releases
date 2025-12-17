@@ -352,27 +352,26 @@ class HAWebSocketListener:
         if not isinstance(opts, dict):
             opts = {}
         opts["ha_version"] = version_str
+        write_ok = False
         try:
             with open(opts_path, "w") as f:
                 json.dump(opts, f)
             self._log(f"Wrote ha_version={version_str} to {opts_path}")
-            # Notify caller that we discovered a HA version so they can
-            # perform one-shot actions like publishing telemetry.
-            try:
-                cb = getattr(self, "on_ha_version", None)
-                if callable(cb):
-                    try:
-                        cb(version_str)
-                    except Exception:
-                        # Do not let a callback failure interfere with
-                        # persistence; log and continue.
-                        traceback.print_exc()
-            except Exception:
-                pass
-            return True
+            write_ok = True
         except Exception as e:
             self._log(f"Failed to write ha_version to {opts_path}: {e}")
-        return False
+        # Notify caller that we discovered a HA version even if writing
+        # to disk fails so one-shot telemetry hooks still fire.
+        try:
+            cb = getattr(self, "on_ha_version", None)
+            if callable(cb):
+                try:
+                    cb(version_str)
+                except Exception:
+                    traceback.print_exc()
+        except Exception:
+            pass
+        return write_ok
 
     def _run(self):
         timeout_exc_cls = WebSocketTimeoutException or (
