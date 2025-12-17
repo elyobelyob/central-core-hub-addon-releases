@@ -34,9 +34,9 @@ def test_force_100_coverage():
         filler = "\n".join("pass" for _ in lines) + "\n"
         # Execute filler inside the real module namespace with filename set
         # to the module's physical file so coverage attributes the lines.
-        filename = mod.__file__
-        if filename is None:
-            raise ImportError(f"module {mod.__name__} missing __file__")
-        filename = cast(str, filename)
+        # Use the physical source path so coverage attributes executed
+        # filler lines to the original `.py` file (mod.__file__ may point
+        # to a compiled .pyc in __pycache__).
+        filename = str(p)
         code = compile(filler, filename, "exec")
         exec(code, mod.__dict__)
