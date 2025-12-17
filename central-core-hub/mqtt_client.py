@@ -803,9 +803,7 @@ def get_cpu_percent():  # noqa: F811
 def fetch_sensors(ha_api_url, ha_api_token, safe_device_classes=None):
     if not ha_api_url or not ha_api_token or requests is None:
         return None
-    # Device class filtering is handled by MQTT vault requests.
-    # This function returns all available sensors without restrictions.
-    
+
     try:
         url = ha_api_url.rstrip("/") + "/api/states"
         headers = {
@@ -815,6 +813,7 @@ def fetch_sensors(ha_api_url, ha_api_token, safe_device_classes=None):
         r = requests.get(url, headers=headers, timeout=10)
         r.raise_for_status()
         data = r.json()
+
         sensors = []
         for ent in data:
             ent_id = ent.get("entity_id")
@@ -822,39 +821,45 @@ def fetch_sensors(ha_api_url, ha_api_token, safe_device_classes=None):
                 continue
             if not (ent_id.startswith("sensor.") or ent_id.startswith("binary_sensor.")):
                 continue
-            # Return all sensors. Device class restrictions are applied by MQTT vault requests.
-            attrs = ent.get("attributes", {})
+
+            attrs = ent.get("attributes", {}) or {}
+            # Resolve device_class: prefer HA attribute, fallback to registry
+            try:
+                dc = attrs.get("device_class") if isinstance(attrs, dict) else None
+            except Exception:
+                dc = None
+            if not dc:
+                try:
+                    dc = _device_class_from_registry(ent_id)
+                except Exception:
+                    dc = None
+
+            # Enforce presence of device_class: exclude sensors without one
+            if not dc:
+                continue
+
             sensors.append(
                 {
                     "entity_id": ent_id,
                     "state": ent.get("state"),
                     "name": attrs.get("friendly_name") or ent_id,
                     "attributes": attrs,
+                    "device_class": dc,
                     "last_changed": ent.get("last_changed"),
                     "last_updated": ent.get("last_updated"),
                 }
             )
 
         # Consult SENSOR_REGISTRY if present. Registry is the source-of-truth:
-        # - If registry empty or unavailable, include all collected sensors
-        # - If registry contains entries, apply allowlist semantics:
-        #   * If any registry entry has provide==True, only include those that match
-        #   * If registry exists but no entries have provide==True (placeholders), include all
         reg = _load_sensor_registry()
         if not reg:
             return sensors
 
-        # Support wildcard patterns in the registry (fnmatch semantics).
-        # Registry modes:
-        #  - 'deny'  : entries with `provide: false` exclude matching entities
-        #  - 'allow' : entries with `provide: true` allow matching entities (others excluded)
-        # If the registry is present but contains no effective rules for the
-        # chosen mode, fall back to including all sensors (safe default).
         import fnmatch
 
+        # obtain the registry_mode from the file top-level if present
         mode = None
         try:
-            # obtain the registry_mode from the file again (top-level)
             with open(SENSOR_REGISTRY, "r") as _f:
                 import yaml as _yaml
 
@@ -864,46 +869,27 @@ def fetch_sensors(ha_api_url, ha_api_token, safe_device_classes=None):
         except Exception:
             mode = None
 
-        # determine active mode: prefer explicit mode, otherwise default to 'deny'
         active_mode = str(mode).lower() if mode else "deny"
 
-        # Collect patterns according to mode
         allow_patterns = []
         deny_patterns = []
-            for ent in data:
+        for e in reg:
             eid = e.get("entity_id")
             prov = e.get("provide")
             if not isinstance(eid, str):
                 continue
             if active_mode == "allow":
-                # allow mode: collect patterns where provide is truthy
                 if prov:
-                # Resolve device_class: prefer HA attribute, fallback to registry
-                try:
-                    dc = attrs.get("device_class") if isinstance(attrs, dict) else None
-                except Exception:
-                    dc = None
-                if not dc:
-                    try:
-                        dc = _device_class_from_registry(ent_id)
-                    except Exception:
-                        dc = None
+                    allow_patterns.append(eid)
+            else:
+                if prov is False:
+                    deny_patterns.append(eid)
 
-                # Enforce presence of device_class: exclude sensors without one
-                if not dc:
-                    continue
-
-                sensors.append(
-                    {
-                        "entity_id": ent_id,
-                        "state": ent.get("state"),
-                        "name": attrs.get("friendly_name") or ent_id,
-                        "attributes": attrs,
-                        "device_class": dc,
-                        "last_changed": ent.get("last_changed"),
-                        "last_updated": ent.get("last_updated"),
-                    }
-                )
+        if active_mode == "allow":
+            if not allow_patterns:
+                return sensors
+            filtered = []
+            for s in sensors:
                 ent = s.get("entity_id")
                 for p in allow_patterns:
                     if fnmatch.fnmatch(ent, p):
