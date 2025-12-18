@@ -2,15 +2,22 @@
 import json
 from datetime import datetime, timezone
 
+# Get the local timezone for timestamp normalization
+_LOCAL_TZ = datetime.now().astimezone().tzinfo
+
 
 def _normalize_timestamp(ts_str):
-    """Normalize timestamp string to UTC ISO format with Z."""
+    """Normalize timestamp string to hub's local timezone ISO format."""
     if not isinstance(ts_str, str):
         return ts_str
     try:
         dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            # Assume naive timestamps are in local timezone
+            dt = dt.replace(tzinfo=_LOCAL_TZ)
+        else:
+            # Convert aware timestamps to local timezone
+            dt = dt.astimezone(_LOCAL_TZ)
         return dt.isoformat().replace('+00:00', 'Z')
     except ValueError:
         # If parsing fails, return as is

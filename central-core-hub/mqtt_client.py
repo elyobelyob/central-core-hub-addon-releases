@@ -24,6 +24,9 @@ import typing
 from datetime import datetime, timezone
 from typing import cast
 
+# Get the local timezone for timestamp normalization
+_LOCAL_TZ = datetime.now().astimezone().tzinfo
+
 # Device class filtering is handled by MQTT vault requests (authoritative source).
 # fetch_sensors() returns all sensors without client-side device class restrictions.
 
@@ -35,9 +38,9 @@ OUTBOX_TOPICS = os.environ.get("MQTT_OUTBOX_TOPICS")
 
 
 def _normalize_timestamp(ts_str):
-    """Normalize timestamp string to UTC ISO format with 'Z' suffix.
+    """Normalize timestamp string to hub's local timezone ISO format.
     
-    Parses ISO timestamp strings, ensures UTC timezone, and formats with 'Z'.
+    Parses ISO timestamp strings, ensures local timezone, and formats accordingly.
     If parsing fails, returns the original string.
     """
     if not ts_str:
@@ -46,7 +49,11 @@ def _normalize_timestamp(ts_str):
         # Handle 'Z' suffix by replacing with +00:00 for parsing
         dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            # Assume naive timestamps are in local timezone
+            dt = dt.replace(tzinfo=_LOCAL_TZ)
+        else:
+            # Convert aware timestamps to local timezone
+            dt = dt.astimezone(_LOCAL_TZ)
         return dt.isoformat().replace('+00:00', 'Z')
     except ValueError:
         return ts_str

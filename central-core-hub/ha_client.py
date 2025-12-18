@@ -12,7 +12,8 @@ import threading
 import time
 import traceback
 import typing
-from datetime import datetime, timezone
+from datetime import datetime
+from typing import Optional
 
 # Safe device classes allowed for sensor inclusion.
 # Sensors with device_class values in this set are considered safe for telemetry.
@@ -31,11 +32,14 @@ OPTIONS_PATH = "/data/options.json"
 # consumers can apply a TTL without hitting the filesystem.
 _HA_VERSION_CACHE: typing.Optional[dict] = None
 
+# Get the local timezone for timestamp normalization
+_LOCAL_TZ = datetime.now().astimezone().tzinfo
 
-def _normalize_timestamp(ts_str):
-    """Normalize timestamp string to UTC ISO format with 'Z' suffix.
+
+def _normalize_timestamp(ts_str: Optional[str]) -> Optional[str]:
+    """Normalize timestamp string to hub's local timezone ISO format.
     
-    Parses ISO timestamp strings, ensures UTC timezone, and formats with 'Z'.
+    Parses ISO timestamp strings, ensures local timezone, and formats accordingly.
     If parsing fails, returns the original string.
     """
     if not ts_str:
@@ -44,7 +48,11 @@ def _normalize_timestamp(ts_str):
         # Handle 'Z' suffix by replacing with +00:00 for parsing
         dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            # Assume naive timestamps are in local timezone
+            dt = dt.replace(tzinfo=_LOCAL_TZ)
+        else:
+            # Convert aware timestamps to local timezone
+            dt = dt.astimezone(_LOCAL_TZ)
         return dt.isoformat().replace('+00:00', 'Z')
     except ValueError:
         return ts_str
