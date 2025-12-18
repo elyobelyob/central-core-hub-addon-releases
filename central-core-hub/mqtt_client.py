@@ -34,6 +34,24 @@ OUTBOX_MAX = int(os.environ.get("MQTT_OUTBOX_MAX") or "1000")
 OUTBOX_TOPICS = os.environ.get("MQTT_OUTBOX_TOPICS")
 
 
+def _normalize_timestamp(ts_str):
+    """Normalize timestamp string to UTC ISO format with 'Z' suffix.
+    
+    Parses ISO timestamp strings, ensures UTC timezone, and formats with 'Z'.
+    If parsing fails, returns the original string.
+    """
+    if not ts_str:
+        return ts_str
+    try:
+        # Handle 'Z' suffix by replacing with +00:00 for parsing
+        dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.isoformat().replace('+00:00', 'Z')
+    except ValueError:
+        return ts_str
+
+
 def _should_persist_topic(topic: str) -> bool:
     """Decide whether a topic should be persisted to the outbox.
 
@@ -831,8 +849,8 @@ def fetch_sensors(ha_api_url, ha_api_token, safe_device_classes=None):
                     "name": attrs.get("friendly_name") or ent_id,
                     "attributes": attrs,
                     "device_class": attrs.get("device_class") if isinstance(attrs, dict) else None,
-                    "last_changed": ent.get("last_changed"),
-                    "last_updated": ent.get("last_updated"),
+                    "last_changed": _normalize_timestamp(ent.get("last_changed")),
+                    "last_updated": _normalize_timestamp(ent.get("last_updated")),
                 }
             )
 

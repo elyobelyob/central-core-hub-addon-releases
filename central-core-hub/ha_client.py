@@ -12,7 +12,7 @@ import threading
 import time
 import traceback
 import typing
-# datetime/timezone not used in this module
+from datetime import datetime, timezone
 
 # Safe device classes allowed for sensor inclusion.
 # Sensors with device_class values in this set are considered safe for telemetry.
@@ -30,6 +30,24 @@ OPTIONS_PATH = "/data/options.json"
 # small struct with the version string and the timestamp it was set so
 # consumers can apply a TTL without hitting the filesystem.
 _HA_VERSION_CACHE: typing.Optional[dict] = None
+
+
+def _normalize_timestamp(ts_str):
+    """Normalize timestamp string to UTC ISO format with 'Z' suffix.
+    
+    Parses ISO timestamp strings, ensures UTC timezone, and formats with 'Z'.
+    If parsing fails, returns the original string.
+    """
+    if not ts_str:
+        return ts_str
+    try:
+        # Handle 'Z' suffix by replacing with +00:00 for parsing
+        dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.isoformat().replace('+00:00', 'Z')
+    except ValueError:
+        return ts_str
 
 
 def set_ha_version(version: str, ts: float | None = None):
@@ -120,8 +138,8 @@ def fetch_sensors(ha_api_url, ha_api_token, requests_mod=None):
                         "attributes": attrs,
                         # Preserve HA timestamps when present so downstream systems
                         # can reason about data recency.
-                        "last_changed": ent.get("last_changed"),
-                        "last_updated": ent.get("last_updated"),
+                        "last_changed": _normalize_timestamp(ent.get("last_changed")),
+                        "last_updated": _normalize_timestamp(ent.get("last_updated")),
                     }
                 )
         return sensors
@@ -152,8 +170,8 @@ def fetch_sensors_by_ids(ha_api_url, ha_api_token, entity_ids, requests_mod=None
                         "state": data.get("state"),
                         "name": data.get("attributes", {}).get("friendly_name") or data.get("entity_id"),
                         "attributes": data.get("attributes", {}) or {},
-                        "last_changed": data.get("last_changed"),
-                        "last_updated": data.get("last_updated"),
+                        "last_changed": _normalize_timestamp(data.get("last_changed")),
+                        "last_updated": _normalize_timestamp(data.get("last_updated")),
                     }
                 )
         except Exception:
