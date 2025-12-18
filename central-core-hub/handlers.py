@@ -200,14 +200,16 @@ def handle_message(
                 ent = s.get("entity_id")
                 if not ent:
                     continue
-                obs = None
-                try:
-                    obs = s.get("last_changed") or s.get("last_updated")
-                    # Normalize HA timestamps to match add-on format
-                    if obs and isinstance(obs, str):
-                        obs = obs.replace("+00:00", "Z")
-                except Exception:
-                    obs = None
+                obs = s.get("last_changed") or s.get("last_updated")
+                # Normalize HA timestamps to UTC ISO format with Z
+                if obs and isinstance(obs, str):
+                    try:
+                        dt = datetime.fromisoformat(obs.replace('Z', '+00:00'))
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        obs = dt.isoformat().replace('+00:00', 'Z')
+                    except ValueError:
+                        pass  # keep as is if can't parse
                 if not obs:
                     obs = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 observed_map[ent] = obs
@@ -366,14 +368,16 @@ def handle_message(
                                 ent = si.get("entity_id")
                                 if not ent:
                                     continue
-                                obs = None
-                                try:
-                                    obs = si.get("last_changed") or si.get("last_updated")
-                                    # Normalize HA timestamps to match add-on format
-                                    if obs and isinstance(obs, str):
-                                        obs = obs.replace("+00:00", "Z")
-                                except Exception:
-                                    obs = None
+                                obs = si.get("last_changed") or si.get("last_updated")
+                                # Normalize HA timestamps to UTC ISO format with Z
+                                if obs and isinstance(obs, str):
+                                    try:
+                                        dt = datetime.fromisoformat(obs.replace('Z', '+00:00'))
+                                        if dt.tzinfo is None:
+                                            dt = dt.replace(tzinfo=timezone.utc)
+                                        obs = dt.isoformat().replace('+00:00', 'Z')
+                                    except ValueError:
+                                        pass  # keep as is if can't parse
                                 if not obs:
                                     obs = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                                 observed_map[ent] = obs
@@ -520,13 +524,16 @@ def handle_message(
                                 readback_values[ent] = read_state
                                 readback_attrs[ent] = data.get("attributes", {}) or {}
                                 # prefer HA-provided timestamps if available
-                                try:
-                                    obs = data.get("last_changed") or data.get("last_updated")
-                                    # Normalize HA timestamps to match add-on format
-                                    if obs and isinstance(obs, str):
-                                        obs = obs.replace("+00:00", "Z")
-                                except Exception:
-                                    obs = None
+                                obs = data.get("last_changed") or data.get("last_updated")
+                                # Normalize HA timestamps to UTC ISO format with Z
+                                if obs and isinstance(obs, str):
+                                    try:
+                                        dt = datetime.fromisoformat(obs.replace('Z', '+00:00'))
+                                        if dt.tzinfo is None:
+                                            dt = dt.replace(tzinfo=timezone.utc)
+                                        obs = dt.isoformat().replace('+00:00', 'Z')
+                                    except ValueError:
+                                        pass  # keep as is if can't parse
                                 if not obs:
                                     obs = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                                 readback_observed[ent] = obs

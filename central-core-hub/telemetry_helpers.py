@@ -3,20 +3,28 @@ import json
 from datetime import datetime, timezone
 
 
+def _normalize_timestamp(ts_str):
+    """Normalize timestamp string to UTC ISO format with Z."""
+    if not isinstance(ts_str, str):
+        return ts_str
+    try:
+        dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.isoformat().replace('+00:00', 'Z')
+    except ValueError:
+        # If parsing fails, return as is
+        return ts_str
+
+
 def attach_ha_timestamps(attrs, sensor):
     """Attach Home Assistant timestamps to attributes, normalizing format."""
     lc = sensor.get("last_changed")
     if lc is not None:
-        # Normalize HA timestamps to match add-on format
-        if isinstance(lc, str):
-            lc = lc.replace("+00:00", "Z")
-        attrs["last_changed"] = lc
+        attrs["last_changed"] = _normalize_timestamp(lc)
     lu = sensor.get("last_updated")
     if lu is not None:
-        # Normalize HA timestamps to match add-on format
-        if isinstance(lu, str):
-            lu = lu.replace("+00:00", "Z")
-        attrs["last_updated"] = lu
+        attrs["last_updated"] = _normalize_timestamp(lu)
     return attrs
 
 
