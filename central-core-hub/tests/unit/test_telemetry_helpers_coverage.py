@@ -97,6 +97,22 @@ def test_attach_ha_timestamps_non_string_values():
     assert result["last_updated"] == 67890
 
 
+def test_normalize_timestamp_various_formats():
+    """Test _normalize_timestamp with various input formats."""
+    # Test +00:00 format
+    assert telemetry_helpers._normalize_timestamp("2025-01-01T00:00:00+00:00") == "2025-01-01T00:00:00Z"
+    # Test Z format
+    assert telemetry_helpers._normalize_timestamp("2025-01-01T00:00:00Z") == "2025-01-01T00:00:00Z"
+    # Test naive timestamp (should be treated as local time, which is GMT)
+    assert telemetry_helpers._normalize_timestamp("2025-01-01T00:00:00") == "2025-01-01T00:00:00Z"
+    # Test different timezone
+    assert telemetry_helpers._normalize_timestamp("2025-01-01T00:00:00-05:00") == "2025-01-01T05:00:00Z"
+    # Test None
+    assert telemetry_helpers._normalize_timestamp(None) is None
+    # Test invalid string
+    assert telemetry_helpers._normalize_timestamp("invalid") == "invalid"
+
+
 def test_build_sensor_maps_basic():
     """Test building sensor maps from a list of sensors."""
     sensors = [
