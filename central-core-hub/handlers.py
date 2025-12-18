@@ -95,7 +95,7 @@ def handle_message(
             completion_payload = {
                 "status": "completed" if upd_result.get("success") else "failed",
                 "result": upd_result,
-                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "timestamp": datetime.now().astimezone().isoformat().replace("+00:00", "Z"),
             }
             if command_id:
                 try:
@@ -125,7 +125,7 @@ def handle_message(
                     v1_ack = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
                 ack_payload = {
                     "status": "acknowledged",
-                    "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    "timestamp": datetime.now().astimezone().isoformat().replace("+00:00", "Z"),
                 }
                 try:
                     client._publish(v1_ack, json.dumps(ack_payload), qos=1)
@@ -201,17 +201,19 @@ def handle_message(
                 if not ent:
                     continue
                 obs = s.get("last_changed") or s.get("last_updated")
-                # Normalize HA timestamps to UTC ISO format with Z
+                # Normalize HA timestamps to hub's local timezone ISO format
                 if obs and isinstance(obs, str):
                     try:
                         dt = datetime.fromisoformat(obs.replace('Z', '+00:00'))
                         if dt.tzinfo is None:
-                            dt = dt.replace(tzinfo=timezone.utc)
+                            dt = dt.replace(tzinfo=datetime.now().astimezone().tzinfo)
+                        else:
+                            dt = dt.astimezone(datetime.now().astimezone().tzinfo)
                         obs = dt.isoformat().replace('+00:00', 'Z')
                     except ValueError:
                         pass  # keep as is if can't parse
                 if not obs:
-                    obs = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                    obs = datetime.now().astimezone().isoformat().replace("+00:00", "Z")
                 observed_map[ent] = obs
                 # Extract device_class from attributes
                 attrs = s.get("attributes", {}) or {}
@@ -303,7 +305,7 @@ def handle_message(
                 v1_ack = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
                 ack_payload = {
                     "status": "acknowledged",
-                    "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    "timestamp": datetime.now().astimezone().isoformat().replace("+00:00", "Z"),
                 }
                 try:
                     client._publish(v1_ack, json.dumps(ack_payload), qos=1)
@@ -369,17 +371,19 @@ def handle_message(
                                 if not ent:
                                     continue
                                 obs = si.get("last_changed") or si.get("last_updated")
-                                # Normalize HA timestamps to UTC ISO format with Z
+                                # Normalize HA timestamps to hub's local timezone ISO format
                                 if obs and isinstance(obs, str):
                                     try:
                                         dt = datetime.fromisoformat(obs.replace('Z', '+00:00'))
                                         if dt.tzinfo is None:
-                                            dt = dt.replace(tzinfo=timezone.utc)
+                                            dt = dt.replace(tzinfo=datetime.now().astimezone().tzinfo)
+                                        else:
+                                            dt = dt.astimezone(datetime.now().astimezone().tzinfo)
                                         obs = dt.isoformat().replace('+00:00', 'Z')
                                     except ValueError:
                                         pass  # keep as is if can't parse
                                 if not obs:
-                                    obs = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                                    obs = datetime.now().astimezone().isoformat().replace("+00:00", "Z")
                                 observed_map[ent] = obs
                                 # Extract device_class from attributes
                                 attrs = si.get("attributes", {}) or {}
@@ -525,33 +529,35 @@ def handle_message(
                                 readback_attrs[ent] = data.get("attributes", {}) or {}
                                 # prefer HA-provided timestamps if available
                                 obs = data.get("last_changed") or data.get("last_updated")
-                                # Normalize HA timestamps to UTC ISO format with Z
+                                # Normalize HA timestamps to hub's local timezone ISO format
                                 if obs and isinstance(obs, str):
                                     try:
                                         dt = datetime.fromisoformat(obs.replace('Z', '+00:00'))
                                         if dt.tzinfo is None:
-                                            dt = dt.replace(tzinfo=timezone.utc)
+                                            dt = dt.replace(tzinfo=datetime.now().astimezone().tzinfo)
+                                        else:
+                                            dt = dt.astimezone(datetime.now().astimezone().tzinfo)
                                         obs = dt.isoformat().replace('+00:00', 'Z')
                                     except ValueError:
                                         pass  # keep as is if can't parse
                                 if not obs:
-                                    obs = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                                    obs = datetime.now().astimezone().isoformat().replace("+00:00", "Z")
                                 readback_observed[ent] = obs
                             except Exception:
                                 readback_values[ent] = st
                                 readback_attrs[ent] = {}
-                                readback_observed[ent] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                                readback_observed[ent] = datetime.now().astimezone().isoformat().replace("+00:00", "Z")
                         else:
                             readback_values[ent] = st
                             readback_attrs[ent] = {}
-                            readback_observed[ent] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                            readback_observed[ent] = datetime.now().astimezone().isoformat().replace("+00:00", "Z")
                         results["set"].append(ent)
                     else:
                         results["failed"].append({"entity_id": ent, "reason": "no_ha_config"})
                 except Exception as e:
                     results["failed"].append({"entity_id": ent, "reason": str(e)})
 
-            now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            now_iso = datetime.now().astimezone().isoformat().replace("+00:00", "Z")
 
             try:
                 data_map = {}

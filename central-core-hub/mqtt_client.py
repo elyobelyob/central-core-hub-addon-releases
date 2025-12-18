@@ -1987,7 +1987,7 @@ class CentralCoreClient:
         payload = {
             "schema_version": 1,
             "client_id": self.client_id,
-            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "timestamp": datetime.now(_LOCAL_TZ).isoformat().replace("+00:00", "Z"),
             "sensors": filtered or [],
         }
         try:
@@ -2018,7 +2018,7 @@ class CentralCoreClient:
         payload = {
             "schema_version": 1,
             "client_id": self.client_id,
-            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "timestamp": datetime.now(_LOCAL_TZ).isoformat().replace("+00:00", "Z"),
             "sensors": sensors or [],
         }
         # Publish to preferred Vault topic (development-only; legacy dropped)
