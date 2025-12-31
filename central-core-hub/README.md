@@ -1,79 +1,28 @@
-# Central Core Hub Add-on
 
-This repository folder contains the Home Assistant Supervisor add-on for Central Core Hub.
+# Central Core Hub
 
-Installation (from Supervisor add-on store):
+Welcome to the Central Core Hub add-on for Home Assistant!
 
-Notes:
-docker build -t ghcr.io/elyobelyob/central-core-hub:1.0.0 .
-# Central Core Hub Add-on
+## What is Central Core Hub?
+Central Core Hub is an add-on that brings enhanced connectivity and integration features to your Home Assistant system. It is designed to be reliable, easy to use, and to work seamlessly with your smart home setup.
 
-This is a Home Assistant Supervisor add-on for Central Core Hub.
+## Key Features
+- Simple setup and automatic updates
+- Reliable operation with built-in health monitoring
+- Designed for a wide range of Home Assistant devices
+- Minimal permissions for improved security
 
-## Installation
-1. Go to Supervisor → Add-on Store → Repositories.
-2. Add:
-	```
-	https://github.com/elyobelyob/central-core-hub-addon-releases
-	```
-3. Find "Central Core Hub" in the Add-on Store and install it.
+## How to Use
+Once installed, Central Core Hub will start automatically and run in the background. You can manage the add-on from the Home Assistant Supervisor panel:
+- Start, stop, or restart the add-on as needed
+- Enable or disable automatic updates
+- Monitor resource usage and health status
 
-## Features
-- Multi-arch: amd64, aarch64
-- Host networking
-- Minimal permissions
+No additional configuration is required for most users. The add-on is designed to work out of the box.
 
-## Build/CI
-- Prebuilt images: `ghcr.io/elyobelyob/central-core-hub:<tag>`
-- Supervisor can also build locally using the included Dockerfile.
+## Need Help?
+For support, please visit [www.central-core.com](https://www.central-core.com).
 
-## Support
-See the Home Assistant [add-on developer docs](https://developers.home-assistant.io/docs/add-ons/) for more info.
-```
+**Note:** This add-on is intended to be installed and managed only by the maintainer. If you are not the maintainer, please do not install this add-on on your devices.
 
-2. Add this repository URL to Home Assistant Supervisor Add-on store:
-
-```text
-https://github.com/elyobelyob/central-core-hub-addon-releases
-```
-
-3. Refresh the Add-on store. The add-on `Central Core Hub` should appear. Install it — Supervisor will validate `config.yaml` and `config.json`.
-
-4. If the add-on fails validation, check Supervisor logs and ensure the image tag exists and is publicly accessible (or authenticate GHCR).
-
-CI / Auto-build (GitHub Actions):
-
-- This repository includes a workflow: `.github/workflows/release.yml`.
-- Push a git tag (for example `1.0.0`) to trigger the workflow which will build multi-arch images and push them to `ghcr.io/elyobelyob/central-core-hub:<tag>` and `:latest`.
-
-HAOS reliability notes
-
-- `init: true` is enabled so the container runs with proper init handling.
-- `stage: stable` and `timeout: 30` are set in the add-on config to help Supervisor manage lifecycle.
-- `ports` and `watchdog` are provided (web UI assumed on port `8080`) — Supervisor will use the `watchdog` URL to validate add-on health.
-- The Docker image includes `io.hass.*` labels (build-time) to improve Supervisor compatibility.
-
-If you want HAOS to build the add-on locally instead of pulling from GHCR, Supervisor will use `Dockerfile` and `build.yaml` from the add-on folder. Building on the Pi can be slow; pushing prebuilt images to GHCR is faster for users.
-
-Example (create annotated tag and push):
-
-```bash
-git tag 1.0.0
-git push origin 1.0.0
-```
-
-Notes on authentication:
-- The workflow uses `${{ secrets.GITHUB_TOKEN }}` to authenticate to GitHub Container Registry (GHCR). Ensure Actions has `packages: write` permission (it is set in the workflow). In some orgs, you may need a Personal Access Token with `write:packages` stored in `secrets.GHCR_PAT` and the workflow adjusted to use it.
-
-Using a Personal Access Token (recommended in some orgs):
-
-1. Create a PAT with these scopes: `repo` (if private repo) and `write:packages` (to push to GHCR). Optionally `read:packages`.
-2. In your repository Settings → Secrets → Actions, add a new secret named `GHCR_PAT` containing the PAT value.
-3. The workflow will prefer `GHCR_PAT` when present; otherwise it falls back to the default `GITHUB_TOKEN`.
-
-If you want me to add sample `icon.png`/`logo.png` raster files or to create a GitHub Actions job that also builds release notes, tell me and I'll add them.
-
-Supervisor builds:
-- A `Dockerfile` and `build.yaml` are included, so Supervisor or the Home Assistant build system can build the add-on locally if you prefer not to use the prebuilt GHCR image.
-
-If you want me to also add a `logo.png`, `run.sh`, or a Dockerfile/build files, tell me which approach you prefer (prebuilt image vs. build in Supervisor).
+Thank you for using Central Core Hub!
