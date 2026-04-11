@@ -18,6 +18,7 @@ import re
 import socket
 import sys
 import tempfile
+import threading
 import time
 import traceback
 import typing
@@ -1111,6 +1112,7 @@ class CentralCoreClient:
             self._outbox = None
 
         self._connected = False
+        self._stop_event = threading.Event()
         # Cache the last HA version we observed so telemetry can reuse it
         self._ha_version_cache = None
         # track last sensors publish time (epoch seconds)
@@ -1775,7 +1777,7 @@ class CentralCoreClient:
     def connect(self):
         # Backwards-compatible public connect method implemented in
         # terms of smaller helpers: `connect_once` and `wait_for_connected`.
-        while True:
+        while not self._stop_event.is_set():
             ok = self.connect_once()
             if ok:
                 # wait for connection signal from on_connect handler
@@ -1795,7 +1797,9 @@ class CentralCoreClient:
                     _log("MQTT connect failed, retrying in 5s")
                 except Exception:
                     pass
-            time.sleep(5)
+            # Interruptible sleep: exits early if stop is requested
+            self._stop_event.wait(timeout=5)
+        return False
 
     def connect_once(self):
         """Attempt a single connect + loop_start. Returns True on no exception.
@@ -2175,6 +2179,10 @@ class CentralCoreClient:
 
     def close(self):
         """Stop background listeners and disconnect MQTT (safe to call multiple times)."""
+        try:
+            self._stop_event.set()
+        except Exception:
+            pass
         try:
             listener = getattr(self, "_ha_ws_listener", None)
             if listener is not None:
