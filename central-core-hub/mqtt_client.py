@@ -1113,6 +1113,7 @@ class CentralCoreClient:
 
         self._connected = False
         self._stop_event = threading.Event()
+        self._temp_cert_files = []
         # Cache the last HA version we observed so telemetry can reuse it
         self._ha_version_cache = None
         # track last sensors publish time (epoch seconds)
@@ -1334,12 +1335,12 @@ class CentralCoreClient:
             if not cert_str:
                 return ""
             if cert_str.startswith("-----BEGIN"):
-                # It's certificate content, write to temp file
                 with tempfile.NamedTemporaryFile(mode="w", suffix=suffix, delete=False) as f:
                     f.write(cert_str)
-                    return f.name
+                    path = f.name
+                self._temp_cert_files.append(path)
+                return path
             else:
-                # It's a file path
                 return cert_str
 
         self.mqtt_ca = _handle_cert(self.mqtt_ca, ".ca.crt")
@@ -2183,6 +2184,12 @@ class CentralCoreClient:
             self._stop_event.set()
         except Exception:
             pass
+        for path in list(getattr(self, "_temp_cert_files", [])):
+            try:
+                os.unlink(path)
+            except Exception:
+                pass
+        self._temp_cert_files = []
         try:
             listener = getattr(self, "_ha_ws_listener", None)
             if listener is not None:
