@@ -108,3 +108,21 @@ def test_build_vault_payload_extracts_metrics_and_ha():
     assert obj["metrics"]["cpu_percent"] == 5
     assert obj["telemetry_interval"] == 30
     assert obj.get("ha_version") == "2025.0.0"
+
+
+def test_get_cpu_percent_falls_back_to_helpers_module():
+    """After removing inspect.currentframe(), helpers module must still be used."""
+    import types
+    fake_helpers = types.SimpleNamespace(get_cpu_percent=lambda: 42)
+    old = sys.modules.get("helpers")
+    sys.modules["helpers"] = fake_helpers
+    tel._external_get_cpu_percent = None
+    try:
+        result = tel._get_cpu_percent()
+        assert result == 42
+    finally:
+        tel._external_get_cpu_percent = None
+        if old is not None:
+            sys.modules["helpers"] = old
+        else:
+            sys.modules.pop("helpers", None)
