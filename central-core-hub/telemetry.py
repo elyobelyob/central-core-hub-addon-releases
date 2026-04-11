@@ -1,4 +1,5 @@
 import json
+import os
 import platform
 import socket
 import sys
@@ -8,13 +9,7 @@ _LOCAL_TZ = datetime.now().astimezone().tzinfo
 
 
 def _get_cpu_percent():
-    """Resolve and call a get_cpu_percent implementation from available modules.
-
-    This prefers a `helpers` module if present, otherwise falls back to any
-    already-loaded `mqtt_client` module (useful for tests that monkeypatch
-    the function on the mqtt_client module). If nothing is found, returns
-    None.
-    """
+    """Resolve and call get_cpu_percent from helpers or the external override."""
     # If an external override has been attached to this module, use it first.
     ext = globals().get("_external_get_cpu_percent")
     if ext:
@@ -22,25 +17,6 @@ def _get_cpu_percent():
             return ext()
         except Exception:  # pragma: no cover - external override error is environment-specific
             pass
-
-    # First, check the caller module (useful when mqtt_client monkeypatches get_cpu_percent)
-    try:
-        import inspect
-
-        frm = inspect.currentframe()
-        if frm is not None and frm.f_back is not None:
-            caller_mod_name = frm.f_back.f_globals.get("__name__")
-            if caller_mod_name:
-                m = sys.modules.get(caller_mod_name)
-                if m and hasattr(m, "get_cpu_percent"):
-                    try:
-                        result = m.get_cpu_percent()
-                        if result is not None:
-                            return result
-                    except Exception:  # pragma: no cover - defensive fallback when caller module misbehaves
-                        pass
-    except Exception:
-        pass
 
     try:
         import helpers
@@ -50,14 +26,6 @@ def _get_cpu_percent():
             return cpu_val
     except Exception:  # pragma: no cover - helpers module not available in test harness
         pass
-    # Try common mqtt_client module names for tests that import in different ways
-    for cand in ("mqtt_client", "fresh_mqtt_client", "m", "m2"):
-        mod = sys.modules.get(cand)
-        if mod and hasattr(mod, "get_cpu_percent"):
-            try:
-                return mod.get_cpu_percent()
-            except Exception:  # pragma: no cover - defensive fallback for misbehaving modules
-                return None
     return None
 
 
@@ -139,7 +107,7 @@ def build_telemetry(
             disk_total, disk_free = None, None
     except Exception:
         disk_total, disk_free = None, None  # pragma: no cover
-    cpu_count = 1
+    cpu_count = os.cpu_count() or 1
     # Allow caller to supply a specific get_cpu_percent function (useful for tests);
     # otherwise resolve at runtime.
     cpu_percent = None
