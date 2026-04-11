@@ -349,6 +349,8 @@ except Exception:
 # clear the cache so handlers can update the file at runtime.
 _SENSOR_REGISTRY_CACHE = None
 _SENSOR_REGISTRY_MTIME = None
+_SENSOR_REGISTRY_DOC_CACHE = None
+_SENSOR_REGISTRY_DOC_MTIME = None
 
 
 def _load_sensor_registry():
@@ -407,6 +409,39 @@ def _load_sensor_registry():
         return []
 
 
+def _load_sensor_registry_doc():
+    """Load and cache the full SENSOR_REGISTRY.yaml document dict.
+
+    Uses mtime-based caching so the file is only read when it changes.
+    Returns an empty dict if the file is absent, unreadable, or malformed.
+    """
+    global _SENSOR_REGISTRY_DOC_CACHE, _SENSOR_REGISTRY_DOC_MTIME
+    try:
+        import yaml
+
+        if not SENSOR_REGISTRY.exists():
+            _SENSOR_REGISTRY_DOC_CACHE = {}
+            _SENSOR_REGISTRY_DOC_MTIME = None
+            return {}
+        try:
+            mtime = SENSOR_REGISTRY.stat().st_mtime
+        except Exception:
+            mtime = None
+        if (
+            _SENSOR_REGISTRY_DOC_CACHE is not None
+            and mtime is not None
+            and mtime == _SENSOR_REGISTRY_DOC_MTIME
+        ):
+            return _SENSOR_REGISTRY_DOC_CACHE
+        with open(SENSOR_REGISTRY, "r") as f:
+            doc = yaml.safe_load(f) or {}
+        _SENSOR_REGISTRY_DOC_CACHE = doc if isinstance(doc, dict) else {}
+        _SENSOR_REGISTRY_DOC_MTIME = mtime
+        return _SENSOR_REGISTRY_DOC_CACHE
+    except Exception:
+        return {}
+
+
 def reload_sensor_registry():
     """Invalidate any cached sensor registry so subsequent calls read disk."""
     global _SENSOR_REGISTRY_CACHE, _SENSOR_REGISTRY_MTIME
@@ -463,29 +498,22 @@ def list_monitored_sensors():
 
 
 def is_entity_allowed(entity_id: str) -> bool:
-    """Return True if the given entity_id is allowed by the registry.
+    """Return True if entity_id is allowed by the registry (uses mtime cache).
 
-    If the registry is absent or not enabled, default to allowing the
-    entity (safe/fallback behavior).
+    Defaults to True (allow) when the registry is absent or not enabled.
     """
     try:
         import fnmatch
-        import yaml
 
-        if not SENSOR_REGISTRY.exists():
-            return True
-        with open(SENSOR_REGISTRY, "r") as f:
-            doc = yaml.safe_load(f) or {}
-        if not isinstance(doc, dict):
+        doc = _load_sensor_registry_doc()
+        if not doc:
             return True
         mode = doc.get("registry_mode")
         apply_registry = bool(doc.get("apply_registry", False))
         if mode is None and not apply_registry:
             return True
-
         active_mode = str(mode).lower() if mode else "deny"
 
-        # Collect patterns
         allow_patterns = []
         deny_patterns = []
         for e in doc.get("entries") or []:
@@ -510,7 +538,6 @@ def is_entity_allowed(entity_id: str) -> bool:
                     return True
             return False
 
-        # deny mode
         if not deny_patterns:
             return True
         for p in deny_patterns:
