@@ -341,6 +341,7 @@ def handle_message(
                         # make a stable 'selected' value for reminder/persist
                         selected = getattr(client, "selected_sensors", None) or list(s)
                         # Immediately publish current values for the selected sensors
+                        monitor_telemetry = None
                         try:
                             sensors = fetch_sensors(client.ha_api_url, client.ha_api_token) or []
                             sensors = [
@@ -458,7 +459,7 @@ def handle_message(
                                 v1_comp = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
                             # If we built monitor_telemetry above, include it in the
                             # completion ACK so callers receive the current values
-                            mt = locals().get("monitor_telemetry")
+                            mt = monitor_telemetry
                             if mt:
                                 comp_payload = {
                                     "status": "completed",
@@ -543,6 +544,10 @@ def handle_message(
 
             now_iso = datetime.now().astimezone().isoformat().replace("+00:00", "Z")
 
+            data_map = None
+            attrs_map = {}
+            names_map = {}
+            enabled_map = {}
             try:
                 data_map = {}
                 raw_map = {}
@@ -642,13 +647,9 @@ def handle_message(
             # publishes for tests and consumers that rely on a
             # `preferred_sensors_topic` publication.
             try:
-                data_map = locals().get("data_map", None)
                 # Only publish fallback telemetry if the real data_map wasn't
                 # constructed and published above.
                 if not data_map:
-                    attrs_map = locals().get("attrs_map", {}) or {}
-                    names_map = locals().get("names_map", {}) or {}
-                    enabled_map = locals().get("enabled_map", {}) or {}
                     telemetry_payload = {
                         "data": {},
                         "raw": {},
@@ -679,7 +680,7 @@ def handle_message(
                 # simple completion ACK with the results so callers receive
                 # an outcome for the set operation.
                 try:
-                    if command_id and not (locals().get("data_map", None)):
+                    if command_id and not data_map:
                         try:
                             v1_comp = client.build_ack_topic(action, command_id)
                         except Exception:
