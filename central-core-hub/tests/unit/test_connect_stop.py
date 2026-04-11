@@ -1,5 +1,7 @@
 import importlib.util
+import os
 import pathlib
+import tempfile
 import threading
 
 
@@ -29,3 +31,16 @@ def test_close_sets_stop_event():
     assert not c._stop_event.is_set()
     c.close()
     assert c._stop_event.is_set()
+
+
+def test_temp_cert_files_deleted_on_close():
+    mod = _load()
+    c = mod.CentralCoreClient({"client_id": "test"})
+    # Create a real temp file and register it as if _handle_cert wrote it
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".crt", delete=False) as f:
+        f.write("fake cert")
+        path = f.name
+    c._temp_cert_files = [path]
+    assert os.path.exists(path)
+    c.close()
+    assert not os.path.exists(path), "Temp cert file should be deleted on close()"
