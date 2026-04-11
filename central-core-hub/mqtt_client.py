@@ -54,7 +54,7 @@ def _normalize_timestamp(ts_str):
         else:
             # Convert aware timestamps to local timezone
             dt = dt.astimezone(_LOCAL_TZ)
-        return dt.isoformat().replace('+00:00', 'Z')
+        return dt.isoformat()
     except ValueError:
         return ts_str
 
@@ -1559,7 +1559,7 @@ class CentralCoreClient:
         self._addon_slug = slug
         return slug
 
-    def trigger_addon_update(self):
+    def trigger_addon_update(self, version=None):
         slug = self._resolve_addon_slug()
         if not slug:
             return {"success": False, "reason": "addon_slug_missing"}

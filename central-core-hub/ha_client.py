@@ -53,7 +53,7 @@ def _normalize_timestamp(ts_str: Optional[str]) -> Optional[str]:
         else:
             # Convert aware timestamps to local timezone
             dt = dt.astimezone(_LOCAL_TZ)
-        return dt.isoformat().replace('+00:00', 'Z')
+        return dt.isoformat()
     except ValueError:
         return ts_str
 
