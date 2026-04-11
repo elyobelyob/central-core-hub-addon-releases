@@ -9,6 +9,26 @@ import os
 import traceback
 from datetime import datetime, timezone
 
+_LOCAL_TZ = datetime.now().astimezone().tzinfo
+
+
+def _normalize_ts(ts_str):
+    """Normalize a HA timestamp to hub's local timezone ISO format.
+
+    Returns ts_str unchanged if it is not a parseable string.
+    """
+    if not ts_str or not isinstance(ts_str, str):
+        return ts_str
+    try:
+        dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_LOCAL_TZ)
+        else:
+            dt = dt.astimezone(_LOCAL_TZ)
+        return dt.isoformat()
+    except ValueError:
+        return ts_str
+
 
 def _is_entity_allowed(entity_id):
     """Runtime helper that consults `mqtt_client.is_entity_allowed` when
@@ -201,19 +221,7 @@ def handle_message(
                 if not ent:
                     continue
                 obs = s.get("last_changed") or s.get("last_updated")
-                # Normalize HA timestamps to hub's local timezone ISO format
-                if obs and isinstance(obs, str):
-                    try:
-                        dt = datetime.fromisoformat(obs.replace('Z', '+00:00'))
-                        if dt.tzinfo is None:
-                            dt = dt.replace(tzinfo=datetime.now().astimezone().tzinfo)
-                        else:
-                            dt = dt.astimezone(datetime.now().astimezone().tzinfo)
-                        obs = dt.isoformat().replace('+00:00', 'Z')
-                    except ValueError:
-                        pass  # keep as is if can't parse
-                if not obs:
-                    obs = datetime.now().astimezone().isoformat().replace("+00:00", "Z")
+                obs = _normalize_ts(obs) or datetime.now().astimezone().isoformat()
                 observed_map[ent] = obs
                 # Extract device_class from attributes
                 attrs = s.get("attributes", {}) or {}
@@ -371,19 +379,7 @@ def handle_message(
                                 if not ent:
                                     continue
                                 obs = si.get("last_changed") or si.get("last_updated")
-                                # Normalize HA timestamps to hub's local timezone ISO format
-                                if obs and isinstance(obs, str):
-                                    try:
-                                        dt = datetime.fromisoformat(obs.replace('Z', '+00:00'))
-                                        if dt.tzinfo is None:
-                                            dt = dt.replace(tzinfo=datetime.now().astimezone().tzinfo)
-                                        else:
-                                            dt = dt.astimezone(datetime.now().astimezone().tzinfo)
-                                        obs = dt.isoformat().replace('+00:00', 'Z')
-                                    except ValueError:
-                                        pass  # keep as is if can't parse
-                                if not obs:
-                                    obs = datetime.now().astimezone().isoformat().replace("+00:00", "Z")
+                                obs = _normalize_ts(obs) or datetime.now().astimezone().isoformat()
                                 observed_map[ent] = obs
                                 # Extract device_class from attributes
                                 attrs = si.get("attributes", {}) or {}
@@ -529,28 +525,16 @@ def handle_message(
                                 readback_attrs[ent] = data.get("attributes", {}) or {}
                                 # prefer HA-provided timestamps if available
                                 obs = data.get("last_changed") or data.get("last_updated")
-                                # Normalize HA timestamps to hub's local timezone ISO format
-                                if obs and isinstance(obs, str):
-                                    try:
-                                        dt = datetime.fromisoformat(obs.replace('Z', '+00:00'))
-                                        if dt.tzinfo is None:
-                                            dt = dt.replace(tzinfo=datetime.now().astimezone().tzinfo)
-                                        else:
-                                            dt = dt.astimezone(datetime.now().astimezone().tzinfo)
-                                        obs = dt.isoformat().replace('+00:00', 'Z')
-                                    except ValueError:
-                                        pass  # keep as is if can't parse
-                                if not obs:
-                                    obs = datetime.now().astimezone().isoformat().replace("+00:00", "Z")
+                                obs = _normalize_ts(obs) or datetime.now().astimezone().isoformat()
                                 readback_observed[ent] = obs
                             except Exception:
                                 readback_values[ent] = st
                                 readback_attrs[ent] = {}
-                                readback_observed[ent] = datetime.now().astimezone().isoformat().replace("+00:00", "Z")
+                                readback_observed[ent] = datetime.now().astimezone().isoformat()
                         else:
                             readback_values[ent] = st
                             readback_attrs[ent] = {}
-                            readback_observed[ent] = datetime.now().astimezone().isoformat().replace("+00:00", "Z")
+                            readback_observed[ent] = datetime.now().astimezone().isoformat()
                         results["set"].append(ent)
                     else:
                         results["failed"].append({"entity_id": ent, "reason": "no_ha_config"})
