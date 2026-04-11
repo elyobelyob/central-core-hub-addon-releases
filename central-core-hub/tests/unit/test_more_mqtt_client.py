@@ -39,8 +39,8 @@ def test_connect_handles_timeout_and_retries(monkeypatch):
     c._client = ClientShim()
     monkeypatch.setattr(c, "connect_once", fake_connect_once)
     monkeypatch.setattr(c, "wait_for_connected", fake_wait_for_connected)
-    # avoid sleeping
-    monkeypatch.setattr(mc.time, "sleep", lambda s: None)
+    # avoid sleeping delays from _stop_event.wait(timeout=5)
+    monkeypatch.setattr(c._stop_event, "wait", lambda timeout=None: None)
 
     # connect should eventually return True after retry
     assert c.connect() is True
@@ -63,7 +63,8 @@ def test_connect_reports_failed_then_succeeds(monkeypatch):
 
     monkeypatch.setattr(c, "connect_once", fake_connect_once)
     monkeypatch.setattr(c, "wait_for_connected", lambda timeout=5: True)
-    monkeypatch.setattr(mc.time, "sleep", lambda s: None)
+    # avoid sleeping delays from _stop_event.wait(timeout=5)
+    monkeypatch.setattr(c._stop_event, "wait", lambda timeout=None: None)
 
     assert c.connect() is True
     assert seq["n"] >= 2

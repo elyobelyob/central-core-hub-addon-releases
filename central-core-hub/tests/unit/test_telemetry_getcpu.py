@@ -49,22 +49,12 @@ def test_helpers_module_get_cpu_percent(monkeypatch):
     del sys.modules["helpers"]
 
 
-def test_fallback_mqtt_client_candidate(monkeypatch):
+def test_fallback_external_get_cpu_percent(monkeypatch):
     t = _load_telemetry_module()
-    # inject a fake module named 'mqtt_client' with get_cpu_percent
-    mod = types.ModuleType("mqtt_client")
-    setattr(mod, "get_cpu_percent", lambda: 3.3)
-    sys.modules["mqtt_client"] = mod
-    
-    old_helpers = sys.modules.get("helpers")
-    sys.modules["helpers"] = None
+    # inject via the _external_get_cpu_percent hook (new API)
+    t._external_get_cpu_percent = lambda: 3.3
     try:
-        # calling _get_cpu_percent directly should find it
         val = t._get_cpu_percent()
         assert val == 3.3
     finally:
-        del sys.modules["mqtt_client"]
-        if old_helpers is not None:
-             sys.modules["helpers"] = old_helpers
-        else:
-             sys.modules.pop("helpers", None)
+        t._external_get_cpu_percent = None

@@ -147,16 +147,21 @@ def test_connect_loop_handles_connect_failed_and_retries(monkeypatch):
 
     c = CentralCoreClient({"client_id": "unit-loop1"})
 
-    # make connect_once return False to exercise retry branch
-    c.connect_once = lambda: False
+    # make connect_once return False to exercise retry branch, then set stop event
+    call_count = [0]
 
-    # cause sleep to raise to break out of loop after first iteration
-    monkeypatch.setattr(mod.time, "sleep", lambda s: (_ for _ in ()).throw(SystemExit()))
+    def once():
+        call_count[0] += 1
+        if call_count[0] >= 2:
+            c._stop_event.set()
+        return False
 
-    try:
-        c.connect()
-    except SystemExit:
-        pass
+    c.connect_once = once
+    # avoid sleeping delays
+    monkeypatch.setattr(c._stop_event, "wait", lambda timeout=None: None)
+
+    c.connect()
+    assert call_count[0] >= 1
 
 
 def test_connect_loop_handles_timed_out_wait(monkeypatch):
@@ -185,12 +190,16 @@ def test_connect_loop_handles_timed_out_wait(monkeypatch):
 
     c._client = FakeClient()
 
-    monkeypatch.setattr(mod.time, "sleep", lambda s: (_ for _ in ()).throw(SystemExit()))
+    # wait_for_connected returns False then sets stop event so loop exits
+    def wait_timed_out(timeout=5):
+        c._stop_event.set()
+        return False
 
-    try:
-        c.connect()
-    except SystemExit:
-        pass
+    c.wait_for_connected = wait_timed_out
+    # avoid 5s wait from _stop_event.wait(timeout=5) between retries
+    monkeypatch.setattr(c._stop_event, "wait", lambda timeout=None: None)
+
+    c.connect()
 
     assert called["stopped"] is True
 

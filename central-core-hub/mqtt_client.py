@@ -753,7 +753,7 @@ except Exception:
         def _bt_simple(client_id):
             return json.dumps({"client_id": client_id})
 
-        def _bv_simple(raw):
+        def _bv_simple(_raw):
             return None
 
         # expose a single name for analyzers: assign the simple implementations
@@ -853,7 +853,7 @@ def get_cpu_percent():  # noqa: F811
         return None
 
 
-def fetch_sensors(ha_api_url, ha_api_token, safe_device_classes=None):
+def fetch_sensors(ha_api_url, ha_api_token, _safe_device_classes=None):
     if not ha_api_url or not ha_api_token or requests is None:
         return None
 
@@ -983,6 +983,8 @@ class CentralCoreClient:
         self.mqtt_cert = ""
         self.mqtt_key = ""
         self.mqtt_cert_bundle = options.get("mqtt_cert_bundle") or ""
+        # Must be initialized before _setup_cert_files() which calls _handle_cert
+        self._temp_cert_files = []
         # Handle certificate content vs paths
         self._setup_cert_files()
         self.client_id = options.get("client_id") or socket.gethostname().lower().replace(" ", "-")
@@ -1073,25 +1075,25 @@ class CentralCoreClient:
                 # If even the fallback fails, preserve previous behavior as best-effort
                 # by creating a minimal shim client so the instance is usable during tests.
                 class _ClientShim:
-                    def __init__(self, *a, **k):
+                    def __init__(self, *_a, **_k):
                         pass
 
-                    def username_pw_set(self, u, p=None):
+                    def username_pw_set(self, _u, _p=None):
                         return None
 
-                    def tls_set(self, **kw):
+                    def tls_set(self, **_kw):
                         return None
 
-                    def publish(self, topic, payload, qos=0):
+                    def publish(self, *_args, **_kwargs):
                         class R:
                             rc = 0
 
                         return R()
 
-                    def subscribe(self, topic, qos=0):
+                    def subscribe(self, *_args, **_kwargs):
                         return (0, 1)
 
-                    def connect(self, *a, **k):
+                    def connect(self, *_a, **_k):
                         return 0
 
                     def loop_start(self):
@@ -1113,7 +1115,6 @@ class CentralCoreClient:
 
         self._connected = False
         self._stop_event = threading.Event()
-        self._temp_cert_files = []
         # Cache the last HA version we observed so telemetry can reuse it
         self._ha_version_cache = None
         # track last sensors publish time (epoch seconds)
@@ -1487,7 +1488,7 @@ class CentralCoreClient:
         attrs = new_state.get("attributes") or {}
         name = attrs.get("friendly_name") or new_state.get("name") or entity_id
         enabled = not bool(attrs.get("disabled_by"))
-        now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        now_iso = datetime.now(timezone.utc).isoformat()
         # Extract device_class if present; if missing, consult SENSOR_REGISTRY
         device_classes_map = {}
         dc = attrs.get("device_class")
@@ -1498,12 +1499,14 @@ class CentralCoreClient:
                 dc = None
         if dc:
             device_classes_map[entity_id] = dc
+        obs_ts = _normalize_timestamp(attrs.get("last_changed") or attrs.get("last_updated")) or now_iso
         telemetry_payload = {
             "data": {entity_id: raw_state},
             "raw": {entity_id: raw_state},
             "names": {entity_id: name},
             "enabled": {entity_id: enabled},
             "attributes": {entity_id: dict(attrs)},
+            "observed": {entity_id: obs_ts},
             "device_classes": device_classes_map,
             "timestamp": now_iso,
         }
@@ -1589,7 +1592,7 @@ class CentralCoreClient:
         self._addon_slug = slug
         return slug
 
-    def trigger_addon_update(self, version=None):
+    def trigger_addon_update(self, _version=None):
         slug = self._resolve_addon_slug()
         if not slug:
             return {"success": False, "reason": "addon_slug_missing"}
@@ -1622,7 +1625,7 @@ class CentralCoreClient:
             "update": update_result,
         }
 
-    def on_connect(self, client, userdata, *args, **kwargs):
+    def on_connect(self, client, _userdata, *args, **kwargs):
         """MQTT on_connect callback.
 
         Accept variable args/kwargs to be tolerant of different paho-mqtt
@@ -1683,7 +1686,7 @@ class CentralCoreClient:
             _log("Unhandled exception in on_connect", sys.stderr)
             traceback.print_exc()
 
-    def on_disconnect(self, client, userdata, *args, **kwargs):
+    def on_disconnect(self, _client, _userdata, *args, **kwargs):
         """MQTT on_disconnect callback.
 
         Be tolerant of varying callback signatures from paho-mqtt. Attempt
@@ -1709,7 +1712,7 @@ class CentralCoreClient:
             _log("Unhandled exception in on_disconnect", sys.stderr)
             traceback.print_exc()
 
-    def on_message(self, client, userdata, msg):
+    def on_message(self, _client, userdata, msg):
         try:
             try:
                 payload = msg.payload.decode("utf-8", errors="replace")
@@ -2016,15 +2019,34 @@ class CentralCoreClient:
         sensors = fetch_sensors(self.ha_api_url, self.ha_api_token) or []
         # Filter by safe_device_classes if configured
         filtered = self._filter_sensors_by_device_class(sensors, self.safe_device_classes)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        data_map = {}
+        names_map = {}
+        enabled_map = {}
+        attrs_map = {}
+        observed_map = {}
+        for s in (filtered or []):
+            ent = s.get("entity_id")
+            if not ent:
+                continue
+            attrs = s.get("attributes", {}) or {}
+            data_map[ent] = s.get("state")
+            names_map[ent] = attrs.get("friendly_name") or s.get("name") or ent
+            enabled_map[ent] = not bool(attrs.get("disabled_by"))
+            attrs_map[ent] = attrs
+            obs = s.get("last_changed") or s.get("last_updated")
+            observed_map[ent] = _normalize_timestamp(obs) if obs else now_iso
         payload = {
-            "schema_version": 1,
-            "client_id": self.client_id,
-            "timestamp": datetime.now(_LOCAL_TZ).isoformat().replace("+00:00", "Z"),
-            "sensors": filtered or [],
+            "data": data_map,
+            "names": names_map,
+            "enabled": enabled_map,
+            "attributes": attrs_map,
+            "observed": observed_map,
+            "timestamp": now_iso,
         }
         try:
             self._publish(self.preferred_sensors_topic, json.dumps(payload), qos=0)
-            _log(f"Published default sensors to {self.preferred_sensors_topic} (count={len(filtered)})")
+            _log(f"Published default sensors to {self.preferred_sensors_topic} (count={len(data_map)})")
         except Exception:
             _log(
                 f"Failed to publish default sensors to {self.preferred_sensors_topic}",

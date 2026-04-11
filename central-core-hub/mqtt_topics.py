@@ -13,7 +13,7 @@ def _try_get_module(name: str) -> Any:
     try:
         mod = __import__(name)
         return mod
-    except Exception:
+    except ImportError:
         return None
 
 

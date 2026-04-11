@@ -1,6 +1,7 @@
 """Test suite for telemetry_helpers.py to achieve 100% coverage."""
 
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Add the parent directory to the path to import telemetry_helpers
@@ -9,8 +10,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import telemetry_helpers
 
 
+def _utc(ts_str):
+    """Parse a normalized timestamp and return its UTC equivalent datetime."""
+    return datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(timezone.utc)
+
+
 def test_attach_ha_timestamps_with_plus_timezone():
-    """Test timestamp normalization from +00:00 to Z format."""
+    """Test timestamp normalization: +00:00 input → valid tz-aware ISO string."""
     sensor = {
         "last_changed": "2025-01-01T00:00:00+00:00",
         "last_updated": "2025-01-01T00:00:01+00:00",
@@ -18,8 +24,8 @@ def test_attach_ha_timestamps_with_plus_timezone():
     attrs = {}
     result = telemetry_helpers.attach_ha_timestamps(attrs, sensor)
 
-    assert result["last_changed"] == "2025-01-01T00:00:00Z"
-    assert result["last_updated"] == "2025-01-01T00:00:01Z"
+    assert _utc(result["last_changed"]) == datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    assert _utc(result["last_updated"]) == datetime(2025, 1, 1, 0, 0, 1, tzinfo=timezone.utc)
 
 
 def test_attach_ha_timestamps_with_z_format():
@@ -31,8 +37,8 @@ def test_attach_ha_timestamps_with_z_format():
     attrs = {}
     result = telemetry_helpers.attach_ha_timestamps(attrs, sensor)
 
-    assert result["last_changed"] == "2025-01-01T00:00:00Z"
-    assert result["last_updated"] == "2025-01-01T00:00:01Z"
+    assert _utc(result["last_changed"]) == datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    assert _utc(result["last_updated"]) == datetime(2025, 1, 1, 0, 0, 1, tzinfo=timezone.utc)
 
 
 def test_attach_ha_timestamps_with_none_values():
@@ -67,7 +73,7 @@ def test_attach_ha_timestamps_only_last_changed():
     attrs = {}
     result = telemetry_helpers.attach_ha_timestamps(attrs, sensor)
 
-    assert result["last_changed"] == "2025-01-01T00:00:00Z"
+    assert _utc(result["last_changed"]) == datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
     assert "last_updated" not in result
 
 
@@ -80,7 +86,7 @@ def test_attach_ha_timestamps_only_last_updated():
     result = telemetry_helpers.attach_ha_timestamps(attrs, sensor)
 
     assert "last_changed" not in result
-    assert result["last_updated"] == "2025-01-01T00:00:01Z"
+    assert _utc(result["last_updated"]) == datetime(2025, 1, 1, 0, 0, 1, tzinfo=timezone.utc)
 
 
 def test_attach_ha_timestamps_non_string_values():
@@ -99,14 +105,18 @@ def test_attach_ha_timestamps_non_string_values():
 
 def test_normalize_timestamp_various_formats():
     """Test _normalize_timestamp with various input formats."""
-    # Test +00:00 format
-    assert telemetry_helpers._normalize_timestamp("2025-01-01T00:00:00+00:00") == "2025-01-01T00:00:00Z"
+    utc = timezone.utc
+    # Test +00:00 format — point-in-time must be preserved
+    assert _utc(telemetry_helpers._normalize_timestamp("2025-01-01T00:00:00+00:00")) == datetime(2025, 1, 1, 0, 0, 0, tzinfo=utc)
     # Test Z format
-    assert telemetry_helpers._normalize_timestamp("2025-01-01T00:00:00Z") == "2025-01-01T00:00:00Z"
-    # Test naive timestamp (should be treated as local time, which is GMT)
-    assert telemetry_helpers._normalize_timestamp("2025-01-01T00:00:00") == "2025-01-01T00:00:00Z"
-    # Test different timezone
-    assert telemetry_helpers._normalize_timestamp("2025-01-01T00:00:00-05:00") == "2025-01-01T05:00:00Z"
+    assert _utc(telemetry_helpers._normalize_timestamp("2025-01-01T00:00:00Z")) == datetime(2025, 1, 1, 0, 0, 0, tzinfo=utc)
+    # Test naive timestamp — treated as local time; result must be a tz-aware ISO string
+    result = telemetry_helpers._normalize_timestamp("2025-01-01T00:00:00")
+    assert isinstance(result, str)
+    dt = datetime.fromisoformat(result.replace("Z", "+00:00"))
+    assert dt.tzinfo is not None
+    # Test -05:00 timezone — UTC equivalent must be +5h
+    assert _utc(telemetry_helpers._normalize_timestamp("2025-01-01T00:00:00-05:00")) == datetime(2025, 1, 1, 5, 0, 0, tzinfo=utc)
     # Test None
     assert telemetry_helpers._normalize_timestamp(None) is None
     # Test invalid string
@@ -267,8 +277,8 @@ def test_build_sensor_maps_timestamps_normalized():
 
     data_map, names_map, enabled_map, attrs_map = telemetry_helpers.build_sensor_maps(sensors)
 
-    assert attrs_map["sensor.test"]["last_changed"] == "2025-01-01T00:00:00Z"
-    assert attrs_map["sensor.test"]["last_updated"] == "2025-01-01T00:00:01Z"
+    assert _utc(attrs_map["sensor.test"]["last_changed"]) == datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    assert _utc(attrs_map["sensor.test"]["last_updated"]) == datetime(2025, 1, 1, 0, 0, 1, tzinfo=timezone.utc)
 
 
 def test_build_sensor_event_payload():

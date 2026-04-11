@@ -2,7 +2,6 @@ import importlib.util
 import os
 import pathlib
 import tempfile
-import threading
 
 
 def _load():

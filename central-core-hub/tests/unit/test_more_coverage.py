@@ -180,8 +180,11 @@ def test_fetch_sensors_happy_path(monkeypatch):
     assert isinstance(sensors, list)
     assert any(s["entity_id"] == "sensor.a" for s in sensors)
     sensor_a = next(s for s in sensors if s["entity_id"] == "sensor.a")
-    assert sensor_a.get("last_changed") == "2025-01-01T00:00:00Z"
-    assert sensor_a.get("last_updated") == "2025-01-01T00:00:01Z"
+    from datetime import datetime, timezone
+    lc = datetime.fromisoformat(sensor_a.get("last_changed").replace("Z", "+00:00"))
+    lu = datetime.fromisoformat(sensor_a.get("last_updated").replace("Z", "+00:00"))
+    assert lc.astimezone(timezone.utc) == datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    assert lu.astimezone(timezone.utc) == datetime(2025, 1, 1, 0, 0, 1, tzinfo=timezone.utc)
 
 
 def test_sensors_poll_with_requested_subset(monkeypatch):

@@ -174,3 +174,75 @@ def test_resolve_ha_version_uses_mqtt_options(tmp_path, monkeypatch):
     client.ha_api_token = None
 
     assert mqtt_mod.CentralCoreClient._resolve_ha_version(client) == "2025.12.5"
+
+
+def _load_mqtt():
+    src = Path(__file__).resolve().parents[3] / "central-core-hub" / "mqtt_client.py"
+    return _load_module(src, "mqtt_client_ha_obs")
+
+
+def test_ha_state_event_payload_contains_observed_key():
+    mod = _load_mqtt()
+    c = mod.CentralCoreClient({"client_id": "hub1"})
+    publishes = []
+    c._publish = lambda topic, payload, **kw: publishes.append((topic, payload))
+    c.preferred_sensors_topic = "sensors/test"
+    c._selected_sensors_set = {"sensor.temperature"}
+    c._selected_sensor_cache = {}
+
+    entity_id = "sensor.temperature"
+    new_state = {
+        "state": "22.5",
+        "attributes": {"friendly_name": "Temperature"},
+        "last_changed": "2024-01-15T10:30:00Z",
+        "last_updated": "2024-01-15T10:30:00Z",
+    }
+    c._on_ha_state_event(entity_id, new_state)
+
+    assert len(publishes) == 1
+    payload = json.loads(publishes[0][1])
+    assert "observed" in payload, "Payload must contain 'observed' key"
+    assert entity_id in payload["observed"]
+
+
+def test_publish_sensors_with_default_filter_uses_poll_schema():
+    mod = _load_mqtt()
+    c = mod.CentralCoreClient({"client_id": "hub1"})
+    c.ha_api_url = "http://ha.local"
+    c.ha_api_token = "tok"
+    c.preferred_sensors_topic = "sensors/test"
+    c.safe_device_classes = ["motion"]
+    publishes = []
+    c._publish = lambda topic, payload, **kw: publishes.append((topic, payload))
+
+    sensors = [
+        {
+            "entity_id": "binary_sensor.motion",
+            "state": "on",
+            "attributes": {"device_class": "motion", "friendly_name": "Motion"},
+            "last_changed": "2024-01-15T10:30:00Z",
+            "last_updated": "2024-01-15T10:30:00Z",
+        }
+    ]
+    c._filter_sensors_by_device_class = lambda s, dc: s
+
+    mod_ref = c.__class__.__module__
+    import sys
+    mqtt_mod = sys.modules.get(mod_ref) or mod
+
+    # Patch fetch_sensors at module level
+    orig_fetch = mod.fetch_sensors
+    mod.fetch_sensors = lambda url, token: sensors
+    try:
+        c.publish_sensors_with_default_filter()
+    finally:
+        mod.fetch_sensors = orig_fetch
+
+    assert len(publishes) == 1, "Expected one publish"
+    payload = json.loads(publishes[0][1])
+    assert "data" in payload, "Must use poll schema with 'data' key"
+    assert "names" in payload
+    assert "enabled" in payload
+    assert "attributes" in payload
+    assert "observed" in payload
+    assert "binary_sensor.motion" in payload["data"]

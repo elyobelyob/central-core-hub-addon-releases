@@ -118,7 +118,7 @@ def test_connect_retry_path(monkeypatch):
     c.connect_once = connect_once
     c.wait_for_connected = wait_for_connected
 
-    # speed up sleep to no-op
-    monkeypatch.setattr(mod.time, "sleep", lambda s: None)
+    # avoid sleeping delays from _stop_event.wait(timeout=5)
+    monkeypatch.setattr(c._stop_event, "wait", lambda timeout=None: None)
 
     assert c.connect() is True
