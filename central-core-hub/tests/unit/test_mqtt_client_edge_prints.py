@@ -21,18 +21,20 @@ def test_connect_loop_reports_connect_failed(monkeypatch):
     c = CentralCoreClient({"client_id": "loop-fail"})
 
     # connect_once returns False to trigger 'MQTT connect failed' branch
-    monkeypatch.setattr(c, "connect_once", lambda: False)
+    call_count = [0]
 
-    # make sleep raise to break the infinite loop
-    def stopper(s):
-        raise RuntimeError("stop")
+    def once():
+        call_count[0] += 1
+        if call_count[0] >= 2:
+            c._stop_event.set()
+        return False
 
-    monkeypatch.setattr(mc.time, "sleep", stopper)
+    monkeypatch.setattr(c, "connect_once", once)
+    # make wait return immediately
+    monkeypatch.setattr(c._stop_event, "wait", lambda timeout=None: None)
 
-    try:
-        c.connect()
-    except RuntimeError:
-        pass
+    c.connect()
+    assert call_count[0] >= 1
 
 
 def test_connect_loop_reports_timed_out(monkeypatch):
@@ -50,13 +52,10 @@ def test_connect_loop_reports_timed_out(monkeypatch):
             return None
 
     c._client = ClientShim()
-    # make sleep raise to break loop after printing
-    monkeypatch.setattr(mc.time, "sleep", lambda s: (_ for _ in ()).throw(RuntimeError("stop")))
+    # Set stop event so loop exits after first iteration
+    c._stop_event.set()
 
-    try:
-        c.connect()
-    except RuntimeError:
-        pass
+    c.connect()
 
 
 def test_publish_sensors_handles_publish_exception(monkeypatch):

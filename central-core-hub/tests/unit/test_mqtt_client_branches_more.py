@@ -67,8 +67,8 @@ def test_connect_retries_until_success(monkeypatch):
 
     monkeypatch.setattr(c, "connect_once", seq_connect_once)
     monkeypatch.setattr(c, "wait_for_connected", lambda timeout=5: True)
-    # avoid sleeping delays
-    monkeypatch.setattr("time.sleep", lambda s: None)
+    # avoid sleeping delays from _stop_event.wait(timeout=5)
+    monkeypatch.setattr(c._stop_event, "wait", lambda timeout=None: None)
 
     ok = c.connect()
     assert ok is True

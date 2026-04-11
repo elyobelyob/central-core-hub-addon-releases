@@ -27,64 +27,48 @@ def test_external_get_cpu_percent_override_success():
         delattr(t, "_external_get_cpu_percent")
 
 
-def test_external_get_cpu_percent_exception_and_sys_module_fallback():
+def test_external_get_cpu_percent_exception_falls_back_to_none():
     t = load_telemetry()
 
     def bad():
         raise RuntimeError("bad ext")
 
     setattr(t, "_external_get_cpu_percent", bad)
-    # add dummy mqtt_client module to sys.modules
-    mod = types.ModuleType("mqtt_client")
-    setattr(mod, "get_cpu_percent", lambda: 7)
-    sys.modules["mqtt_client"] = mod
-    # ensure helpers doesn't interfere
+    # Block helpers import so we get None as final result
     old_helpers = sys.modules.get("helpers")
     sys.modules["helpers"] = None
     try:
-        # external raises, so fallback to mqtt_client.get_cpu_percent should return 7
-        assert t._get_cpu_percent() == 7
+        # external raises, helpers blocked → None
+        result = t._get_cpu_percent()
+        assert result is None
     finally:
         try:
             delattr(t, "_external_get_cpu_percent")
         except Exception:
             pass
-        # remove our dummy module
-        if sys.modules.get("mqtt_client") is mod:
-            del sys.modules["mqtt_client"]
         if old_helpers is not None:
-             sys.modules["helpers"] = old_helpers
+            sys.modules["helpers"] = old_helpers
         else:
-             sys.modules.pop("helpers", None)
+            sys.modules.pop("helpers", None)
 
 
 def test_build_telemetry_get_cpu_callable_raises_uses_fallback():
     t = load_telemetry()
-    # ensure no external override
-    if hasattr(t, "_external_get_cpu_percent"):
-        delattr(t, "_external_get_cpu_percent")
-
-    # add dummy module for fallback
-    mod = types.ModuleType("mqtt_client")
-    setattr(mod, "get_cpu_percent", lambda: 5)
-    sys.modules["mqtt_client"] = mod
-    old_helpers = sys.modules.get("helpers")
-    sys.modules["helpers"] = None
+    # Inject an external override that returns 5 via _external_get_cpu_percent hook
+    setattr(t, "_external_get_cpu_percent", lambda: 5)
     try:
-
         def raiseer():
             raise ValueError("boom")
 
         payload = t.build_telemetry("cid", get_cpu_percent=raiseer, version="v")
         data = json.loads(payload)
+        # build_telemetry falls back to _get_cpu_percent() when get_cpu_percent raises
         assert data["cpu_percent"] == 5
     finally:
-        if sys.modules.get("mqtt_client") is mod:
-            del sys.modules["mqtt_client"]
-        if old_helpers is not None:
-             sys.modules["helpers"] = old_helpers
-        else:
-             sys.modules.pop("helpers", None)
+        try:
+            delattr(t, "_external_get_cpu_percent")
+        except Exception:
+            pass
 
 
 def test_build_telemetry_socket_connect_fails_results_in_unknown_ip():

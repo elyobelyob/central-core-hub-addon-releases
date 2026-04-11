@@ -74,26 +74,14 @@ def test_fetch_sensors_parses_entities(monkeypatch, tmp_path):
     assert any(s["entity_id"] == "binary_sensor.y" for s in sensors)
 
 
-def test_telemetry_get_cpu_from_mqtt_client_module(monkeypatch):
+def test_telemetry_get_cpu_from_external_provider(monkeypatch):
     tele = _load_module("telemetry.py")
-    # create fake mqtt_client module with get_cpu_percent
-    fake = types.ModuleType("mqtt_client")
-    setattr(fake, "get_cpu_percent", lambda: 4.4)
-    import sys
-
-    # Temporarily remove helpers module so mqtt_client fallback is tested
-    helpers_backup = sys.modules.pop("helpers", None)
-    sys.modules["mqtt_client"] = fake
-    # Also directly attach to the test module so it's found by caller check
-    test_module = sys.modules[__name__]
-    setattr(test_module, "get_cpu_percent", lambda: 4.4)
+    # Inject a CPU provider via the _external_get_cpu_percent hook
+    tele._external_get_cpu_percent = lambda: 4.4
     try:
         assert tele._get_cpu_percent() == 4.4
     finally:
-        delattr(test_module, "get_cpu_percent")
-        del sys.modules["mqtt_client"]
-        if helpers_backup is not None:
-            sys.modules["helpers"] = helpers_backup
+        tele._external_get_cpu_percent = None
 
 
 def test_on_message_falls_back_to_file_load(monkeypatch):

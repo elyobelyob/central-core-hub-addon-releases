@@ -28,8 +28,8 @@ def test_connect_retries_then_succeeds(monkeypatch):
         return calls["n"] >= 2
 
     monkeypatch.setattr(c, "connect_once", fake_connect_once)
-    # avoid sleeping delays
-    monkeypatch.setattr(mc.time, "sleep", lambda s: None)
+    # avoid sleeping delays from _stop_event.wait(timeout=5)
+    monkeypatch.setattr(c._stop_event, "wait", lambda timeout=None: None)
     # once connect_once returns True, wait_for_connected should succeed
     monkeypatch.setattr(c, "wait_for_connected", lambda timeout=5: True)
 

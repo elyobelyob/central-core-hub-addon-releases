@@ -59,7 +59,7 @@ def test_registry_env_token_auth_fail(monkeypatch):
     handlers = load_handlers_module()
     client = DummyClient("reg2")
 
-    os.environ["REGISTRY_TOKEN"] = "envtok"
+    monkeypatch.setenv("REGISTRY_TOKEN", "envtok")
 
     payload = {"command_id": "c2", "payload": {"entries": []}}
     msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/registry/set"})()

@@ -83,4 +83,4 @@ def test_sensors_poll_sensor_without_entity_id(monkeypatch):
     handlers.handle_message(client, msg, __import__("json").dumps(payload), fetch_sensors, None, None)
 
     # Should publish a completion ACK even when sensor entries are missing entity_id
-    assert any("ack" in t[0] or "ack" in (t[0] or "") for t in client.publishes) or client.publishes == []
+    assert any("ack" in t[0] for t in client.publishes)
