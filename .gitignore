@@ -12,6 +12,10 @@ __pycache__/
 htmlcov/
 coverage.xml
 
+# Test-generated runtime files (cert handling, registry writes)
+central-core-hub/tmp*
+central-core-hub/SENSOR_REGISTRY_from_mqtt.json
+
 # Editor/OS files
 .vscode/
 .DS_Store
