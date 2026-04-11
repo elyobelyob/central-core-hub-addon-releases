@@ -52,6 +52,10 @@ def test_registry_set_env_token_auth_fails(monkeypatch, tmp_path):
     orig = sys.modules.get("mqtt_client")
     sys.modules["mqtt_client"] = None
 
+    # Remove any leftover file from previous runs so the assertion is idempotent
+    target = pathlib.Path(__file__).parents[2] / "SENSOR_REGISTRY_from_mqtt.json"
+    target.unlink(missing_ok=True)
+
     try:
         msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/registry/set"})
         payload_obj = {"token": "wrong", "entries": []}
@@ -62,8 +66,7 @@ def test_registry_set_env_token_auth_fails(monkeypatch, tmp_path):
         reason = _find_failed_reason(client)
         assert reason == "auth_failed"
 
-        # file should NOT be written next to handlers.py
-        target = pathlib.Path(__file__).parents[2] / "SENSOR_REGISTRY_from_mqtt.json"
+        # file should NOT be written on auth failure
         assert not target.exists()
     finally:
         if orig is None:
