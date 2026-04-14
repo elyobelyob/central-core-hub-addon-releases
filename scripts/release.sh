@@ -74,7 +74,7 @@ if [[ "$DRY_RUN" -eq 0 ]]; then
   done
 fi
 
-# Update repository.json
+# Update repository.json (tab-indented, preserve existing format)
 $PYTHON - "$REPO_JSON" "$NEW_VERSION" <<PY
 import json,sys
 fn=sys.argv[1]
@@ -83,11 +83,11 @@ with open(fn) as f:
     j=json.load(f)
 j['version']=v
 with open(fn,'w') as f:
-    json.dump(j,f,indent=1)
+    json.dump(j,f,indent='\t')
     f.write('\n')
 PY
 
-# Update central-core-hub/config.json
+# Update central-core-hub/config.json (compact single-line, preserve existing format)
 $PYTHON - "$ADDON_JSON" "$NEW_VERSION" <<PY
 import json,sys
 fn=sys.argv[1]
@@ -96,7 +96,7 @@ with open(fn) as f:
   j=json.load(f)
 j['version']=v
 with open(fn,'w') as f:
-  json.dump(j,f,indent=2)
+  json.dump(j,f,separators=(',',':'))
   f.write('\n')
 PY
 
