@@ -52,7 +52,8 @@ def test_selected_sensor_changes_publish_on_change(monkeypatch):
     assert len(publishes) == 1
     payload = publishes[-1]["payload"]
     assert payload["data"] == {"sensor.a": "1", "sensor.b": "off"}
-    assert payload["raw"] == payload["data"]
+    assert "raw" not in payload
+    assert "observed" in payload
     assert payload["names"]["sensor.a"] == "A"
     assert payload["enabled"]["sensor.b"] is True
     assert payload["attributes"]["sensor.b"].get("friendly_name") == "B"
@@ -79,7 +80,8 @@ def test_selected_sensor_changes_publish_on_change(monkeypatch):
     payload2 = publishes[-1]["payload"]
     assert payload2["data"]["sensor.a"] == "2"
     assert payload2["data"]["sensor.b"] == "off"
-    assert payload2["raw"] == payload2["data"]
+    assert "raw" not in payload2
+    assert "observed" in payload2
 
 
 def test_selected_sensor_changes_streaming(monkeypatch):
@@ -102,7 +104,8 @@ def test_selected_sensor_changes_streaming(monkeypatch):
     assert len(publishes) == 1
     payload = publishes[-1]["payload"]
     assert payload["data"]["sensor.stream"] == "5"
-    assert payload["raw"]["sensor.stream"] == "5"
+    assert "raw" not in payload
+    assert "observed" in payload
     assert payload["names"]["sensor.stream"] == "StreamSensor"
 
     # same value should not trigger another publish
