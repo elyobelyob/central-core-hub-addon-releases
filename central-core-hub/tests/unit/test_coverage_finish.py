@@ -117,7 +117,9 @@ def test_exercise_mqtt_client_branches(monkeypatch):
     c.publish_sensors()
 
     # on_message: simulate handlers import and handle_message raising
-    msg = types.SimpleNamespace(topic="hubs/unit/v1/cmd/sensors/poll", payload=b'{"payload": {"sensors": ["temperature"]}}')
+    msg = types.SimpleNamespace(
+        topic="hubs/unit/v1/cmd/sensors/poll", payload=b'{"payload": {"sensors": ["temperature"]}}'
+    )
 
     # Insert a fake handlers module into sys.modules with a handle_message that raises
     fake_handlers = types.ModuleType("handlers")

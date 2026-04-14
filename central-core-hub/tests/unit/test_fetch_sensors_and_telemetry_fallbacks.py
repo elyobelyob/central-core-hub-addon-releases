@@ -60,6 +60,7 @@ def test_fetch_sensors_parses_entities(monkeypatch, tmp_path):
 
     # Disable registry to test device_class filtering in isolation
     import json
+
     reg = {"apply_registry": False, "entries": []}
     p = tmp_path / "reg.yaml"
     p.write_text(json.dumps(reg))
@@ -102,7 +103,9 @@ def test_on_message_falls_back_to_file_load(monkeypatch):
     c._publish = fake_publish
 
     # call on_message which should import handlers via file and call handle_message
-    msg = types.SimpleNamespace(topic=f"hubs/{c.client_id}/v1/cmd/sensors/poll", payload=b'{"payload": {"sensors": ["temperature"]}}')
+    msg = types.SimpleNamespace(
+        topic=f"hubs/{c.client_id}/v1/cmd/sensors/poll", payload=b'{"payload": {"sensors": ["temperature"]}}'
+    )
     c.on_message(None, None, msg)
 
     # after handling, preferred sensors topic should have been published

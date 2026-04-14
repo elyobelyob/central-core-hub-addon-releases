@@ -98,18 +98,21 @@ class TestTopicTemplateFromSharedPackage:
 
     def test_telemetry_topic_uses_shared_package_value(self):
         import types
+
         stub = types.SimpleNamespace(TELEMETRY_TOPIC="shared/telemetry/{client_id}")
         mod = _load_module(shared_stub=stub)
         assert mod.TELEMETRY_TOPIC_TMPL == "shared/telemetry/{client_id}"
 
     def test_preferred_sensors_topic_uses_shared_package_value(self):
         import types
+
         stub = types.SimpleNamespace(PREFERRED_SENSORS_TOPIC="shared/sensors/{client_id}")
         mod = _load_module(shared_stub=stub)
         assert mod.PREFERRED_SENSORS_TOPIC_TMPL == "shared/sensors/{client_id}"
 
     def test_falls_back_to_default_when_shared_attribute_missing(self):
         import types
+
         stub = types.SimpleNamespace()  # no TELEMETRY_TOPIC attribute
         mod = _load_module(shared_stub=stub)
         assert mod.TELEMETRY_TOPIC_TMPL == "telemetry/{client_id}"

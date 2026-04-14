@@ -131,13 +131,23 @@ class VersionManager:
             with open(file_path, "w") as f:
                 f.write(content)
 
-    def _git_commits_between(self, prev_tag: Optional[str] = None, new_tag: Optional[str] = None) -> List[str]:
-        """Return commit summary lines between prev_tag and new_tag or HEAD.
+    _SKIP_PATTERNS = re.compile(
+        r"^(chore\(release\):|bump version|bump to \d|chore: bump)",
+        re.IGNORECASE,
+    )
 
-        - If both tags provided, attempt `git log --pretty=format:%s prev_tag..new_tag`.
-        - If only prev_tag provided, use `prev_tag..HEAD`.
-        - If prev_tag not provided or git fails, fall back to last 20 commits on HEAD.
+    def _git_commits_between(self, prev_tag: Optional[str] = None, new_tag: Optional[str] = None) -> List[str]:
+        """Return meaningful commit summary lines between prev_tag and new_tag or HEAD.
+
+        Skips release-bump commits and caps at 10 entries to keep changelogs concise.
+        Falls back to the last 10 commits when the tag range is unavailable.
         """
+        _MAX = 10
+
+        def _filter(lines: List[str]) -> List[str]:
+            kept = [f"- {line}" for line in lines if line and not self._SKIP_PATTERNS.match(line)]
+            return kept[:_MAX]
+
         try:
             if prev_tag and new_tag:
                 range_ref = f"v{prev_tag}..v{new_tag}"
@@ -149,16 +159,14 @@ class VersionManager:
             if range_ref:
                 out = subprocess.check_output(["git", "log", "--pretty=format:%s", range_ref], cwd=self.repo_root)
                 lines = out.decode("utf-8").strip().splitlines()
-                # Return found lines (even if empty, do not fallback)
-                return [f"- {line}" for line in lines if line]
+                return _filter(lines)
         except Exception:
             pass
 
         try:
-            # Fallback only if no prev_tag matched or git failed
             out = subprocess.check_output(["git", "log", "--pretty=format:%s", "-n", "20", "HEAD"], cwd=self.repo_root)
             lines = out.decode("utf-8").strip().splitlines()
-            return [f"- {line}" for line in lines if line]
+            return _filter(lines)
         except Exception:
             return []
 
@@ -168,13 +176,16 @@ class VersionManager:
         Returns empty string if none found.
         """
         try:
-            out = subprocess.check_output([
-                "git",
-                "for-each-ref",
-                "--sort=-taggerdate",
-                "--format=%(refname:short)",
-                "refs/tags",
-            ], cwd=self.repo_root)
+            out = subprocess.check_output(
+                [
+                    "git",
+                    "for-each-ref",
+                    "--sort=-taggerdate",
+                    "--format=%(refname:short)",
+                    "refs/tags",
+                ],
+                cwd=self.repo_root,
+            )
             tags = [t.strip() for t in out.decode("utf-8").splitlines() if t.strip()]
             # strip leading 'v' if present
             tags = [t[1:] if t.startswith("v") else t for t in tags]
@@ -193,13 +204,16 @@ class VersionManager:
         a release section with commits between the previous tag and the tag.
         """
         try:
-            out = subprocess.check_output([
-                "git",
-                "for-each-ref",
-                "--sort=taggerdate",
-                "--format=%(refname:short)",
-                "refs/tags",
-            ], cwd=self.repo_root)
+            out = subprocess.check_output(
+                [
+                    "git",
+                    "for-each-ref",
+                    "--sort=taggerdate",
+                    "--format=%(refname:short)",
+                    "refs/tags",
+                ],
+                cwd=self.repo_root,
+            )
             tags = [t.strip() for t in out.decode("utf-8").splitlines() if t.strip()]
             # strip leading 'v' if present
             tags = [t[1:] if t.startswith("v") else t for t in tags]

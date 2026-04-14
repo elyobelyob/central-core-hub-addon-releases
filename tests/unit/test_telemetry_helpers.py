@@ -27,6 +27,7 @@ th = _load_module()
 # _normalize_timestamp
 # ---------------------------------------------------------------------------
 
+
 class TestNormalizeTimestamp:
     def test_non_string_returns_unchanged(self):
         assert th._normalize_timestamp(None) is None
@@ -85,6 +86,7 @@ class TestNormalizeTimestamp:
 # attach_ha_timestamps
 # ---------------------------------------------------------------------------
 
+
 class TestAttachHaTimestamps:
     def test_both_timestamps_attached(self):
         sensor = {"last_changed": "2024-01-01T00:00:00Z", "last_updated": "2024-01-01T00:01:00Z"}
@@ -132,6 +134,7 @@ class TestAttachHaTimestamps:
 # build_sensor_maps
 # ---------------------------------------------------------------------------
 
+
 class TestBuildSensorMaps:
     def test_basic_sensor_produces_all_maps(self):
         sensors = [
@@ -174,9 +177,7 @@ class TestBuildSensorMaps:
         assert names_map["sensor.raw"] == "sensor.raw"
 
     def test_name_uses_top_level_name_when_no_friendly_name(self):
-        sensors = [
-            {"entity_id": "sensor.raw", "state": "x", "name": "Raw Sensor", "attributes": {}}
-        ]
+        sensors = [{"entity_id": "sensor.raw", "state": "x", "name": "Raw Sensor", "attributes": {}}]
         _, names_map, _, _ = th.build_sensor_maps(sensors)
         assert names_map["sensor.raw"] == "Raw Sensor"
 
@@ -224,6 +225,7 @@ class TestBuildSensorMaps:
 # ---------------------------------------------------------------------------
 # build_sensor_event_payload
 # ---------------------------------------------------------------------------
+
 
 class TestBuildSensorEventPayload:
     def test_returns_valid_json_string(self):

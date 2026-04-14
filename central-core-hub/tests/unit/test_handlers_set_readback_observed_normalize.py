@@ -61,11 +61,13 @@ def test_readback_observed_timestamp_normalizes_plus00_to_Z():
         @staticmethod
         def get(url, headers=None, timeout=None):
             # HA returns last_changed with +00:00 timezone
-            return _FakeResp({
-                "state": "on",
-                "attributes": {},
-                "last_changed": "2025-12-17T10:00:00+00:00",
-            })
+            return _FakeResp(
+                {
+                    "state": "on",
+                    "attributes": {},
+                    "last_changed": "2025-12-17T10:00:00+00:00",
+                }
+            )
 
     handlers.handle_message(client, Msg(topic), payload, None, None, None, requests=FakeReq)
 

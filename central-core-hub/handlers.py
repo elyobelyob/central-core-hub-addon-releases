@@ -20,7 +20,7 @@ def _normalize_ts(ts_str):
     if not ts_str or not isinstance(ts_str, str):
         return ts_str
     try:
-        dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+        dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=_LOCAL_TZ)
         else:
@@ -161,29 +161,27 @@ def handle_message(
                         sensors_requested = srv
             except Exception:  # pragma: no cover - defensive branch hard to reproduce in tests
                 sensors_requested = None
-            
+
             # Only publish telemetry if the Vault has requested specific sensors.
             # Without a vault request, we don't know what the user wants.
             if not sensors_requested:
                 return
-            
+
             sensors = fetch_sensors(client.ha_api_url, client.ha_api_token) or []
             # Always apply SENSOR_REGISTRY filtering at minimum
             sensors = [s for s in sensors if _is_entity_allowed(s.get("entity_id"))]
-            
+
             # Store the selected sensors (vault-requested device classes) for reminder messages
             try:
                 client.selected_sensors = list(sensors_requested)
             except Exception:
                 # don't let selection storage failure stop command handling
                 pass
-            
+
             # Filter sensors by device_class (vault sends device class names, not entity IDs)
             requested_classes = {str(cls).lower().strip() for cls in sensors_requested if cls}
             sensors = [
-                s
-                for s in sensors
-                if s.get("attributes", {}).get("device_class", "").lower() in requested_classes
+                s for s in sensors if s.get("attributes", {}).get("device_class", "").lower() in requested_classes
             ]
 
             data_map = {}

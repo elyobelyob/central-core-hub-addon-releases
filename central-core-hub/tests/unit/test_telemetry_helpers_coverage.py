@@ -107,16 +107,22 @@ def test_normalize_timestamp_various_formats():
     """Test _normalize_timestamp with various input formats."""
     utc = timezone.utc
     # Test +00:00 format — point-in-time must be preserved
-    assert _utc(telemetry_helpers._normalize_timestamp("2025-01-01T00:00:00+00:00")) == datetime(2025, 1, 1, 0, 0, 0, tzinfo=utc)
+    assert _utc(telemetry_helpers._normalize_timestamp("2025-01-01T00:00:00+00:00")) == datetime(
+        2025, 1, 1, 0, 0, 0, tzinfo=utc
+    )
     # Test Z format
-    assert _utc(telemetry_helpers._normalize_timestamp("2025-01-01T00:00:00Z")) == datetime(2025, 1, 1, 0, 0, 0, tzinfo=utc)
+    assert _utc(telemetry_helpers._normalize_timestamp("2025-01-01T00:00:00Z")) == datetime(
+        2025, 1, 1, 0, 0, 0, tzinfo=utc
+    )
     # Test naive timestamp — treated as local time; result must be a tz-aware ISO string
     result = telemetry_helpers._normalize_timestamp("2025-01-01T00:00:00")
     assert isinstance(result, str)
     dt = datetime.fromisoformat(result.replace("Z", "+00:00"))
     assert dt.tzinfo is not None
     # Test -05:00 timezone — UTC equivalent must be +5h
-    assert _utc(telemetry_helpers._normalize_timestamp("2025-01-01T00:00:00-05:00")) == datetime(2025, 1, 1, 5, 0, 0, tzinfo=utc)
+    assert _utc(telemetry_helpers._normalize_timestamp("2025-01-01T00:00:00-05:00")) == datetime(
+        2025, 1, 1, 5, 0, 0, tzinfo=utc
+    )
     # Test None
     assert telemetry_helpers._normalize_timestamp(None) is None
     # Test invalid string

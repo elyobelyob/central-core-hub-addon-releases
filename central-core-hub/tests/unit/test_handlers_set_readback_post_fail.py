@@ -42,7 +42,9 @@ class Msg:
 def test_sensors_set_post_raises_reports_failed_in_completion():
     client = DummyClient()
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
-    payload = json.dumps({"command_id": "c-postfail", "payload": {"sensors": [{"entity_id": "sensor.fail", "state": "off"}]}})
+    payload = json.dumps(
+        {"command_id": "c-postfail", "payload": {"sensors": [{"entity_id": "sensor.fail", "state": "off"}]}}
+    )
 
     class FakeReq:
         @staticmethod

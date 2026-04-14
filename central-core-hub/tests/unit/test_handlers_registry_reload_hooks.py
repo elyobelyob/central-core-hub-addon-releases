@@ -36,8 +36,10 @@ def test_registry_set_calls_mqtt_reload_and_writes_file(tmp_path, monkeypatch):
     mod = types.ModuleType("mqtt_client")
     target = tmp_path / "SENSOR_REGISTRY.json"
     mod.SENSOR_REGISTRY = str(target)
+
     def _reload():
         mod._reloaded = True
+
     mod.reload_sensor_registry = _reload
     sys.modules["mqtt_client"] = mod
 

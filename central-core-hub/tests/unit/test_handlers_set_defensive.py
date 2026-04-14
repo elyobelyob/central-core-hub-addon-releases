@@ -73,10 +73,12 @@ def test_set_list_with_missing_entity_id_skipped():
     client.ha_api_url = None
     client.ha_api_token = None
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
-    payload = json.dumps({
-        "command_id": "t2",
-        "payload": {"sensors": [{"state": "on"}, {"entity_id": "sensor.y", "state": "off"}]},
-    })
+    payload = json.dumps(
+        {
+            "command_id": "t2",
+            "payload": {"sensors": [{"state": "on"}, {"entity_id": "sensor.y", "state": "off"}]},
+        }
+    )
 
     handlers.handle_message(client, Msg(topic), payload, None, None, None)
 

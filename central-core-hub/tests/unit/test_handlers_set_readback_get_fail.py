@@ -53,7 +53,9 @@ class _FakeResp:
 def test_sensors_set_readback_get_raises_fallbacks_to_sent_state():
     client = DummyClient()
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
-    payload = json.dumps({"command_id": "c-getfail", "payload": {"sensors": [{"entity_id": "sensor.x", "state": "on"}]}})
+    payload = json.dumps(
+        {"command_id": "c-getfail", "payload": {"sensors": [{"entity_id": "sensor.x", "state": "on"}]}}
+    )
 
     # fake requests: post succeeds, get raises exception to trigger fallback
     class FakeReq:

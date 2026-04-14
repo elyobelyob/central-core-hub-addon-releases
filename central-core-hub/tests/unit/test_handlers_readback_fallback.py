@@ -58,12 +58,14 @@ def test_sensors_set_readback_success():
         @staticmethod
         def get(url, headers=None, timeout=None):
             # return a readback payload
-            return FakeResponse({
-                "entity_id": "sensor.foo",
-                "state": "on",
-                "attributes": {"friendly_name": "Foo"},
-                "last_changed": "2025-01-01T00:00:00+00:00",
-            })
+            return FakeResponse(
+                {
+                    "entity_id": "sensor.foo",
+                    "state": "on",
+                    "attributes": {"friendly_name": "Foo"},
+                    "last_changed": "2025-01-01T00:00:00+00:00",
+                }
+            )
 
     msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/sensors/set"})
     payload = {

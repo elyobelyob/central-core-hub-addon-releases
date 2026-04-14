@@ -43,7 +43,9 @@ def run_listener_with_ws_messages(monkeypatch, messages, on_event=None, selector
     def on_ha_version(v):
         called["persisted"] = True
 
-    listener = ha.HAWebSocketListener("http://ha", "tok", on_event, log_fn=lambda m: None, selectors=selectors or [], on_ha_version=on_ha_version)
+    listener = ha.HAWebSocketListener(
+        "http://ha", "tok", on_event, log_fn=lambda m: None, selectors=selectors or [], on_ha_version=on_ha_version
+    )
 
     t = threading.Thread(target=listener._run, daemon=True)
     t.start()

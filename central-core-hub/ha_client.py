@@ -19,9 +19,7 @@ from typing import Optional
 # Sensors with device_class values in this set are considered safe for telemetry.
 # Sensors with device_class values NOT in this set are filtered out.
 # Sensors without a device_class attribute are excluded.
-SAFE_DEVICE_CLASSES = {
-    "motion", "door", "battery", "occupancy", "presence", "opening"
-}
+SAFE_DEVICE_CLASSES = {"motion", "door", "battery", "occupancy", "presence", "opening"}
 
 # Path to the add-on options file. Tests can monkeypatch this variable to
 # redirect writes to a temporary location.
@@ -38,7 +36,7 @@ _LOCAL_TZ = datetime.now().astimezone().tzinfo
 
 def _normalize_timestamp(ts_str: Optional[str]) -> Optional[str]:
     """Normalize timestamp string to hub's local timezone ISO format.
-    
+
     Parses ISO timestamp strings, ensures local timezone, and formats accordingly.
     If parsing fails, returns the original string.
     """
@@ -46,7 +44,7 @@ def _normalize_timestamp(ts_str: Optional[str]) -> Optional[str]:
         return ts_str
     try:
         # Handle 'Z' suffix by replacing with +00:00 for parsing
-        dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+        dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
         if dt.tzinfo is None:
             # Assume naive timestamps are in local timezone
             dt = dt.replace(tzinfo=_LOCAL_TZ)

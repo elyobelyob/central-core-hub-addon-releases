@@ -56,6 +56,7 @@ def test_build_telemetry_get_cpu_callable_raises_uses_fallback():
     # Inject an external override that returns 5 via _external_get_cpu_percent hook
     setattr(t, "_external_get_cpu_percent", lambda: 5)
     try:
+
         def raiseer():
             raise ValueError("boom")
 

@@ -65,12 +65,14 @@ def test_sensors_set_readback_success():
 
         @staticmethod
         def get(url, headers=None, timeout=None):
-            return _FakeResp({
-                "entity_id": "sensor.a",
-                "state": "42",
-                "attributes": {"friendly_name": "A", "device_class": "opening"},
-                "last_changed": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            })
+            return _FakeResp(
+                {
+                    "entity_id": "sensor.a",
+                    "state": "42",
+                    "attributes": {"friendly_name": "A", "device_class": "opening"},
+                    "last_changed": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                }
+            )
 
     handlers.handle_message(client, Msg(topic), payload, None, None, None, requests=FakeReq)
 

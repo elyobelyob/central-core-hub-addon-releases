@@ -47,6 +47,7 @@ def _make_ctx(**kwargs):
 # Shim path (mqtt_mod=None)
 # ---------------------------------------------------------------------------
 
+
 class TestShimPath:
     def test_returns_shim_client_when_no_mqtt_mod(self):
         ctx = _make_ctx()
@@ -61,8 +62,16 @@ class TestShimPath:
     def test_shim_has_required_methods(self):
         ctx = _make_ctx()
         rt.setup_mqtt_client(ctx, None)
-        for method in ("username_pw_set", "tls_set", "publish", "subscribe",
-                       "connect", "loop_start", "loop_stop", "disconnect"):
+        for method in (
+            "username_pw_set",
+            "tls_set",
+            "publish",
+            "subscribe",
+            "connect",
+            "loop_start",
+            "loop_stop",
+            "disconnect",
+        ):
             assert callable(getattr(ctx._client, method)), f"shim missing {method}"
 
     def test_shim_publish_returns_rc_zero(self):
@@ -89,6 +98,7 @@ class TestShimPath:
 # Real paho client path
 # ---------------------------------------------------------------------------
 
+
 class TestRealClientPath:
     def _make_mqtt_mod(self, has_callback_api=True):
         """Create a fake paho mqtt module."""
@@ -113,8 +123,7 @@ class TestRealClientPath:
         mqtt_mod, _ = self._make_mqtt_mod()
         rt.setup_mqtt_client(ctx, mqtt_mod)
         call_kwargs = mqtt_mod.Client.call_args
-        assert call_kwargs.kwargs.get("client_id") == "hub-xyz" or \
-               (call_kwargs.args and "hub-xyz" in call_kwargs.args)
+        assert call_kwargs.kwargs.get("client_id") == "hub-xyz" or (call_kwargs.args and "hub-xyz" in call_kwargs.args)
 
     def test_username_password_set_when_provided(self):
         ctx = _make_ctx(mqtt_username="user", mqtt_password="pass")
@@ -141,6 +150,7 @@ class TestRealClientPath:
         _, client_instance = self._make_mqtt_mod(has_callback_api=False)
         # Use a plain SimpleNamespace so hasattr returns False for missing attrs
         import types as _t
+
         real_mod = _t.SimpleNamespace()
         real_mod.Client = MagicMock(return_value=client_instance)
         rt.setup_mqtt_client(ctx, real_mod)
@@ -150,6 +160,7 @@ class TestRealClientPath:
 # ---------------------------------------------------------------------------
 # TLS configuration
 # ---------------------------------------------------------------------------
+
 
 class TestTlsConfiguration:
     def test_tls_set_called_when_tls_enabled(self):
@@ -211,15 +222,18 @@ class TestTlsConfiguration:
 # _log helper
 # ---------------------------------------------------------------------------
 
+
 class TestLog:
     def test_log_outputs_timestamp_and_message(self):
         import io
+
         buf = io.StringIO()
         rt._log("hello world", file=buf)
         assert "hello world" in buf.getvalue()
 
     def test_log_output_contains_timestamp(self):
         import io
+
         buf = io.StringIO()
         rt._log("test message", file=buf)
         out = buf.getvalue()
