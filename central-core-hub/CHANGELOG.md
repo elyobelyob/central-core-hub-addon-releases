@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.0.38] - 2026-04-14
+
+- fix: align publish_selected_sensor_changes to poll schema (add observed, remove raw)
+
+## [2.0.37] - 2026-04-14
+
+- fix: preserve JSON formatting in release/version bump scripts
+- fix: align version to 2.0.36 across all manifests and fix ruff lint errors
+- chore: remove stale temp cert files
+
+## [2.0.36] - 2026-04-11
+
+- fix: remove spurious +00:00->Z replace in _normalize_timestamp
+- refactor: consolidate inline timestamp normalization in handlers.py
+- fix: remove inspect.currentframe() stack-walking from _get_cpu_percent
+- fix: replace locals().get() anti-pattern with explicit variable init
+- perf: fix is_entity_allowed to use mtime-cached YAML doc
+- fix: add _stop_event to interrupt connect() infinite loop
+- fix: track and delete temp cert files on close()
+- fix: complete code-review fixes — Tasks 9, 10, Pyright, and test updates
+- fix: idempotent test isolation and gitignore for test artifacts
+
 ## [2.0.35] - 2025-12-31
 
 - Update README: user-focused, support link, maintainer-only note

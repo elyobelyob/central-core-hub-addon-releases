@@ -263,12 +263,10 @@ class VersionManager:
 
         if commits:
             body = "\n".join(commits) + "\n\n"
-            commits_section = "### Commits included in this release\n\n" + "\n".join(commits) + "\n\n"
         else:
             body = f"- chore(release): bump version to {new_version}\n\n"
-            commits_section = ""
 
-        release_block = header + body + commits_section
+        release_block = header + body
 
         # Files to update
         changelog_paths = [self.repo_root / "CHANGELOG.md", self.repo_root / "central-core-hub" / "CHANGELOG.md"]

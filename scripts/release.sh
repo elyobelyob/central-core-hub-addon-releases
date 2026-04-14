@@ -122,6 +122,14 @@ else
   echo "version: \"$NEW_VERSION\"" >> "$ADDON_YAML"
 fi
 
+# Update changelogs
+echo "Updating changelogs..."
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  echo "[DRY-RUN] Would update changelogs for $NEW_VERSION"
+else
+  "$PYTHON" "$ROOT_DIR/version_manager.py" set "$NEW_VERSION"
+fi
+
 # Run linters and tests
 echo "Running linters and test suite..."
 
