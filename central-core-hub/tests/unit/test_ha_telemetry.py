@@ -226,10 +226,6 @@ def test_publish_sensors_with_default_filter_uses_poll_schema():
     ]
     c._filter_sensors_by_device_class = lambda s, dc: s
 
-    mod_ref = c.__class__.__module__
-    import sys
-    mqtt_mod = sys.modules.get(mod_ref) or mod
-
     # Patch fetch_sensors at module level
     orig_fetch = mod.fetch_sensors
     mod.fetch_sensors = lambda url, token: sensors
