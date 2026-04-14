@@ -184,15 +184,15 @@ else
   python -m pytest -q
 fi
 
-echo "Staging version files and creating release commit"
+echo "Staging all changes and creating release commit"
 if [[ "$DRY_RUN" -eq 1 ]]; then
-  echo "[DRY-RUN] git add $REPO_JSON $ADDON_JSON $ADDON_YAML"
+  echo "[DRY-RUN] git add -u"
   echo "[DRY-RUN] git commit -m \"chore(release): bump version to $NEW_VERSION\""
   echo "[DRY-RUN] git tag -a v$NEW_VERSION -m \"v$NEW_VERSION\""
   echo "[DRY-RUN] git push origin HEAD --follow-tags"
   echo "[DRY-RUN] Release v$NEW_VERSION simulated"
 else
-  git add "$REPO_JSON" "$ADDON_JSON" "$ADDON_YAML"
+  git add -u
   git commit -m "chore(release): bump version to $NEW_VERSION"
 
   echo "Creating annotated tag v$NEW_VERSION"
