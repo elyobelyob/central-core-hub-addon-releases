@@ -82,11 +82,11 @@ def test_handle_sensors_poll_filters_and_publish():
     assert any(client.preferred_sensors_topic == t for t, _, _ in client.published)
     assert any("ack" in t for t, _, _ in client.published)
 
-
     def test__load_handlers_importerror(monkeypatch):
         monkeypatch.setattr(importlib.util, "spec_from_file_location", lambda *a, **k: None)
         with pytest.raises(ImportError):
             _load_handlers()
+
 
 def test_handle_sensors_set_selection_list_persistence(tmp_path, monkeypatch):
     client = DummyClient()
@@ -94,9 +94,9 @@ def test_handle_sensors_set_selection_list_persistence(tmp_path, monkeypatch):
     payload = json.dumps({"command_id": "c3", "payload": {"sensors": ["sensor.x", "sensor.y"]}})
 
     # create a fake mqtt_client module with SELECTED_SENSORS_FILE pointing to tmp
-    fake_mqtt = type(sys)('mqtt_client')
+    fake_mqtt = type(sys)("mqtt_client")
     fake_mqtt.SELECTED_SENSORS_FILE = str(tmp_path / "selected.json")
-    sys.modules['mqtt_client'] = fake_mqtt
+    sys.modules["mqtt_client"] = fake_mqtt
 
     def fetch_sensors(url, token):
         return [
@@ -111,4 +111,4 @@ def test_handle_sensors_set_selection_list_persistence(tmp_path, monkeypatch):
     data = json.loads(sel.read_text())
     assert "sensor.x" in data and "sensor.y" in data
     # cleanup fake module
-    del sys.modules['mqtt_client']
+    del sys.modules["mqtt_client"]

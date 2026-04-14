@@ -42,8 +42,10 @@ class Msg:
 def test_is_entity_allowed_exception_falls_back_to_allow(monkeypatch):
     # Provide a mqtt_client.is_entity_allowed that raises
     mod = types.ModuleType("mqtt_client")
+
     def bad_allowed(ent):
         raise RuntimeError("boom")
+
     mod.is_entity_allowed = bad_allowed
     sys.modules["mqtt_client"] = mod
 
@@ -52,9 +54,7 @@ def test_is_entity_allowed_exception_falls_back_to_allow(monkeypatch):
     payload = json.dumps({"command_id": "c-allow", "payload": {"sensors": ["temperature"]}})
 
     def fetch_sensors(url, token):
-        return [
-            {"entity_id": "sensor.x", "state": "9", "attributes": {"device_class": "temperature"}}
-        ]
+        return [{"entity_id": "sensor.x", "state": "9", "attributes": {"device_class": "temperature"}}]
 
     handlers.handle_message(client, Msg(topic), payload, fetch_sensors, None, None)
 

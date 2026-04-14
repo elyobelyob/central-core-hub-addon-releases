@@ -16,8 +16,7 @@ def test_is_entity_allowed_reads_yaml_only_once_per_mtime(tmp_path):
     mod = _load()
     registry = tmp_path / "SENSOR_REGISTRY.yaml"
     registry.write_text(
-        "registry_mode: allow\napply_registry: true\nentries:\n"
-        "  - entity_id: sensor.ok\n    provide: true\n"
+        "registry_mode: allow\napply_registry: true\nentries:\n  - entity_id: sensor.ok\n    provide: true\n"
     )
     mod.SENSOR_REGISTRY = registry
     mod._SENSOR_REGISTRY_DOC_CACHE = None
@@ -44,8 +43,7 @@ def test_is_entity_allowed_deny_mode(tmp_path):
     mod = _load()
     registry = tmp_path / "SENSOR_REGISTRY.yaml"
     registry.write_text(
-        "registry_mode: deny\napply_registry: true\nentries:\n"
-        "  - entity_id: sensor.blocked\n    provide: false\n"
+        "registry_mode: deny\napply_registry: true\nentries:\n  - entity_id: sensor.blocked\n    provide: false\n"
     )
     mod.SENSOR_REGISTRY = registry
     mod._SENSOR_REGISTRY_DOC_CACHE = None

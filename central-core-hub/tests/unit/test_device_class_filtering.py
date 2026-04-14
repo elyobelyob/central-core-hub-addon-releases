@@ -68,7 +68,7 @@ def test_ha_client_filters_by_device_class():
 
     sensors = ha_client.fetch_sensors("http://ha", "tok", requests_mod=RClient())
     assert isinstance(sensors, list)
-    
+
     # ha_client now returns all sensors (filtering is vault's responsibility)
     entity_ids = [s["entity_id"] for s in sensors]
     assert "sensor.motion1" in entity_ids
@@ -76,7 +76,7 @@ def test_ha_client_filters_by_device_class():
     assert "binary_sensor.presence1" in entity_ids
     assert "sensor.temperature" in entity_ids
     assert "binary_sensor.window" in entity_ids
-    
+
     # Sensors without device_class are also returned
     assert "sensor.no_device_class" in entity_ids
 
@@ -128,7 +128,7 @@ def test_mqtt_client_filters_by_device_class():
     cast(Any, mc).requests = RClient()
     sensors = mc.fetch_sensors("http://ha", "tok")
     assert isinstance(sensors, list)
-    
+
     # mqtt_client now returns all sensors (filtering is vault's responsibility)
     entity_ids = [s["entity_id"] for s in sensors]
     assert "sensor.motion2" in entity_ids
@@ -200,7 +200,7 @@ def test_device_class_mixed_with_registry():
 
     cast(Any, mc).requests = RClient()
     sensors = mc.fetch_sensors("http://ha", "tok")
-    
+
     # mqtt_client now returns all sensors without device_class filtering
     entity_ids = [s["entity_id"] for s in sensors]
     assert "sensor.motion_allowed" in entity_ids

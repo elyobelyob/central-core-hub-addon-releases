@@ -49,9 +49,12 @@ def test_attach_timestamps_and_build_maps_and_event_payload():
     }
     attrs = {}
     from datetime import datetime, timezone as _tz
+
     attrs = mod.attach_ha_timestamps(attrs, sensor)
+
     def _utc(s):
         return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(_tz.utc)
+
     assert _utc(attrs["last_changed"]) == datetime(2025, 1, 1, 0, 0, 0, tzinfo=_tz.utc)
     assert _utc(attrs["last_updated"]) == datetime(2025, 1, 1, 0, 0, 1, tzinfo=_tz.utc)
 

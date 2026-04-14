@@ -93,7 +93,12 @@ def test_auth_failed(monkeypatch):
 def test_event_dispatch(monkeypatch):
     # auth_required with ha_version, auth_ok, then an event
     ev = {"type": "event", "event": {"data": {"entity_id": "sensor.x", "new_state": {"state": "1"}}}}
-    msgs = [json.dumps({"type": "auth_required", "ha_version": "v"}), json.dumps({"type": "auth_ok"}), json.dumps(ev), ""]
+    msgs = [
+        json.dumps({"type": "auth_required", "ha_version": "v"}),
+        json.dumps({"type": "auth_ok"}),
+        json.dumps(ev),
+        "",
+    ]
     monkeypatch.setattr(ha_client, "websocket", _make_ws_module(msgs))
     monkeypatch.setattr(ha_client.HAWebSocketListener, "_log", lambda self, m: None)
 

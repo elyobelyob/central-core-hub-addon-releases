@@ -27,6 +27,7 @@ h = _load_module()
 # uptime_seconds
 # ---------------------------------------------------------------------------
 
+
 class TestUptimeSeconds:
     def test_returns_integer_uptime(self):
         with patch("builtins.open", return_value=StringIO("12345.67 890.12\n")):
@@ -49,6 +50,7 @@ class TestUptimeSeconds:
 # loadavg
 # ---------------------------------------------------------------------------
 
+
 class TestLoadavg:
     def test_returns_three_load_values(self):
         with patch("builtins.open", return_value=StringIO("0.10 0.20 0.30 1/100 12345\n")):
@@ -67,6 +69,7 @@ class TestLoadavg:
 # ---------------------------------------------------------------------------
 # mem_info_kb
 # ---------------------------------------------------------------------------
+
 
 class TestMemInfoKb:
     def test_returns_mem_total_and_free(self):
@@ -101,6 +104,7 @@ class TestMemInfoKb:
 # disk_info_kb
 # ---------------------------------------------------------------------------
 
+
 class TestDiskInfoKb:
     def test_returns_total_and_free_kb(self):
         st = MagicMock()
@@ -132,6 +136,7 @@ class TestDiskInfoKb:
 # _read_proc_stat
 # ---------------------------------------------------------------------------
 
+
 class TestReadProcStat:
     def test_returns_idle_and_total(self):
         # cpu  user nice sys idle iowait irq softirq steal guest
@@ -151,6 +156,7 @@ class TestReadProcStat:
 # ---------------------------------------------------------------------------
 # get_cpu_percent
 # ---------------------------------------------------------------------------
+
 
 class TestGetCpuPercent:
     def test_returns_float_between_0_and_100(self):

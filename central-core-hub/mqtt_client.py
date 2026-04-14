@@ -40,7 +40,7 @@ OUTBOX_TOPICS = os.environ.get("MQTT_OUTBOX_TOPICS")
 
 def _normalize_timestamp(ts_str):
     """Normalize timestamp string to hub's local timezone ISO format.
-    
+
     Parses ISO timestamp strings, ensures local timezone, and formats accordingly.
     If parsing fails, returns the original string.
     """
@@ -48,7 +48,7 @@ def _normalize_timestamp(ts_str):
         return ts_str
     try:
         # Handle 'Z' suffix by replacing with +00:00 for parsing
-        dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+        dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
         if dt.tzinfo is None:
             # Assume naive timestamps are in local timezone
             dt = dt.replace(tzinfo=_LOCAL_TZ)
@@ -428,11 +428,7 @@ def _load_sensor_registry_doc():
             mtime = SENSOR_REGISTRY.stat().st_mtime
         except Exception:
             mtime = None
-        if (
-            _SENSOR_REGISTRY_DOC_CACHE is not None
-            and mtime is not None
-            and mtime == _SENSOR_REGISTRY_DOC_MTIME
-        ):
+        if _SENSOR_REGISTRY_DOC_CACHE is not None and mtime is not None and mtime == _SENSOR_REGISTRY_DOC_MTIME:
             return _SENSOR_REGISTRY_DOC_CACHE
         with open(SENSOR_REGISTRY, "r") as f:
             doc = yaml.safe_load(f) or {}
@@ -1963,11 +1959,11 @@ class CentralCoreClient:
 
     def _filter_sensors_by_device_class(self, sensors, device_classes):
         """Filter sensors by device_class. If device_classes is empty, return all.
-        
+
         Args:
             sensors: List of sensor objects with 'attributes' containing 'device_class'
             device_classes: List of allowed device classes (empty = return all)
-            
+
         Returns:
             Filtered sensor list (only includes sensors with matching device_class)
         """
@@ -1987,7 +1983,7 @@ class CentralCoreClient:
 
     def publish_sensors_with_default_filter(self):
         """Publish sensors filtered by safe_device_classes on initial connect.
-        
+
         This provides the Vault with a safe default set of sensors without
         broadcasting all available sensors at startup.
         """
@@ -2003,7 +1999,7 @@ class CentralCoreClient:
         enabled_map = {}
         attrs_map = {}
         observed_map = {}
-        for s in (filtered or []):
+        for s in filtered or []:
             ent = s.get("entity_id")
             if not ent:
                 continue
@@ -2037,7 +2033,7 @@ class CentralCoreClient:
 
         Publishes to `telemetry/<client_id>/sensors` as a JSON object:
         { schema_version: 1, client_id, timestamp, sensors: [...] }
-        
+
         Note: This publishes the full list of available sensors to the Vault.
         The Vault then requests specific sensors via device_class filtering.
         The SENSOR_REGISTRY still applies as a security layer.

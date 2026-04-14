@@ -59,9 +59,7 @@ def test_poll_data_type_parsing(monkeypatch):
 
     c.on_message(None, None, msg)
 
-    tele_payload = json.loads(
-        next(p["payload"] for p in dummy.published if p["topic"] == c.preferred_sensors_topic)
-    )
+    tele_payload = json.loads(next(p["payload"] for p in dummy.published if p["topic"] == c.preferred_sensors_topic))
     data = tele_payload.get("data")
     # Preserve raw HA-provided values (no coercion)
     assert data["sensor.on"] == "on"

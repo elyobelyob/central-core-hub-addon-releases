@@ -8,6 +8,7 @@ import importlib.util
 def _load_client_module():
     repo_root = Path(__file__).resolve().parents[3]
     import sys
+
     sys.path.append(str(repo_root / "central-core-hub"))
     src = repo_root / "central-core-hub" / "mqtt_client.py"
     spec = importlib.util.spec_from_file_location("mqtt_client", str(src))

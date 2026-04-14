@@ -42,9 +42,9 @@ def test__get_cpu_percent_uses_helpers_if_present(monkeypatch):
         assert tele._get_cpu_percent() == 7.7
     finally:
         if old_helpers is not None and old_helpers is not fake_helpers:
-             sys.modules["helpers"] = old_helpers
+            sys.modules["helpers"] = old_helpers
         else:
-             sys.modules.pop("helpers", None)
+            sys.modules.pop("helpers", None)
 
 
 def test_build_telemetry_with_injected_helpers():
@@ -129,8 +129,18 @@ def test_handlers_poll_with_disabled_and_names(monkeypatch):
         return sensors
 
     # call handle_message for poll topic
-    msg = types.SimpleNamespace(topic="hubs/hub1/v1/cmd/sensors/poll", payload=b'{"payload": {"sensors": ["temperature"]}}')
-    handlers.handle_message(client, msg, '{"payload": {"sensors": ["temperature"]}}', fetch_sensors, lambda cid: "{}", lambda raw: None, None)
+    msg = types.SimpleNamespace(
+        topic="hubs/hub1/v1/cmd/sensors/poll", payload=b'{"payload": {"sensors": ["temperature"]}}'
+    )
+    handlers.handle_message(
+        client,
+        msg,
+        '{"payload": {"sensors": ["temperature"]}}',
+        fetch_sensors,
+        lambda cid: "{}",
+        lambda raw: None,
+        None,
+    )
 
     # find the published telemetry payload
     tele_msgs = [p for p in published if p["topic"] == client.preferred_sensors_topic]

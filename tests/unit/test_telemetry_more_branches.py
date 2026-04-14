@@ -113,6 +113,7 @@ def test_build_vault_payload_extracts_metrics_and_ha():
 def test_get_cpu_percent_falls_back_to_helpers_module():
     """After removing inspect.currentframe(), helpers module must still be used."""
     import types
+
     fake_helpers = types.SimpleNamespace(get_cpu_percent=lambda: 42)
     old = sys.modules.get("helpers")
     sys.modules["helpers"] = fake_helpers

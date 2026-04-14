@@ -11,7 +11,7 @@ def _normalize_timestamp(ts_str):
     if not isinstance(ts_str, str):
         return ts_str
     try:
-        dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+        dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
         if dt.tzinfo is None:
             # Assume naive timestamps are in local timezone
             dt = dt.replace(tzinfo=_LOCAL_TZ)

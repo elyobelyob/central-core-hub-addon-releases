@@ -1,9 +1,9 @@
-
 import argparse
 import time
 import sys
 import json
 import paho.mqtt.client as mqtt
+
 
 def on_connect(client, userdata, flags, rc, properties=None):
     if rc == 0:
@@ -11,14 +11,16 @@ def on_connect(client, userdata, flags, rc, properties=None):
     else:
         print(f"Failed to connect, return code {rc}")
 
+
 def on_publish(client, userdata, mid, reason_code=None, properties=None):
     print(f"Message published (mid={mid})")
+
 
 def trigger_update(broker, port, username, password, client_id, version):
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     if username and password:
         client.username_pw_set(username, password)
-    
+
     client.on_connect = on_connect
     client.on_publish = on_publish
 
@@ -26,16 +28,16 @@ def trigger_update(broker, port, username, password, client_id, version):
     try:
         client.connect(broker, port, 60)
         client.loop_start()
-        time.sleep(1) # wait for connection
+        time.sleep(1)  # wait for connection
 
         topic = f"hubs/{client_id}/v1/cmd/config/update"
         payload = {"version": version} if version else {}
-        
+
         print(f"Publishing update command to {topic} with payload {payload}")
         msg_info = client.publish(topic, json.dumps(payload), qos=1)
         msg_info.wait_for_publish()
-        
-        time.sleep(1) # ensure sent
+
+        time.sleep(1)  # ensure sent
         client.loop_stop()
         client.disconnect()
         print("Done.")
@@ -43,6 +45,7 @@ def trigger_update(broker, port, username, password, client_id, version):
     except Exception as e:
         print(f"Error: {e}")
         return False
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Trigger remote add-on update via MQTT")

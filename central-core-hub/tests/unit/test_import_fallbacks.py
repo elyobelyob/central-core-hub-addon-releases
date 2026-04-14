@@ -28,15 +28,14 @@ def test_container_files_present_for_dockerfile_copy():
 
     assert not missing_files, f"Missing required files for container: {missing_files}"
 
-
     # Arrange: inject a dummy 'helpers' and 'telemetry' module to force
     # the initial import in mqtt_client to raise ImportError for missing names.
     dummy_helpers = types.ModuleType("helpers")
     dummy_telemetry = types.ModuleType("telemetry")
-    
+
     old_helpers = sys.modules.get("helpers")
     old_telemetry = sys.modules.get("telemetry")
-    
+
     sys.modules["helpers"] = dummy_helpers
     sys.modules["telemetry"] = dummy_telemetry
 
@@ -60,13 +59,13 @@ def test_container_files_present_for_dockerfile_copy():
         # cleanup fresh_mqtt_client
         if "fresh_mqtt_client" in sys.modules:
             del sys.modules["fresh_mqtt_client"]
-            
+
         # restore helpers
         if old_helpers is not None:
             sys.modules["helpers"] = old_helpers
         else:
             sys.modules.pop("helpers", None)
-            
+
         # restore telemetry
         if old_telemetry is not None:
             sys.modules["telemetry"] = old_telemetry

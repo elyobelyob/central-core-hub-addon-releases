@@ -181,6 +181,7 @@ def test_fetch_sensors_happy_path(monkeypatch):
     assert any(s["entity_id"] == "sensor.a" for s in sensors)
     sensor_a = next(s for s in sensors if s["entity_id"] == "sensor.a")
     from datetime import datetime, timezone
+
     lc = datetime.fromisoformat(sensor_a.get("last_changed").replace("Z", "+00:00"))
     lu = datetime.fromisoformat(sensor_a.get("last_updated").replace("Z", "+00:00"))
     assert lc.astimezone(timezone.utc) == datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
