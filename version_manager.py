@@ -113,9 +113,12 @@ class VersionManager:
             data["version"] = new_version
 
             with open(file_path, "w") as f:
-                json.dump(data, f, indent="\t" if file_path.name == "repository.json" else None)
-                if file_path.name != "repository.json":
-                    f.write("\n")  # Add newline for non-repository files
+                if file_path.name == "repository.json":
+                    json.dump(data, f, indent="\t")
+                else:
+                    # config.json is compact single-line
+                    json.dump(data, f, separators=(",", ":"))
+                f.write("\n")
 
         elif file_path.name.endswith(".yaml"):
             # YAML files
