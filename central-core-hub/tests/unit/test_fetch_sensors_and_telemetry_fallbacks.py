@@ -1,6 +1,5 @@
 import importlib.util
 from pathlib import Path
-import types
 from typing import Any, cast
 import pytest
 
