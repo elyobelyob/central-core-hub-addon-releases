@@ -1,3 +1,4 @@
 [
-  "sensor.a"
+  "sensor.sun_next_dawn",
+  "sensor.sun_next_dusk"
 ]
