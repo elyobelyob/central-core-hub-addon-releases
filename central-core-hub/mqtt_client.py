@@ -1502,7 +1502,6 @@ class CentralCoreClient:
         obs_ts = _normalize_timestamp(attrs.get("last_changed") or attrs.get("last_updated")) or now_iso
         telemetry_payload = {
             "data": {entity_id: raw_state},
-            "raw": {entity_id: raw_state},
             "names": {entity_id: name},
             "enabled": {entity_id: enabled},
             "attributes": {entity_id: dict(attrs)},
@@ -2100,21 +2099,21 @@ class CentralCoreClient:
         filtered = [s for s in sensors if s.get("entity_id") in selected_set and is_entity_allowed(s.get("entity_id"))]
 
         data_map = {}
-        raw_map = {}
         names_map = {}
         enabled_map = {}
         attrs_map = {}
+        observed_map = {}
         for s in filtered:
             ent = s.get("entity_id")
             if not ent:
                 continue
-            raw_state = s.get("state")
             attrs = s.get("attributes", {}) or {}
-            data_map[ent] = raw_state
-            raw_map[ent] = raw_state
+            data_map[ent] = s.get("state")
             names_map[ent] = attrs.get("friendly_name") or s.get("name") or ent
             enabled_map[ent] = not bool(attrs.get("disabled_by"))
             attrs_map[ent] = attrs
+            obs = s.get("last_changed") or s.get("last_updated")
+            observed_map[ent] = _normalize_timestamp(obs) if obs else None
 
         if not data_map:
             return
@@ -2124,13 +2123,13 @@ class CentralCoreClient:
             return
 
         self._selected_sensor_cache = snapshot
-        now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        now_iso = datetime.now(timezone.utc).isoformat()
         telemetry_payload = {
             "data": data_map,
-            "raw": raw_map,
             "names": names_map,
             "enabled": enabled_map,
             "attributes": attrs_map,
+            "observed": observed_map,
             "timestamp": now_iso,
         }
         try:
