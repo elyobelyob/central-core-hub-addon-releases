@@ -273,32 +273,10 @@ class VersionManager:
 
         for path in changelog_paths:
             try:
-                if not path.exists():
-                    # create a minimal changelog if missing
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    with open(path, "w") as f:
-                        f.write("# Changelog\n\n")
-
-                content = path.read_text()
-
-                # If an entry for this version already exists, replace it
-                existing_pattern = rf"^## \[{re.escape(new_version)}\].*?(?=^## \[|\Z)"
-                if re.search(existing_pattern, content, flags=re.DOTALL | re.MULTILINE):
-                    new_content = re.sub(existing_pattern, release_block, content, flags=re.DOTALL | re.MULTILINE)
-                    path.write_text(new_content)
-                    print(f"Replaced existing changelog entry for {new_version}: {path}")
-                else:
-                    # Insert new release block after title (after first header line)
-                    parts = content.split("\n", 2)
-                    if len(parts) >= 2 and parts[0].startswith("#"):
-                        # preserve first header and an existing blank line if present
-                        remainder = content[len(parts[0]) + 1 :]
-                        new_content = parts[0] + "\n\n" + release_block + remainder.lstrip()
-                    else:
-                        new_content = release_block + content
-
-                    path.write_text(new_content)
-                    print(f"Updated changelog: {path}")
+                path.parent.mkdir(parents=True, exist_ok=True)
+                # Always replace the entire file with only the latest entry
+                path.write_text("# Changelog\n\n" + release_block)
+                print(f"Updated changelog: {path}")
             except Exception as exc:
                 print(f"Warning: failed to update changelog {path}: {exc}")
 
