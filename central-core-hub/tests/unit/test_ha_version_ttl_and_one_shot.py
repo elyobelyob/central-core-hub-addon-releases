@@ -34,7 +34,8 @@ def test_ha_version_ttl(monkeypatch, tmp_path):
     assert ha.get_ha_version(ttl_seconds=1) is None
 
 
-def test_one_shot_publish_on_ha_version(monkeypatch):
+def test_ha_version_callback_updates_cache(monkeypatch):
+    """_on_ha_version should update the cache; it no longer triggers a publish."""
     repo_root = Path(__file__).resolve().parents[3]
     mqtt_path = repo_root / "central-core-hub" / "mqtt_client.py"
 
@@ -67,11 +68,12 @@ def test_one_shot_publish_on_ha_version(monkeypatch):
 
     mqtt = _load_module(mqtt_path, "mqtt_client_testmod_one_shot")
 
-    # Replace publish_telemetry on the class so we can detect it
-    def _mark_publish(self):
-        setattr(self, "_published_once", True)
+    publish_calls = []
 
-    monkeypatch.setattr(mqtt.CentralCoreClient, "publish_telemetry", _mark_publish, raising=False)
+    def _track_publish(self):
+        publish_calls.append(True)
+
+    monkeypatch.setattr(mqtt.CentralCoreClient, "publish_telemetry", _track_publish, raising=False)
 
     opts = {
         "client_id": "test-hub",
@@ -82,4 +84,7 @@ def test_one_shot_publish_on_ha_version(monkeypatch):
     }
     c = mqtt.CentralCoreClient(opts)
 
-    assert getattr(c, "_published_once", False) is True
+    # Cache should be updated by the callback
+    assert c._ha_version_cache == "2.3.4"
+    # publish_telemetry should NOT have been triggered by _on_ha_version
+    assert publish_calls == []

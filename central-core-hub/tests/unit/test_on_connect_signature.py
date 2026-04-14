@@ -33,39 +33,30 @@ def test_on_connect_accepts_extra_args(monkeypatch):
     dummy = DummyClientInner()
     c._client = dummy
 
-    called = {"sensors": 0, "telemetry": 0}
+    sensors_called = [0]
 
     def fake_publish_sensors_with_default_filter():
-        called["sensors"] += 1
-
-    def fake_publish_telemetry():
-        called["telemetry"] += 1
+        sensors_called[0] += 1
 
     monkeypatch.setattr(c, "publish_sensors_with_default_filter", fake_publish_sensors_with_default_filter)
-    monkeypatch.setattr(c, "publish_telemetry", fake_publish_telemetry)
 
     # Standard call (positional args)
     c._connected = False
     c.on_connect(c._client, None, None, 0)
     assert any(s["topic"] == c.cmd_sub_topic for s in dummy.subscribed)
-    assert called["sensors"] >= 1
-    assert called["telemetry"] >= 1
+    assert sensors_called[0] >= 1
     assert c._connected is True
 
     # Extra positional args
     c._connected = False
-    called["sensors"] = 0
-    called["telemetry"] = 0
+    sensors_called[0] = 0
     c.on_connect(c._client, None, 0, None, None)
-    assert called["sensors"] >= 1
-    assert called["telemetry"] >= 1
+    assert sensors_called[0] >= 1
     assert c._connected is True
 
     # Keyword args style
     c._connected = False
-    called["sensors"] = 0
-    called["telemetry"] = 0
+    sensors_called[0] = 0
     c.on_connect(c._client, None, rc=0, properties=None)
-    assert called["sensors"] >= 1
-    assert called["telemetry"] >= 1
+    assert sensors_called[0] >= 1
     assert c._connected is True

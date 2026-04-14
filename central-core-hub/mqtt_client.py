@@ -1549,8 +1549,7 @@ class CentralCoreClient:
     def _on_ha_version(self, version):
         """Callback invoked when the HA websocket listener discovers a HA version.
 
-        Perform a one-shot telemetry publish so consumers see the updated
-        Home Assistant core information promptly.
+        Update the local cache; the next run_iteration will include it in telemetry.
         """
         if not version:
             return
@@ -1558,21 +1557,7 @@ class CentralCoreClient:
             ver = str(version)
         except Exception:
             return
-        prev = getattr(self, "_ha_version_cache", None)
-        # Update the local cache and trigger a one-shot telemetry publish
-        # only when the version has changed.
-        try:
-            if prev == ver:
-                self._ha_version_cache = ver
-                return
-            self._ha_version_cache = ver
-            try:
-                self.publish_telemetry()
-            except Exception:
-                _log("One-shot telemetry publish failed", sys.stderr)
-                traceback.print_exc()
-        except Exception:
-            traceback.print_exc()
+        self._ha_version_cache = ver
 
     def _resolve_addon_slug(self):
         slug = getattr(self, "_addon_slug", None)
@@ -1674,12 +1659,6 @@ class CentralCoreClient:
                 self.publish_sensors_with_default_filter()
             except Exception:
                 _log("Failed to publish default sensors on connect", sys.stderr)
-            
-            # Publish initial telemetry on connection
-            try:
-                self.publish_telemetry()
-            except Exception:
-                _log("Failed to publish telemetry on connect", sys.stderr)
         except Exception:
             # Ensure no exceptions escape the callback into paho's thread
             _log("Unhandled exception in on_connect", sys.stderr)
