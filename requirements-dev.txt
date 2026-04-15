@@ -1,3 +1,4 @@
+central-core-mqtt-shared @ git+https://github.com/elyobelyob/central-core-mqtt-shared.git@v1.0.2
 pytest>=7.0.0
 pytest-cov>=4.0.0
 ruff>=0.12.0
