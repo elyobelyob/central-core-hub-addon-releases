@@ -1,6 +1,6 @@
 paho-mqtt>=1.6.1
 requests>=2.25.1
-websocket-client>=1.8.0
+websocket-client>=1.9.2
 PyYAML>=6.0  # required by mqtt_client.py to parse SENSOR_REGISTRY.yaml
 
 # Shared MQTT topics/schemas package
