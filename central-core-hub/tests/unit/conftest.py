@@ -1,4 +1,13 @@
 import importlib.util as _iu
+import pathlib as _pl
+import sys as _sys
+
+# The add-on's modules sit two levels up. CI runs plain `pytest`, which (unlike
+# `python -m pytest`) does not put the working directory on sys.path, so tests
+# that `import handlers` / `import addon_updater` need it added here.
+_ADDON_DIR = str(_pl.Path(__file__).resolve().parents[2])
+if _ADDON_DIR not in _sys.path:
+    _sys.path.insert(0, _ADDON_DIR)
 
 # Preserve original reference
 _orig_module_from_spec = getattr(_iu, "module_from_spec")
