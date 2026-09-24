@@ -47,6 +47,7 @@ def test_config_ack_fallback_when_build_ack_raises():
     payload = {"command_id": "cfg1", "payload": {"version": "1.2.3"}}
 
     handlers.handle_message(client, msg, json.dumps(payload), None, None, None)
+    handlers.wait_for_update_worker(timeout=5)
 
     # ensure fallback ack topic (config.update) was used and completion published
     expected_ack = f"hubs/{client.client_id}/v1/ack/config.update/cfg1"
