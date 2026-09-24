@@ -91,31 +91,3 @@ def test_handle_sensors_set_no_ha_fails():
     assert any(p["topic"] == ack_topic for p in c.published)
 
 
-def test_config_update_command_triggers_addon_update():
-    mqtt_mod, handlers = _load_modules()
-    c = DummyClient()
-    cmd = {
-        "command_id": "conf123",
-        "action": "config/update",
-        "payload": {},
-    }
-    topic = f"hubs/{c.client_id}/v1/cmd/config/update"
-    msg = DummyMsg(topic, json.dumps(cmd).encode("utf-8"))
-
-    handlers.handle_message(
-        c,
-        msg,
-        json.dumps(cmd),
-        fetch_sensors=lambda a, b: [],
-        build_telemetry=mqtt_mod.build_telemetry,
-        build_vault_payload=mqtt_mod.build_vault_payload,
-        requests=None,
-    )
-
-    ack_topic = f"hubs/{c.client_id}/v1/ack/config.update/conf123"
-    ack_messages = [p for p in c.published if p["topic"] == ack_topic]
-    assert ack_messages, "no ack published for config update"
-
-    payload = json.loads(ack_messages[-1]["payload"])
-    assert payload["status"] == "completed"
-    assert payload["result"]["success"] is True

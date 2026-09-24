@@ -48,6 +48,50 @@ def _is_entity_allowed(entity_id):
         return True
 
 
+def _run_update_command(client, action, command_id, run):
+    """Run an updater call and publish its result as the command's completion ACK.
+
+    `run(send_started)` returns the result dict. For an update, the updater
+    calls `send_started` before installing, because the add-on restarts during
+    the install and could not send anything afterwards.
+    """
+    sent = {"done": False}
+
+    def publish(result):
+        if not command_id or sent["done"]:
+            return
+        payload = {
+            "status": "failed" if result.get("outcome") == "failed" else "completed",
+            "result": result,
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+        try:
+            topic = client.build_ack_topic(action, command_id)
+        except Exception:
+            topic = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
+        try:
+            client._publish(topic, json.dumps(payload), qos=1)
+            sent["done"] = True
+        except Exception:
+            pass
+
+    updater = None
+    try:
+        updater = client.addon_updater()
+    except Exception:
+        updater = None
+    if updater is None:
+        publish({"outcome": "failed", "installed": None, "latest": None, "auto_update": None,
+                 "reason": "ha_unreachable"})
+        return
+    try:
+        result = run(updater, publish)
+    except Exception as exc:
+        result = {"outcome": "failed", "installed": None, "latest": None, "auto_update": None,
+                  "reason": str(exc)}
+    publish(result)
+
+
 def handle_message(
     client,
     msg,
@@ -97,35 +141,31 @@ def handle_message(
                     client._publish(v1_ack, json.dumps(ack_payload), qos=1)
                 except Exception:
                     pass
-            upd_result = {}
+            version = None
+            payload_obj = cmd.get("payload") if isinstance(cmd, dict) else None
+            if isinstance(payload_obj, dict):
+                version = payload_obj.get("version")
+            _run_update_command(
+                client, action, command_id,
+                lambda updater, send: updater.update(expected_version=version, before_install=send),
+            )
+            return
+
+        expected_check_topic = f"hubs/{client.client_id}/v1/cmd/config/check_update"
+        if topic == expected_check_topic:
             try:
-                # Extract version from payload if provided
-                version = None
-                try:
-                    payload_obj = cmd.get("payload") if isinstance(cmd, dict) else None
-                    if isinstance(payload_obj, dict):
-                        version = payload_obj.get("version")
-                except Exception:
-                    version = None
-
-                upd_result = client.trigger_addon_update(version=version) or {}
+                cmd = json.loads(payload_str) if payload_str and payload_str != "<binary>" else {}
             except Exception:
-                upd_result = {"success": False, "error": "trigger_failed"}
-
-            completion_payload = {
-                "status": "completed" if upd_result.get("success") else "failed",
-                "result": upd_result,
-                "timestamp": datetime.now().astimezone().isoformat().replace("+00:00", "Z"),
-            }
+                cmd = {}
+            command_id = cmd.get("command_id")
+            action = cmd.get("action") or "config/check_update"
             if command_id:
                 try:
-                    v1_comp = client.build_ack_topic(action, command_id)
-                except Exception:
-                    v1_comp = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
-                try:
-                    client._publish(v1_comp, json.dumps(completion_payload), qos=1)
+                    client._publish(client.build_ack_topic(action, command_id),
+                                    json.dumps({"status": "acknowledged"}), qos=1)
                 except Exception:
                     pass
+            _run_update_command(client, action, command_id, lambda updater, send: updater.check())
             return
 
         expected_cmd_topic_v1 = f"hubs/{client.client_id}/v1/cmd/sensors/poll"

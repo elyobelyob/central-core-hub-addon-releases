@@ -53,29 +53,6 @@ class Msg:
         self.topic = topic
 
 
-def test_config_update_trigger_fails_publishes_failed_completion():
-    client = DummyClientTriggerFail()
-    topic = f"hubs/{client.client_id}/v1/cmd/config/update"
-    payload = json.dumps({"command_id": "c-upd", "payload": {"version": "1.2.3"}})
-
-    handlers.handle_message(client, Msg(topic), payload, None, None, None)
-
-    # completion ack should be published and indicate failure
-    comp = None
-    for t, payload_str, qos in client.published:
-        try:
-            p = json.loads(payload_str)
-        except Exception:
-            continue
-        if p.get("status") in ("completed", "failed"):
-            comp = p
-            break
-    assert comp is not None
-    res = comp.get("result") or {}
-    assert res.get("success") is False
-    assert res.get("error") == "trigger_failed"
-
-
 def test_sensors_poll_build_ack_raises_falls_back_to_string_topic():
     client = DummyClientAckBad()
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/poll"

@@ -1554,57 +1554,31 @@ class CentralCoreClient:
         except Exception:
             return
         self._ha_version_cache = ver
+        # Once per process, now that Home Assistant is answering. Not on this
+        # thread: it is the websocket receive loop, which is what delivers the
+        # replies the updater waits for.
+        if not getattr(self, "_auto_update_checked", False):
+            self._auto_update_checked = True
+            threading.Thread(target=self._switch_off_ha_auto_update, name="ha-auto-update-off",
+                             daemon=True).start()
 
-    def _resolve_addon_slug(self):
-        slug = getattr(self, "_addon_slug", None)
-        if slug:
-            return slug
-        slug = None
+    def addon_updater(self):
+        """The updater for this add-on, or None if Home Assistant isn't connected."""
+        listener = getattr(self, "_ha_ws_listener", None)
+        if listener is None or not callable(getattr(listener, "request", None)):
+            return None
+        from addon_updater import AddonUpdater
+
+        return AddonUpdater(listener)
+
+    def _switch_off_ha_auto_update(self):
+        """Updates happen only when the vault orders them."""
         try:
-            config_path = pathlib.Path(__file__).parent / "config.json"
-            with open(config_path, "r") as f:
-                data = json.load(f)
-                slug = data.get("slug")
-        except Exception:
-            slug = None
-        if not slug:
-            slug = os.environ.get("ADDON_SLUG")
-        self._addon_slug = slug
-        return slug
-
-    def trigger_addon_update(self, _version=None):
-        slug = self._resolve_addon_slug()
-        if not slug:
-            return {"success": False, "reason": "addon_slug_missing"}
-
-        check_domains = (
-            ("supervisor", "check_addon_updates"),
-            ("hassio", "check_addon_updates"),
-        )
-        check_result = None
-        for domain, service in check_domains:
-            res = self._call_ha_service(domain, service, {"addon": slug})
-            if res is not None:
-                check_result = {"domain": domain, "result": res}
-                break
-
-        update_domains = (
-            ("supervisor", "addon_update"),
-            ("hassio", "addon_update"),
-        )
-        update_result = None
-        for domain, service in update_domains:
-            res = self._call_ha_service(domain, service, {"addon": slug})
-            if res is not None:
-                update_result = {"domain": domain, "result": res}
-                break
-
-        return {
-            "success": update_result is not None,
-            "check": check_result,
-            "update": update_result,
-        }
-
+            updater = self.addon_updater()
+            if updater is not None and updater.disable_auto_update():
+                _log("Home Assistant auto-update is off for this add-on: updates come from the vault")
+        except Exception as exc:
+            _log(f"Could not switch off Home Assistant auto-update: {exc}")
     def on_connect(self, client, _userdata, *args, **kwargs):
         """MQTT on_connect callback.
 
