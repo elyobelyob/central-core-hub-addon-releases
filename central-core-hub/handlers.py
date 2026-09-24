@@ -5,6 +5,7 @@ command lifecycles testable independently.
 """
 
 import json
+import threading
 import os
 import traceback
 from datetime import datetime, timezone
@@ -46,6 +47,20 @@ def _is_entity_allowed(entity_id):
         return True
     except Exception:
         return True
+
+
+# One update or check at a time, off paho's network thread: an update can take
+# minutes, and while that thread is busy the hub sends nothing (no keepalives,
+# no sensor changes, not even this command's own replies).
+_update_lock = threading.Lock()
+_update_thread = None
+
+
+def wait_for_update_worker(timeout=None):
+    """Wait for the running update/check to finish (used by tests and shutdown)."""
+    t = _update_thread
+    if t is not None:
+        t.join(timeout)
 
 
 def _run_update_command(client, action, command_id, run):
@@ -92,12 +107,25 @@ def _run_update_command(client, action, command_id, run):
         publish({"outcome": "failed", "installed": None, "latest": None, "auto_update": None,
                  "reason": "ha_unreachable"})
         return
-    try:
-        result = run(updater, publish)
-    except Exception as exc:
-        result = {"outcome": "failed", "installed": None, "latest": None, "auto_update": None,
-                  "reason": str(exc)}
-    publish(result)
+    if not _update_lock.acquire(blocking=False):
+        publish({"outcome": "failed", "installed": None, "latest": None, "auto_update": None,
+                 "reason": "update_already_running"})
+        return
+
+    def work():
+        try:
+            try:
+                result = run(updater, publish)
+            except Exception as exc:
+                result = {"outcome": "failed", "installed": None, "latest": None, "auto_update": None,
+                          "reason": str(exc)}
+            publish(result)
+        finally:
+            _update_lock.release()
+
+    global _update_thread
+    _update_thread = threading.Thread(target=work, name="addon-update", daemon=True)
+    _update_thread.start()
 
 
 def handle_message(

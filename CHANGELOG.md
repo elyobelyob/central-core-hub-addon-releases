@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.47] - 2026-09-24
+
+- fix: updates and update checks run on their own worker thread. They ran on the MQTT client's
+  network thread, which for the minutes a store reload can take stopped the hub sending
+  keepalives and sensor changes, and held back the update's own replies.
+- fix: a second update or check ordered while one is running is refused with
+  "update_already_running" instead of queueing behind it.
+
 ## [2.0.46] - 2026-09-24
 
 - fix: the "update started" reply is delivered before Home Assistant stops the add-on to install

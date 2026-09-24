@@ -1,4 +1,6 @@
 import json
+import threading
+import time
 from types import SimpleNamespace
 
 import handlers
@@ -37,10 +39,12 @@ class FakeClient:
         self.published.append((topic, json.loads(payload)))
 
 
-def _send(client, action, payload=None):
+def _send(client, action, payload=None, wait=True):
     msg = SimpleNamespace(topic=f"hubs/hub-x/v1/cmd/{action}")
     body = json.dumps({"command_id": "c1", "action": action, "payload": payload or {}})
     handlers.handle_message(client, msg, body, None, None, None, requests=None)
+    if wait:
+        handlers.wait_for_update_worker(timeout=5)
     return [p for t, p in client.published if t.endswith("/c1")]
 
 
@@ -104,3 +108,52 @@ def test_started_reply_is_delivered_before_the_install_runs():
     kinds = [e[0] for e in events]
     assert "delivered" in kinds and kinds.index("delivered") < kinds.index("install")
     assert events[kinds.index("delivered")][1]
+
+
+
+class BlockingUpdater:
+    """An update that runs until released, like a slow Supervisor."""
+
+    def __init__(self):
+        self.release = threading.Event()
+        self.installs = 0
+        self.calls = 0
+
+    def update(self, expected_version=None, before_install=None):
+        self.calls += 1
+        self.release.wait(5)
+        self.installs += 1
+        return dict(STARTED)
+
+    def check(self):
+        self.release.wait(5)
+        return dict(STARTED, outcome="checked")
+
+
+def test_update_does_not_block_the_mqtt_thread():
+    # The handler is called on paho's network thread; while an update runs
+    # that thread must stay free for keepalives, sensor events and replies.
+    updater = BlockingUpdater()
+    client = FakeClient(updater)
+    t0 = time.monotonic()
+    _send(client, "config/update", wait=False)
+    assert time.monotonic() - t0 < 1.0
+    assert [p["status"] for t, p in client.published if t.endswith("/c1")] == ["acknowledged"]
+    updater.release.set()
+    handlers.wait_for_update_worker(timeout=5)
+    assert any(p["status"] == "completed" for t, p in client.published if t.endswith("/c1"))
+
+
+def test_second_order_while_one_runs_is_refused_not_run():
+    updater = BlockingUpdater()
+    client = FakeClient(updater)
+    _send(client, "config/update", wait=False)
+    msg = SimpleNamespace(topic="hubs/hub-x/v1/cmd/config/update")
+    handlers.handle_message(client, msg, json.dumps({"command_id": "c2", "action": "config/update"}),
+                            None, None, None, requests=None)
+    second = [p for t, p in client.published if t.endswith("/c2") and p["status"] != "acknowledged"]
+    assert second and second[-1]["status"] == "failed"
+    assert second[-1]["result"]["reason"] == "update_already_running"
+    updater.release.set()
+    handlers.wait_for_update_worker(timeout=5)
+    assert updater.calls == 1
