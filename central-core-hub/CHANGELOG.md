@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.0.44] - 2026-09-24
+
+- fix: an update ordered while Home Assistant restarts reports "update entity not found" instead of
+  failing with an internal error.
+
 ## [2.0.43] - 2026-09-24
 
 - fix: updates ordered from the vault work again. They now go through Home Assistant's update
