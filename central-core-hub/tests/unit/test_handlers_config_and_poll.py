@@ -34,33 +34,6 @@ class Msg:
         self.topic = topic
 
 
-def test_config_update_success_publishes_completed():
-    client = DummyClient("unit-cfg")
-
-    def trigger_addon_update(version=None):
-        return {"success": True, "version": version}
-
-    client.trigger_addon_update = trigger_addon_update
-
-    topic = f"hubs/{client.client_id}/v1/cmd/config/update"
-    payload = json.dumps({"command_id": "cfg1", "payload": {"version": "1.2.3"}})
-
-    handlers.handle_message(client, Msg(topic), payload, None, None, None)
-
-    # Ensure a completion ack published with success True
-    comp = None
-    for t, p, qos in client.published:
-        try:
-            o = json.loads(p)
-        except Exception:
-            continue
-        if o.get("status") == "completed":
-            comp = o
-            break
-    assert comp is not None
-    assert comp.get("result", {}).get("success") is True
-
-
 def test_sensors_poll_early_return_no_sensors_requested():
     client = DummyClient("unit-poll")
 

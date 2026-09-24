@@ -36,6 +36,13 @@ class FakeClient:
 
 def test_config_ack_fallback_when_build_ack_raises():
     client = FakeClient()
+
+    class Updater:
+        def update(self, expected_version=None, before_install=None):
+            return {"outcome": "up_to_date", "installed": "1.2.3", "latest": "1.2.3",
+                    "auto_update": False, "reason": None}
+
+    client.addon_updater = lambda: Updater()
     msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/config/update"})
     payload = {"command_id": "cfg1", "payload": {"version": "1.2.3"}}
 
@@ -52,7 +59,7 @@ def test_config_ack_fallback_when_build_ack_raises():
             obj = json.loads(p)
         except Exception:
             continue
-        if obj.get("status") == "completed" and obj.get("result", {}).get("success"):
+        if obj.get("status") == "completed" and obj.get("result", {}).get("outcome") == "up_to_date":
             ok = True
             break
     assert ok
