@@ -152,3 +152,13 @@ def test_entity_disappearing_between_check_and_install_is_reported():
 
     res = au.AddonUpdater(Flaky()).update()
     assert res["outcome"] == "failed" and res["reason"] == "update_entity_not_found"
+
+
+def test_store_reload_allows_for_a_slow_supervisor():
+    # Home Assistant gives supervisor/api calls 10 s unless told otherwise, and
+    # a store reload fetches every add-on repository: on Irongate it timed out
+    # (unknown_error) until an explicit timeout was passed.
+    fake = FakeListener([_state()])
+    au.AddonUpdater(fake).check()
+    reload = [c for c in fake.calls("supervisor/api") if c["endpoint"] == "/store/reload"][0]
+    assert reload["timeout"] >= 60

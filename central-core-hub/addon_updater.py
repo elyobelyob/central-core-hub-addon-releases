@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 
 SLUG_SUFFIX = "central-core-hub"
+STORE_RELOAD_TIMEOUT = 90  # seconds
 _PICTURE_RE = re.compile(r"/addons/([^/]+)/icon")
 
 
@@ -59,8 +60,10 @@ class AddonUpdater:
         return None, "update_entity_not_found"
 
     def _reload_store(self):
-        self.listener.request({"type": "supervisor/api", "endpoint": "/store/reload", "method": "post"},
-                              timeout=60.0)
+        # Home Assistant allows supervisor/api calls 10 s unless told otherwise;
+        # a reload fetches every add-on repository and can take longer.
+        self.listener.request({"type": "supervisor/api", "endpoint": "/store/reload", "method": "post",
+                               "timeout": STORE_RELOAD_TIMEOUT}, timeout=STORE_RELOAD_TIMEOUT + 10)
         if self.entity_id:
             self.listener.request({"type": "call_service", "domain": "homeassistant",
                                    "service": "update_entity",
