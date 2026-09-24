@@ -351,6 +351,33 @@ class HAWebSocketListener:
             return None
         return final.get("result")
 
+    def request(self, payload, timeout: float = 15.0):
+        """Send any websocket command and return Home Assistant's full reply.
+
+        The reply is the whole message ({"success", "result", "error"}), so a
+        caller can tell "unauthorized" from "no answer" (None).
+        """
+        if not self._ws:
+            return None
+        try:
+            req_id, event = self._register_request()
+        except Exception:
+            return None
+        message = dict(payload)
+        message["id"] = req_id
+        try:
+            self._send_json(self._ws, message)
+        except Exception:
+            with self._prot_req_lock:
+                self._pending_requests.pop(req_id, None)
+            return None
+        completed = event.wait(timeout)
+        with self._prot_req_lock:
+            final = self._pending_requests.pop(req_id, None)
+        if not completed or final is None:
+            return None
+        return final.get("result")
+
     def _persist_ha_version(self, version):
         """Cache and persist the discovered HA version."""
         if version is None:
