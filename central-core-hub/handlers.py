@@ -70,10 +70,18 @@ def _run_update_command(client, action, command_id, run):
         except Exception:
             topic = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
         try:
-            client._publish(topic, json.dumps(payload), qos=1)
+            info = client._publish(topic, json.dumps(payload), qos=1)
             sent["done"] = True
         except Exception:
-            pass
+            return
+        # Home Assistant stops the add-on for its own install; make sure the
+        # reply has actually left before that happens.
+        wait = getattr(info, "wait_for_publish", None)
+        if callable(wait):
+            try:
+                wait(timeout=5)
+            except Exception:
+                pass
 
     updater = None
     try:
