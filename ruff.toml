@@ -10,6 +10,9 @@ extend-ignore = ["E203"]
 # Common per-file ignores (e.g. allow unused imports in package __init__ files)
 per-file-ignores = {"__init__.py" = ["F401"]}
 
-# Keep the default rule set (do not explicitly select). Projects can add
-# additional `select` or `ignore` entries here when they need to diverge
-# from the defaults used in CI.
+# The rule set this code was written against: Ruff's long-standing defaults.
+# A later Ruff release broadened the defaults (blind-except, security,
+# import sorting…), and CI installs the latest Ruff, so relying on the
+# defaults turned CI red overnight with 705 findings no one had chosen.
+# Widen this deliberately, not by upgrading Ruff.
+select = ["E4", "E7", "E9", "F"]
