@@ -7,9 +7,14 @@ means a release published minutes ago is seen. Both need an admin token.
 from __future__ import annotations
 
 import re
+import time
 
 SLUG_SUFFIX = "central-core-hub"
 STORE_RELOAD_TIMEOUT = 90  # seconds
+# After a store reload Home Assistant refreshes the update entity on its own
+# schedule; give an ordered version this long to appear before giving up.
+VERSION_WAIT_SECONDS = 30
+POLL_SECONDS = 5
 _PICTURE_RE = re.compile(r"/addons/([^/]+)/icon")
 
 
@@ -39,8 +44,9 @@ def _failure(reply):
 
 
 class AddonUpdater:
-    def __init__(self, listener):
+    def __init__(self, listener, sleep=time.sleep):
         self.listener = listener
+        self._sleep = sleep
         self.entity_id = None
         self.slug = None
 
@@ -64,6 +70,9 @@ class AddonUpdater:
         # a reload fetches every add-on repository and can take longer.
         self.listener.request({"type": "supervisor/api", "endpoint": "/store/reload", "method": "post",
                                "timeout": STORE_RELOAD_TIMEOUT}, timeout=STORE_RELOAD_TIMEOUT + 10)
+        self._refresh_entity()
+
+    def _refresh_entity(self):
         if self.entity_id:
             self.listener.request({"type": "call_service", "domain": "homeassistant",
                                    "service": "update_entity",
@@ -87,9 +96,19 @@ class AddonUpdater:
         if state is None:   # e.g. Home Assistant restarted since the check
             return _result("failed", reason=reason)
         attrs = state["attributes"]
-        installed, latest = attrs.get("installed_version"), attrs.get("latest_version")
         if attrs.get("in_progress"):
             return _result("started", state)
+        waited = 0
+        while (expected_version and waited < VERSION_WAIT_SECONDS
+               and version_tuple(attrs.get("latest_version")) < version_tuple(expected_version)):
+            self._sleep(POLL_SECONDS)
+            waited += POLL_SECONDS
+            self._refresh_entity()
+            state, reason = self._find()
+            if state is None:
+                return _result("failed", reason=reason)
+            attrs = state["attributes"]
+        installed, latest = attrs.get("installed_version"), attrs.get("latest_version")
         if expected_version and version_tuple(latest) < version_tuple(expected_version):
             return _result("failed", state, reason="store_not_updated_yet")
         if version_tuple(latest) <= version_tuple(installed):

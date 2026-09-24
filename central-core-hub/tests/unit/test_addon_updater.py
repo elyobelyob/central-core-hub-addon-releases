@@ -105,7 +105,7 @@ def test_store_reload_refused_still_updates_to_what_is_visible():
 
 def test_expected_version_not_yet_in_store():
     fake = FakeListener([_state("2.0.43", "2.0.43")])
-    res = au.AddonUpdater(fake).update(expected_version="2.0.45")
+    res = au.AddonUpdater(fake, sleep=lambda seconds: None).update(expected_version="2.0.45")
     assert res["outcome"] == "failed" and res["reason"] == "store_not_updated_yet"
 
 
@@ -162,3 +162,32 @@ def test_store_reload_allows_for_a_slow_supervisor():
     au.AddonUpdater(fake).check()
     reload = [c for c in fake.calls("supervisor/api") if c["endpoint"] == "/store/reload"][0]
     assert reload["timeout"] >= 60
+
+
+class SlowEntity(FakeListener):
+    """The update entity shows the new version only after a few lookups."""
+
+    def __init__(self, visible_after):
+        super().__init__([_state("2.0.44", "2.0.44")])
+        self.visible_after, self.lookups = visible_after, 0
+
+    def request(self, payload, timeout=15.0):
+        if payload["type"] == "get_states":
+            self.lookups += 1
+            if self.lookups >= self.visible_after:
+                self.states = [_state("2.0.44", "2.0.45")]
+        return super().request(payload, timeout)
+
+
+def test_waits_briefly_for_the_ordered_version_to_appear():
+    naps = []
+    res = au.AddonUpdater(SlowEntity(visible_after=5), sleep=naps.append).update(expected_version="2.0.45")
+    assert res["outcome"] == "started" and res["latest"] == "2.0.45"
+    assert naps  # it waited rather than giving up at once
+
+
+def test_gives_up_waiting_after_the_limit():
+    naps = []
+    res = au.AddonUpdater(SlowEntity(visible_after=10_000), sleep=naps.append).update(expected_version="2.0.45")
+    assert res["reason"] == "store_not_updated_yet"
+    assert sum(naps) <= au.VERSION_WAIT_SECONDS

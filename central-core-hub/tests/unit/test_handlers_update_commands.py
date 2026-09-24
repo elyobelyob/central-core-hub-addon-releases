@@ -78,3 +78,29 @@ def test_check_update_reports_versions():
 def test_no_home_assistant_listener():
     acks = _send(FakeClient(None), "config/update")
     assert acks[-1]["status"] == "failed" and acks[-1]["result"]["reason"] == "ha_unreachable"
+
+
+def test_started_reply_is_delivered_before_the_install_runs():
+    # Live on Irongate, Home Assistant stopped the add-on for the install
+    # before its "started" reply left the machine.
+    events = []
+
+    class Info:
+        def wait_for_publish(self, timeout=None):
+            events.append(("delivered", timeout))
+
+    class DeliveringClient(FakeClient):
+        def _publish(self, topic, payload, qos=0):
+            super()._publish(topic, payload, qos)
+            return Info()
+
+    class Updater(FakeUpdater):
+        def update(self, expected_version=None, before_install=None):
+            before_install(self.update_result)
+            events.append(("install", None))
+            return self.update_result
+
+    _send(DeliveringClient(Updater(update_result=STARTED)), "config/update")
+    kinds = [e[0] for e in events]
+    assert "delivered" in kinds and kinds.index("delivered") < kinds.index("install")
+    assert events[kinds.index("delivered")][1]
