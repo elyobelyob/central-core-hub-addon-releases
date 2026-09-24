@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Refuse to push anything that would fail CI. Enable with:
+#   git config core.hooksPath .githooks
+exec "$(git rev-parse --show-toplevel)/scripts/ci-local.sh"
