@@ -80,7 +80,9 @@ class AddonUpdater:
         checked = self.check()
         if checked["outcome"] == "failed":
             return checked
-        state, _ = self._find()
+        state, reason = self._find()
+        if state is None:   # e.g. Home Assistant restarted since the check
+            return _result("failed", reason=reason)
         attrs = state["attributes"]
         installed, latest = attrs.get("installed_version"), attrs.get("latest_version")
         if attrs.get("in_progress"):

@@ -134,3 +134,21 @@ def test_disable_auto_update_skips_when_already_off():
     fake = FakeListener([_state(auto_update=False)])
     assert au.AddonUpdater(fake).disable_auto_update() is True
     assert not [c for c in fake.calls("supervisor/api") if c["endpoint"].endswith("/options")]
+
+
+def test_entity_disappearing_between_check_and_install_is_reported():
+    # Home Assistant restarting between the check and the install
+    class Flaky(FakeListener):
+        def __init__(self):
+            super().__init__([_state("2.0.43", "2.0.44")])
+            self.lookups = 0
+
+        def request(self, payload, timeout=15.0):
+            if payload["type"] == "get_states":
+                self.lookups += 1
+                if self.lookups > 2:
+                    return {"success": True, "result": []}
+            return super().request(payload, timeout)
+
+    res = au.AddonUpdater(Flaky()).update()
+    assert res["outcome"] == "failed" and res["reason"] == "update_entity_not_found"
