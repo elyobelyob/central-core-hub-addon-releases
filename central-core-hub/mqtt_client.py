@@ -183,10 +183,34 @@ class PersistentOutbox:
         return success
 
 
-def _log(msg, file=sys.stdout):
+def _log(msg, file=None):
     """Log a message with UTC timestamp."""
     ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    print(f"[{ts}] {msg}", file=file, flush=True)
+    print(f"[{ts}] {msg}", file=file or sys.stdout, flush=True)
+
+
+# Payloads (sensor states, attributes, command bodies) are logged only when
+# debug logging is on: the `debug_logging` add-on option or CC_HUB_DEBUG=1.
+_DEBUG_LOGGING = os.environ.get("CC_HUB_DEBUG", "").lower() in ("1", "true", "yes")
+_PREVIEW_CHARS = 300
+_PEM_RE = re.compile(r"-----BEGIN [^-]+-----.*?-----END [^-]+-----", re.DOTALL)
+
+
+def _log_debug(msg):
+    if _DEBUG_LOGGING:
+        _log(msg)
+
+
+def _preview(payload, limit=_PREVIEW_CHARS):
+    """A short, PEM-redacted rendering of a payload for debug logs."""
+    if payload is None:
+        return "<none>"
+    try:
+        text = payload.decode("utf-8", errors="replace") if isinstance(payload, (bytes, bytearray)) else str(payload)
+    except Exception:
+        return "<unprintable>"
+    text = _PEM_RE.sub("[PEM REDACTED]", text)
+    return text if len(text) <= limit else text[:limit] + f"...(+{len(text) - limit} chars)"
 
 
 try:
@@ -450,10 +474,8 @@ def reload_sensor_registry():
     try:
         entries = _load_sensor_registry() or []
         provided = [e.get("entity_id") for e in entries if e.get("entity_id") and e.get("provide")]
-        if provided:
-            _log(f"Monitored sensors: {', '.join(provided)}")
-        else:
-            _log("Monitored sensors: none")
+        _log(f"Monitored sensors: {len(provided) or 'none'}")
+        _log_debug(f"Monitored sensors: {', '.join(provided)}")
     except Exception:
         _log("Monitored sensors: none")
 
@@ -998,6 +1020,9 @@ class CentralCoreClient:
         self.client_id = options.get("client_id") or socket.gethostname().lower().replace(" ", "-")
         self.ha_api_url = options.get("ha_api_url") or ""
         self.ha_api_token = options.get("ha_api_token") or ""
+        if options.get("debug_logging"):
+            global _DEBUG_LOGGING
+            _DEBUG_LOGGING = True
         # Load safe device classes from options (vault is authoritative for filtering)
         # Default to common safe device classes if not configured
         configured_safe = options.get("safe_device_classes")
@@ -1178,13 +1203,7 @@ class CentralCoreClient:
                         started = self._ha_ws_listener.start()
                         _log(f"HA WS listener started={started}")
                         # Log which sensors the websocket is currently monitoring
-                        try:
-                            if self._selected_sensors_set:
-                                _log(f"HA WS monitoring sensors: {', '.join(sorted(self._selected_sensors_set))}")
-                            else:
-                                _log("HA WS monitoring sensors: none")
-                        except Exception:
-                            pass
+                        _log(f"HA WS monitoring sensors: {len(self._selected_sensors_set) or 'none'}")
                     except Exception:
                         _log("Failed to start HA WS listener")
                         traceback.print_exc()
@@ -1381,16 +1400,14 @@ class CentralCoreClient:
             self.mqtt_key = keys[0]
 
     def _publish(self, topic, payload, qos=0):
-        """Publish and log the MQTT publish action and result."""
-        # If this topic is eligible for persistence and the outbox is
-        # configured, attempt publish but fall back to enqueuing the
-        # message for later delivery on connect.
+        """Publish, log topic/length/result, and queue eligible messages that fail."""
         try:
             outbox = getattr(self, "_outbox", None)
         except Exception:
             outbox = None
+        length = len(payload) if payload is not None else 0
         try:
-            _log(f"MQTT -> PUBLISH to {topic} qos={qos} len={len(payload) if payload is not None else 0}")
+            _log_debug(f"MQTT -> PUBLISH {topic} qos={qos} len={length} payload={_preview(payload)}")
             # If not connected, only enqueue when we have a real paho MQTT
             # client (i.e. runtime) and the topic is eligible for persistence.
             # In tests the client is often a dummy shim; allow those publishes
@@ -1405,7 +1422,7 @@ class CentralCoreClient:
             ):
                 try:
                     outbox.append(topic, payload if payload is not None else "", qos)
-                    _log(f"MQTT OUTBOX -> queued for {topic}")
+                    _log(f"MQTT OUTBOX <- {topic} len={length} (not connected)")
                     return None
                 except Exception:
                     pass
@@ -1416,37 +1433,7 @@ class CentralCoreClient:
                 rc = getattr(result, "rc", None)
             except Exception:
                 rc = None
-            # Prepare a sanitized, human-readable payload for logging
-            try:
-                if payload is None:
-                    disp = "<none>"
-                elif isinstance(payload, (bytes, bytearray)):
-                    try:
-                        disp = payload.decode("utf-8", errors="replace")
-                    except Exception:
-                        disp = str(payload)
-                else:
-                    disp = str(payload)
-
-                # Redact certificate/private key blocks to avoid leaking secrets
-                import re
-
-                disp = re.sub(
-                    r"-----BEGIN CERTIFICATE-----[^-]*-----END CERTIFICATE-----",
-                    "[CERTIFICATE REDACTED]",
-                    disp,
-                    flags=re.DOTALL,
-                )
-                disp = re.sub(
-                    r"-----BEGIN PRIVATE KEY-----[^-]*-----END PRIVATE KEY-----",
-                    "[PRIVATE KEY REDACTED]",
-                    disp,
-                    flags=re.DOTALL,
-                )
-            except Exception:
-                disp = "<unserializable>"
-
-            _log(f"MQTT <- PUBLISH result for {topic} rc={rc} payload={disp}")
+            _log(f"MQTT -> {topic} qos={qos} len={length} rc={rc}")
             # If publish returned an rc indicating failure and outbox is enabled,
             # persist the message for retry if the topic is eligible.
             try:
@@ -1455,17 +1442,16 @@ class CentralCoreClient:
             except Exception:
                 pass
             return result
-        except Exception:
-            _log(f"MQTT ERROR publishing to {topic}", sys.stderr)
+        except Exception as exc:
+            _log(f"MQTT ERROR publishing to {topic} len={length}: {type(exc).__name__}", sys.stderr)
             # On exception, persist the message if appropriate
             try:
                 outbox = getattr(self, "_outbox", None)
                 if outbox and _should_persist_topic(topic):
                     outbox.append(topic, payload if payload is not None else "", qos)
-                    _log(f"MQTT OUTBOX -> queued for {topic} after error")
+                    _log(f"MQTT OUTBOX <- {topic} len={length} (after error)")
             except Exception:
                 pass
-            traceback.print_exc()
             return None
 
     def _on_ha_state_event(self, entity_id, new_state):
@@ -1526,10 +1512,7 @@ class CentralCoreClient:
                 json.dumps(telemetry_payload),
                 qos=0,
             )
-            try:
-                _log(f"HA WS -> Sent sensor update for {entity_id}: {raw_state}")
-            except Exception:
-                pass
+            _log_debug(f"HA WS -> sent change for {entity_id}: {raw_state!r}")
         except Exception:
             _log("Failed to publish selected sensor change via HA WS", sys.stderr)
         return
@@ -1682,33 +1665,12 @@ class CentralCoreClient:
             except Exception:
                 payload = "<binary>"
 
-            # Sanitize payload for logging to avoid exposing certificates
-            def _sanitize_payload_for_logging(text):
-                import re
-
-                # Redact certificate content
-                text = re.sub(
-                    r"-----BEGIN CERTIFICATE-----[^-]*-----END CERTIFICATE-----",
-                    "[CERTIFICATE REDACTED]",
-                    text,
-                    flags=re.DOTALL,
-                )
-                text = re.sub(
-                    r"-----BEGIN PRIVATE KEY-----[^-]*-----END PRIVATE KEY-----",
-                    "[PRIVATE KEY REDACTED]",
-                    text,
-                    flags=re.DOTALL,
-                )
-                text = re.sub(
-                    r"-----BEGIN [^-]*-----[^-]*-----END [^-]*-----",
-                    "[CERT DATA REDACTED]",
-                    text,
-                    flags=re.DOTALL,
-                )
-                return text
-
-            safe_payload = _sanitize_payload_for_logging(payload)
-            _log(f"Received message on {msg.topic}: {safe_payload}")
+            try:
+                size = len(msg.payload)
+            except Exception:
+                size = "?"
+            _log(f"MQTT <- {msg.topic} len={size} retain={getattr(msg, 'retain', False) is True}")
+            _log_debug(f"MQTT <- {msg.topic} payload={_preview(payload)}")
             # Prefer a local import of the handlers module; fall back to
             # loading relative to the file for test contexts.
             try:
@@ -1921,12 +1883,7 @@ class CentralCoreClient:
         except Exception:
             pass
         try:
-            _log(f"Telemetry interval (effective): {self.telemetry_interval}")
-        except Exception:
-            pass
-        try:
             self._publish(self.telemetry_topic, payload)
-            _log(f"Published telemetry to {self.telemetry_topic}")
         except Exception:
             _log("Failed to publish telemetry")
         # Also publish to an optional vault-specific topic if configured.
@@ -2227,23 +2184,12 @@ class CentralCoreClient:
             now_ts = int(time.time())
             if now_ts - getattr(self, "_last_monitor_log", 0) >= 300:
                 self._last_monitor_log = now_ts
+                _log(f"Periodic: HA WS monitoring sensors: {len(self._selected_sensors_set) or 'none'}")
                 try:
-                    # Websocket-selected sensors
-                    if self._selected_sensors_set:
-                        _log(f"Periodic: HA WS monitoring sensors: {', '.join(sorted(self._selected_sensors_set))}")
-                    else:
-                        _log("Periodic: HA WS monitoring sensors: none")
-                except Exception:
-                    _log("Periodic: HA WS monitoring sensors: none")
-                try:
-                    # Registry-provided sensors (those marked provide=True)
                     provided = list_monitored_sensors()
-                    if provided:
-                        _log(f"Periodic: Registry provided sensors: {', '.join(provided)}")
-                    else:
-                        _log("Periodic: Registry provided sensors: none")
                 except Exception:
-                    _log("Periodic: Registry provided sensors: none")
+                    provided = []
+                _log(f"Periodic: Registry provided sensors: {len(provided) or 'none'}")
         except Exception:
             pass
         # send telemetry every 30s; send sensors every hour

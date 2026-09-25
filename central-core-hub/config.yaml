@@ -40,3 +40,4 @@ schema:
   telemetry_interval: int
   safe_device_classes:
     - str
+  debug_logging: bool?
