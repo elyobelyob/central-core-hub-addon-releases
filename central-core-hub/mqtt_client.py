@@ -887,16 +887,30 @@ def get_cpu_percent():  # noqa: F811
         return None
 
 
-def _sanitize_attributes(attrs):
-    import ha_safety
+def _ha_safety():
+    """The sibling ha_safety module, also when this file was loaded by path
+    (the add-on directory not on sys.path)."""
+    try:
+        import ha_safety
+    except ImportError:
+        import importlib.util as _ilu
+        import pathlib as _pl
 
-    return ha_safety.sanitize_attributes(attrs)
+        spec = _ilu.spec_from_file_location("ha_safety", str(_pl.Path(__file__).with_name("ha_safety.py")))
+        if spec is None or spec.loader is None:
+            raise
+        ha_safety = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(ha_safety)
+        sys.modules["ha_safety"] = ha_safety
+    return ha_safety
+
+
+def _sanitize_attributes(attrs):
+    return _ha_safety().sanitize_attributes(attrs)
 
 
 def _is_selectable_entity(entity_id):
-    import ha_safety
-
-    return ha_safety.is_selectable_entity(entity_id)
+    return _ha_safety().is_selectable_entity(entity_id)
 
 
 def fetch_selected_sensors(ha_api_url, ha_api_token, entity_ids):
@@ -1055,9 +1069,7 @@ class CentralCoreClient:
         self.ha_api_url = options.get("ha_api_url") or ""
         self.ha_api_token = options.get("ha_api_token") or ""
         if self.ha_api_url and self.ha_api_token:
-            import ha_safety
-
-            ok, why = ha_safety.check_token_transport(self.ha_api_url)
+            ok, why = _ha_safety().check_token_transport(self.ha_api_url)
             if not ok:
                 _log(
                     f"ERROR: not sending the Home Assistant token over unencrypted {self.ha_api_url!r}: {why}. "

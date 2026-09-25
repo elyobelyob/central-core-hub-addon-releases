@@ -15,13 +15,25 @@ import typing
 from datetime import datetime, timezone
 from typing import Optional
 
-from ha_safety import (  # noqa: F401 - re-exported for callers of ha_client
-    SELECTABLE_DOMAINS,
-    check_token_transport,
-    is_selectable_entity,
-    is_valid_entity_id,
-    sanitize_attributes,
-)
+try:
+    import ha_safety as _safety
+except ImportError:  # loaded by path without the add-on directory on sys.path
+    import importlib.util as _ilu
+    import pathlib as _pl
+    import sys as _sys
+
+    _spec = _ilu.spec_from_file_location("ha_safety", str(_pl.Path(__file__).with_name("ha_safety.py")))
+    assert _spec is not None and _spec.loader is not None
+    _safety = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_safety)
+    _sys.modules["ha_safety"] = _safety
+
+# re-exported for callers of ha_client
+SELECTABLE_DOMAINS = _safety.SELECTABLE_DOMAINS
+check_token_transport = _safety.check_token_transport
+is_selectable_entity = _safety.is_selectable_entity
+is_valid_entity_id = _safety.is_valid_entity_id
+sanitize_attributes = _safety.sanitize_attributes
 
 # Path to the add-on options file. Tests can monkeypatch this variable to
 # redirect writes to a temporary location.

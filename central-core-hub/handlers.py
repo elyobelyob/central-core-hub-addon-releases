@@ -8,6 +8,7 @@ import collections
 import json
 import os
 import re
+import sys
 import threading
 import traceback
 from datetime import datetime, timezone
@@ -130,10 +131,26 @@ def _run_update_command(client, action, command_id, run):
     _update_thread.start()
 
 
-def _sanitize(attrs):
-    import ha_safety
+def _ha_safety():
+    """The sibling ha_safety module, also when this file was loaded by path
+    (the add-on directory not on sys.path)."""
+    try:
+        import ha_safety
+    except ImportError:
+        import importlib.util as _ilu
+        import pathlib as _pl
 
-    return ha_safety.sanitize_attributes(attrs)
+        spec = _ilu.spec_from_file_location("ha_safety", str(_pl.Path(__file__).with_name("ha_safety.py")))
+        if spec is None or spec.loader is None:
+            raise
+        ha_safety = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(ha_safety)
+        sys.modules["ha_safety"] = ha_safety
+    return ha_safety
+
+
+def _sanitize(attrs):
+    return _ha_safety().sanitize_attributes(attrs)
 
 
 def _utc_now_iso():
@@ -212,7 +229,7 @@ def _handle_sensors_set(client, cmd, fetch_sensors):
     sends). The hub never writes state to Home Assistant: any other shape is
     refused, and every id must be a well-formed entity id before it is kept.
     """
-    import ha_safety
+    ha_safety = _ha_safety()
 
     action = "sensors/set"
     command_id = cmd.get("command_id")
