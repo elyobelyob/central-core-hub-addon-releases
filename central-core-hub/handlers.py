@@ -131,9 +131,9 @@ def _run_update_command(client, action, command_id, run):
 
 
 def _sanitize(attrs):
-    import ha_client
+    import ha_safety
 
-    return ha_client.sanitize_attributes(attrs)
+    return ha_safety.sanitize_attributes(attrs)
 
 
 def _utc_now_iso():
@@ -212,7 +212,7 @@ def _handle_sensors_set(client, cmd, fetch_sensors):
     sends). The hub never writes state to Home Assistant: any other shape is
     refused, and every id must be a well-formed entity id before it is kept.
     """
-    import ha_client
+    import ha_safety
 
     action = "sensors/set"
     command_id = cmd.get("command_id")
@@ -231,7 +231,7 @@ def _handle_sensors_set(client, cmd, fetch_sensors):
 
     accepted, rejected = [], []
     for ent in requested:
-        if ha_client.is_selectable_entity(ent):
+        if ha_safety.is_selectable_entity(ent):
             if ent not in accepted:
                 accepted.append(ent)
         else:

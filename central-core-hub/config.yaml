@@ -31,12 +31,12 @@ schema:
   mqtt_host: str
   mqtt_port: int
   mqtt_username: str?
-  mqtt_password: str?
+  mqtt_password: password?
   mqtt_tls: bool
   mqtt_cert_bundle: password
   client_id: str?
   ha_api_url: str?
-  ha_api_token: str?
+  ha_api_token: password?
   telemetry_interval: int
   safe_device_classes:
     - str
