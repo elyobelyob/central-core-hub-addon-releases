@@ -5,7 +5,9 @@ Small helper module to create and configure an MQTT client for
 client shim so it can be unit-tested independently.
 """
 
+import json
 import sys
+import time
 import traceback
 from datetime import datetime, timezone
 
@@ -108,6 +110,31 @@ def setup_mqtt_client(ctx, mqtt_mod):
         except Exception as exc:
             ctx._tls_error = f"{type(exc).__name__}: {exc}"
             _log(f"Failed to configure TLS for MQTT ({ctx._tls_error}); not connecting without TLS", sys.stderr)
+
+    # Last Will: the broker publishes this if the hub drops off without a
+    # clean disconnect. Shape of the shared StatusOffline schema; the vault
+    # subscribes to status/offline at QoS 1. Not retained, so a vault that
+    # restarts does not see a stale "offline" for a hub that is back.
+    will_topic = getattr(ctx, "status_offline_topic", None)
+    will_set = getattr(ctx._client, "will_set", None)
+    if will_topic and callable(will_set):
+        try:
+            will_set(
+                will_topic,
+                payload=json.dumps({"status": "offline", "timestamp": time.time()}),
+                qos=1,
+                retain=False,
+            )
+        except Exception as exc:
+            _log(f"Could not set MQTT Last Will: {exc}", sys.stderr)
+    # After the first connection paho's network loop reconnects by itself;
+    # back off from 1 s up to 2 minutes instead of retrying at a fixed rate.
+    delay_set = getattr(ctx._client, "reconnect_delay_set", None)
+    if callable(delay_set):
+        try:
+            delay_set(min_delay=1, max_delay=120)
+        except Exception:
+            pass
 
     # Attach callbacks if present on the context
     try:
