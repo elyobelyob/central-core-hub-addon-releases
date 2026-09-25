@@ -8,4 +8,5 @@ PyYAML==6.0.3  # required by mqtt_client.py to parse SENSOR_REGISTRY.yaml
 
 # Prefer the released PyPI package if available. Keep the VCS fallback
 # for environments where the package hasn't been published yet.
-central-core-mqtt-shared @ git+https://github.com/elyobelyob/central-core-mqtt-shared.git@v1.0.2
+# pinned to the commit of tag v1.0.2 (a tag can be moved)
+central-core-mqtt-shared @ git+https://github.com/elyobelyob/central-core-mqtt-shared.git@e95f7ceb88c8fba2fdc1c60016b2f28c1ca7e78e

@@ -5,7 +5,9 @@ Small helper module to create and configure an MQTT client for
 client shim so it can be unit-tested independently.
 """
 
+import json
 import sys
+import time
 import traceback
 from datetime import datetime, timezone
 
@@ -92,7 +94,10 @@ def setup_mqtt_client(ctx, mqtt_mod):
         if getattr(ctx, "mqtt_username", None):
             ctx._client.username_pw_set(ctx.mqtt_username, ctx.mqtt_password)
 
-    # TLS configuration (best-effort)
+    # TLS configuration. This fails closed: if TLS is enabled and cannot be
+    # set up, ctx._tls_error is set and the client refuses to connect rather
+    # than falling back to plaintext.
+    ctx._tls_error = None
     if getattr(ctx, "mqtt_tls", False):
         tls_kwargs = {}
         if getattr(ctx, "mqtt_ca", None):
@@ -101,13 +106,35 @@ def setup_mqtt_client(ctx, mqtt_mod):
             tls_kwargs["certfile"] = ctx.mqtt_cert
             tls_kwargs["keyfile"] = ctx.mqtt_key
         try:
-            # Some clients (shim) may not implement tls_set; ignore failures
             ctx._client.tls_set(**tls_kwargs)
-        except Exception:  # pragma: no cover - TLS setup failures are environment specific
-            try:
-                _log("Failed to configure TLS for MQTT", sys.stderr)
-            except Exception:  # pragma: no cover - logging to stderr may not be available in tests
-                pass
+        except Exception as exc:
+            ctx._tls_error = f"{type(exc).__name__}: {exc}"
+            _log(f"Failed to configure TLS for MQTT ({ctx._tls_error}); not connecting without TLS", sys.stderr)
+
+    # Last Will: the broker publishes this if the hub drops off without a
+    # clean disconnect. Shape of the shared StatusOffline schema; the vault
+    # subscribes to status/offline at QoS 1. Not retained, so a vault that
+    # restarts does not see a stale "offline" for a hub that is back.
+    will_topic = getattr(ctx, "status_offline_topic", None)
+    will_set = getattr(ctx._client, "will_set", None)
+    if will_topic and callable(will_set):
+        try:
+            will_set(
+                will_topic,
+                payload=json.dumps({"status": "offline", "timestamp": time.time()}),
+                qos=1,
+                retain=False,
+            )
+        except Exception as exc:
+            _log(f"Could not set MQTT Last Will: {exc}", sys.stderr)
+    # After the first connection paho's network loop reconnects by itself;
+    # back off from 1 s up to 2 minutes instead of retrying at a fixed rate.
+    delay_set = getattr(ctx._client, "reconnect_delay_set", None)
+    if callable(delay_set):
+        try:
+            delay_set(min_delay=1, max_delay=120)
+        except Exception:
+            pass
 
     # Attach callbacks if present on the context
     try:

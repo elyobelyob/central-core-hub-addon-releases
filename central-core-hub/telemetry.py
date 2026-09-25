@@ -3,9 +3,8 @@ import os
 import platform
 import socket
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
-_LOCAL_TZ = datetime.now().astimezone().tzinfo
 
 
 def _get_cpu_percent():
@@ -124,7 +123,7 @@ def build_telemetry(
         "schema_version": 1,
         "client_id": client_id,
         "status": "online",
-        "timestamp": datetime.now(_LOCAL_TZ).isoformat().replace("+00:00", "Z"),
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "hostname": hostname,
         "ip": ip,
         "uptime": up,
@@ -161,25 +160,10 @@ def build_telemetry(
                 payload["ha_version"] = str(core_version)
             except Exception:
                 payload["ha_version"] = core_version
-    # Prefer the authoritative schema from central_core_mqtt_shared when available.
-    try:
-        import central_core_mqtt_shared.schemas as _schemas  # type: ignore
-
-        Model = getattr(_schemas, "SystemTelemetry", None)
-        if Model is not None:
-            try:
-                m = Model(**payload)
-                # If model provides a json() method (pydantic), use it; otherwise
-                # fall back to serializing the original payload.
-                if hasattr(m, "json") and callable(getattr(m, "json")):
-                    return m.json()
-            except Exception:
-                # Fall back to naive payload if schema instantiation fails
-                pass
-    except Exception:
-        # shared package not installed or import failed; continue with fallback
-        pass
-
+    # Not passed through central_core_mqtt_shared.schemas.SystemTelemetry:
+    # that model (cpu/ram/uptime) does not describe this payload, so it
+    # always failed, and had it succeeded it would have dropped the fields
+    # the vault reads (addon_version, telemetry_interval, cpu_percent).
     return json.dumps(payload)
 
 

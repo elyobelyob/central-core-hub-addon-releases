@@ -32,7 +32,6 @@ class DummyClient:
 
 
 def test_registry_set_calls_mqtt_reload_and_writes_file(tmp_path, monkeypatch):
-    # Prepare fake mqtt_client module with SENSOR_REGISTRY path and reload helper
     mod = types.ModuleType("mqtt_client")
     target = tmp_path / "SENSOR_REGISTRY.json"
     mod.SENSOR_REGISTRY = str(target)
@@ -41,55 +40,92 @@ def test_registry_set_calls_mqtt_reload_and_writes_file(tmp_path, monkeypatch):
         mod._reloaded = True
 
     mod.reload_sensor_registry = _reload
-    sys.modules["mqtt_client"] = mod
+    monkeypatch.setitem(sys.modules, "mqtt_client", mod)
 
     client = DummyClient()
+    client.registry_token = "hook-token"
     topic = f"hubs/{client.client_id}/v1/cmd/registry/set"
-    payload = json.dumps({"command_id": "c-reg", "payload": {"entries": []}})
 
+    # wrong token: nothing written, no reload
+    bad = json.dumps({"command_id": "c-reg0", "payload": {"token": "nope", "entries": []}})
+    handlers.handle_message(client, type("M", (), {"topic": topic})(), bad, None, None, None)
+    assert not target.exists()
+    assert not getattr(mod, "_reloaded", False)
+    assert _secure_final_ack(client.published)["result"]["reason"] == "auth_failed"
+
+    payload = json.dumps({"command_id": "c-reg", "payload": {"token": "hook-token", "entries": []}})
     handlers.handle_message(client, type("M", (), {"topic": topic})(), payload, None, None, None)
-
-    # ensure file was written and reload called
     assert target.exists()
+    assert "hook-token" not in target.read_text()
     assert getattr(mod, "_reloaded", False) is True
-    # completion ack should indicate success
-    comp = None
-    for t, payload_str, qos in client.published:
-        try:
-            p = json.loads(payload_str)
-        except Exception:
-            continue
-        if p.get("status") == "completed":
-            comp = p
-            break
-    assert comp is not None
-    assert comp.get("result", {}).get("success") is True
+    comp = _secure_final_ack(client.published)
+    assert comp["status"] == "completed"
+    assert comp["result"].get("success") is True
 
 
 def test_registry_set_client_reload_hook_exception_handled(tmp_path, monkeypatch):
-    # mqtt_client absent, so handlers will write local file and call client.reload_sensor_registry
-    if "mqtt_client" in sys.modules:
-        del sys.modules["mqtt_client"]
+    # mqtt_client absent: handlers write next to handlers.py and call client.reload_sensor_registry
+    monkeypatch.delitem(sys.modules, "mqtt_client", raising=False)
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_mqtt_client(name, *a, **k):
+        if name == "mqtt_client":
+            raise ImportError("absent for this test")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", no_mqtt_client)
 
     class ClientWithBadHook(DummyClient):
+        registry_token = "hook-token"
+
         def reload_sensor_registry(self):
             raise RuntimeError("boom")
 
     client = ClientWithBadHook()
     topic = f"hubs/{client.client_id}/v1/cmd/registry/set"
-    payload = json.dumps({"command_id": "c-reg2", "payload": {"entries": []}})
-
-    handlers.handle_message(client, type("M", (), {"topic": topic})(), payload, None, None, None)
-
-    # completion ack should still indicate success despite reload hook error
-    comp = None
-    for t, payload_str, qos in client.published:
+    payload = json.dumps({"command_id": "c-reg2", "payload": {"token": "hook-token", "entries": []}})
+    target = pathlib.Path(__file__).parents[2] / "SENSOR_REGISTRY_from_mqtt.json"
+    try:
+        handlers.handle_message(client, type("M", (), {"topic": topic})(), payload, None, None, None)
+        comp = _secure_final_ack(client.published)
+        # still a success despite the reload hook error
+        assert comp["status"] == "completed"
+        assert comp["result"].get("success") is True
+    finally:
         try:
-            p = json.loads(payload_str)
+            target.unlink()
         except Exception:
+            pass
+
+
+# --- helpers for the secure sensors/set and registry/set behaviour ---------
+
+
+def _secure_final_ack(records):
+    """Last non-"acknowledged" ACK body among recorded publishes (any record shape)."""
+    last = None
+    for r in records:
+        topic, payload = (r["topic"], r["payload"]) if isinstance(r, dict) else (r[0], r[1])
+        if "/ack/" not in topic:
             continue
-        if p.get("status") == "completed":
-            comp = p
-            break
-    assert comp is not None
-    assert comp.get("result", {}).get("success") is True
+        body = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+        if isinstance(body, dict) and body.get("status") != "acknowledged":
+            last = body
+    return last
+
+
+class _RecordingRequests:
+    """A `requests` stand-in that records calls and refuses every one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, *a, **k):
+        self.calls.append(("POST", url))
+        raise AssertionError(f"hub must not POST to Home Assistant: {url}")
+
+    def get(self, url, *a, **k):
+        self.calls.append(("GET", url))
+        raise AssertionError(f"sensors/set must not call Home Assistant per entity: {url}")

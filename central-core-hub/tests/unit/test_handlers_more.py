@@ -116,51 +116,54 @@ def test_set_handles_post_error_and_records_failed(monkeypatch):
         assert completions[0]["result"]["failed"] and isinstance(completions[0]["result"]["failed"], list)
 
 
-def test_set_includes_attributes_from_readback(monkeypatch):
+def test_set_list_includes_attributes_and_dict_form_is_refused(monkeypatch):
     handlers = _load_handlers()
     c = DummyClient()
-    cmd = {"command_id": "cmdattr", "payload": {"sensors": {"sensor.attr": "on"}}}
-    msg_payload = json.dumps(cmd)
-    msg = type(
-        "M",
-        (),
-        {
-            "topic": f"hubs/{c.client_id}/v1/cmd/sensors/set",
-            "payload": msg_payload.encode("utf-8"),
-        },
-    )
+    topic = f"hubs/{c.client_id}/v1/cmd/sensors/set"
+    msg = type("M", (), {"topic": topic})
+    req = _RecordingRequests()
 
-    # requests stub returns post ok and get returns attributes
-    class R:
-        def raise_for_status(self):
-            return None
+    dict_cmd = json.dumps({"command_id": "cmdattr", "payload": {"sensors": {"sensor.attr": "on"}}})
+    handlers.handle_message(c, msg, dict_cmd, lambda a, b: [], lambda x: "{}", lambda x: None, requests=req)
+    assert req.calls == []
+    assert _secure_final_ack(c.published)["result"]["reason"] == "invalid_payload"
 
-        def json(self):
-            return {"state": "on", "attributes": {"friendly_name": "Attr"}}
+    def fetch(a, b):
+        return [{"entity_id": "sensor.attr", "state": "on", "attributes": {"friendly_name": "Attr", "access_token": "t"}}]
 
-    class Req:
-        def post(self, url, headers=None, json=None, timeout=10):
-            return R()
+    list_cmd = json.dumps({"command_id": "cmdattr2", "payload": {"sensors": ["sensor.attr"]}})
+    handlers.handle_message(c, msg, list_cmd, fetch, lambda x: "{}", lambda x: None, requests=req)
+    assert req.calls == []
+    res = _secure_final_ack(c.published)["result"]
+    assert res["attributes"]["sensor.attr"] == {"friendly_name": "Attr"}
 
-        def get(self, url, headers=None, timeout=10):
-            return R()
 
-    handlers.handle_message(
-        c,
-        msg,
-        msg_payload,
-        fetch_sensors=lambda a, b: [],
-        build_telemetry=lambda x: "{}",
-        build_vault_payload=lambda x: None,
-        requests=Req(),
-    )
+# --- helpers for the secure sensors/set and registry/set behaviour ---------
 
-    # expect telemetry published with attributes mapping for sensor.attr
-    found = None
-    for p in c.published:
-        if p["topic"] == c.preferred_sensors_topic:
-            found = json.loads(p["payload"])
-            break
-    assert found is not None
-    assert "attributes" in found
-    assert "sensor.attr" in found["attributes"] and found["attributes"]["sensor.attr"].get("friendly_name") == "Attr"
+
+def _secure_final_ack(records):
+    """Last non-"acknowledged" ACK body among recorded publishes (any record shape)."""
+    last = None
+    for r in records:
+        topic, payload = (r["topic"], r["payload"]) if isinstance(r, dict) else (r[0], r[1])
+        if "/ack/" not in topic:
+            continue
+        body = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+        if isinstance(body, dict) and body.get("status") != "acknowledged":
+            last = body
+    return last
+
+
+class _RecordingRequests:
+    """A `requests` stand-in that records calls and refuses every one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, *a, **k):
+        self.calls.append(("POST", url))
+        raise AssertionError(f"hub must not POST to Home Assistant: {url}")
+
+    def get(self, url, *a, **k):
+        self.calls.append(("GET", url))
+        raise AssertionError(f"sensors/set must not call Home Assistant per entity: {url}")

@@ -229,7 +229,7 @@ def test_set_with_scalar_cmd_triggers_sensors_to_set_exception():
     assert True
 
 
-def test_set_readback_off_converts_to_false_and_publishes():
+def test_set_dict_with_off_state_is_refused_and_list_reports_raw_state():
     handlers = load_handlers()
     client = SimpleNamespace()
     client.client_id = "testhub"
@@ -249,38 +249,57 @@ def test_set_readback_off_converts_to_false_and_publishes():
         client.publishes.append((topic, body, qos))
 
     client._publish = _publish
+    requests = _RecordingRequests()
+    topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
 
-    class R:
-        def raise_for_status(self):
-            return None
+    payload = json.dumps({"command_id": "off1", "payload": {"sensors": {"sensor.off": "off"}}})
+    handlers.handle_message(client, make_msg(topic), payload, None, None, None, requests)
+    assert requests.calls == []
+    assert _secure_final_ack(client.publishes)["result"]["reason"] == "invalid_payload"
+    assert not any(t == client.preferred_sensors_topic for t, _, _ in client.publishes)
 
-        def json(self):
-            return {"state": "off", "attributes": {}}
-
-    def post(url, headers=None, json=None, timeout=None):
-        return R()
-
-    def get(url, headers=None, timeout=None):
-        return R()
-
-    requests = SimpleNamespace(post=post, get=get)
-
-    payload = json.dumps({"payload": {"sensors": {"sensor.off": "off"}}})
+    # the list form reports HA's raw state unchanged ("off" stays "off")
+    payload = json.dumps({"command_id": "off2", "payload": {"sensors": ["sensor.off"]}})
     handlers.handle_message(
         client,
-        make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/set"),
+        make_msg(topic),
         payload,
-        None,
+        lambda a, b: [{"entity_id": "sensor.off", "state": "off", "attributes": {}}],
         None,
         None,
         requests,
     )
+    res = _secure_final_ack(client.publishes)["result"]
+    assert res["data"] == {"sensor.off": "off"}
+    assert res["raw"] == {"sensor.off": "off"}
 
-    # Find telemetry publish (preferred_sensors_topic) and assert data value is False
-    found = False
-    for topic, body, qos in client.publishes:
-        if topic == client.preferred_sensors_topic and isinstance(body, dict):
-            data = body.get("data") or {}
-            assert data.get("sensor.off") == "off"
-            found = True
-    assert found
+
+# --- helpers for the secure sensors/set and registry/set behaviour ---------
+
+
+def _secure_final_ack(records):
+    """Last non-"acknowledged" ACK body among recorded publishes (any record shape)."""
+    last = None
+    for r in records:
+        topic, payload = (r["topic"], r["payload"]) if isinstance(r, dict) else (r[0], r[1])
+        if "/ack/" not in topic:
+            continue
+        body = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+        if isinstance(body, dict) and body.get("status") != "acknowledged":
+            last = body
+    return last
+
+
+class _RecordingRequests:
+    """A `requests` stand-in that records calls and refuses every one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, *a, **k):
+        self.calls.append(("POST", url))
+        raise AssertionError(f"hub must not POST to Home Assistant: {url}")
+
+    def get(self, url, *a, **k):
+        self.calls.append(("GET", url))
+        raise AssertionError(f"sensors/set must not call Home Assistant per entity: {url}")

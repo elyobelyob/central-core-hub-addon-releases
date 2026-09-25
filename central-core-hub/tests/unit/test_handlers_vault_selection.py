@@ -41,7 +41,7 @@ class DummyMsg:
         self.payload = payload_bytes
 
 
-def test_poll_updates_selected_and_publishes_reminder(monkeypatch):
+def test_poll_keeps_selection_and_publishes_reminder(monkeypatch):
     mc, handlers = _load_modules()
     CentralCoreClient = mc.CentralCoreClient
 
@@ -79,77 +79,79 @@ def test_poll_updates_selected_and_publishes_reminder(monkeypatch):
     }
     msg = DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/poll", json.dumps(cmd).encode("utf-8"))
 
+    c.selected_sensors = []
+
     # call through the client's on_message handler which loads handlers
     c.on_message(None, None, msg)
 
-    # selected_sensors should have been stored on the client
-    assert getattr(c, "selected_sensors", None) == ["sensor.temp", "sensor.hum"]
+    # a poll reports sensors; only sensors/set changes the watch list
+    assert c.selected_sensors == []
 
-    # ensure a reminder was published to the vault topic
+    # ensure a reminder was published to the vault topic (falls back to the
+    # reported sensors when nothing is selected)
     vault_msgs = [p for p in dummy.published if p["topic"] == c.vault_topic]
     assert vault_msgs, "no reminder published to vault topic"
     payload = json.loads(vault_msgs[-1]["payload"])
     assert payload.get("selected_sensors") == ["sensor.temp", "sensor.hum"]
 
 
-def test_set_publishes_reminder_prefers_client_selected(monkeypatch):
+def test_set_write_form_refused_and_keeps_client_selection(monkeypatch):
     mc, handlers = _load_modules()
     CentralCoreClient = mc.CentralCoreClient
+    req = _RecordingRequests()
+    monkeypatch.setattr(mc, "requests", req)
 
-    # fake requests.post/get to succeed
-    posts = []
-
-    class FakeResp:
-        def __init__(self, data=None):
-            self._data = data or {}
-
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return self._data
-
-    def fake_post(url, headers=None, json=None, timeout=10):
-        posts.append({"url": url, "json": json})
-        return FakeResp()
-
-    def fake_get(url, headers=None, timeout=10):
-        # return a readback matching posted values for test
-        return FakeResp({"state": "22.0", "attributes": {}})
-
-    monkeypatch.setattr(
-        mc,
-        "requests",
-        type("R", (), {"post": staticmethod(fake_post), "get": staticmethod(fake_get)}),
+    c = CentralCoreClient(
+        {"client_id": "unit-hub", "ha_api_url": "http://ha", "ha_api_token": "tok", "ha_readback_after_set": True}
     )
-
-    options = {
-        "client_id": "unit-hub",
-        "ha_api_url": "http://ha",
-        "ha_api_token": "tok",
-        "ha_readback_after_set": True,
-    }
-    c = CentralCoreClient(options)
     dummy = DummyClient()
     c._client = dummy
     c.vault_topic = "vault/unit"
-    # Pretend Vault previously told us the authoritative selection
     c.selected_sensors = ["sensor.temp"]
 
-    command = {
-        "command_id": "set123",
-        "action": "sensors/set",
-        "payload": {"sensors": [{"entity_id": "sensor.temp", "state": "22.0"}]},
-    }
-    msg = DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(command).encode("utf-8"))
+    command = {"command_id": "set123", "action": "sensors/set", "payload": {"sensors": [{"entity_id": "sensor.temp", "state": "22.0"}]}}
+    c.on_message(None, None, DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(command).encode("utf-8")))
 
-    c.on_message(None, None, msg)
+    assert req.calls == [], "no HA call for a write form"
+    assert c.selected_sensors == ["sensor.temp"]
+    assert not [p for p in dummy.published if p["topic"] == c.vault_topic]
+    comp = _secure_final_ack(dummy.published)
+    assert comp["status"] == "failed" and comp["result"]["reason"] == "invalid_payload"
 
-    # ensure we attempted to call HA
-    assert posts, "expected HA POST calls"
+    # the list form replaces the selection and reminds the vault of it
+    command = {"command_id": "set124", "action": "sensors/set", "payload": {"sensors": ["sensor.hum"]}}
+    c.on_message(None, None, DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(command).encode("utf-8")))
+    assert c.selected_sensors == ["sensor.hum"]
+    reminder = json.loads([p for p in dummy.published if p["topic"] == c.vault_topic][-1]["payload"])
+    assert reminder["selected_sensors"] == ["sensor.hum"]
 
-    # ensure the reminder favored client.selected_sensors
-    vault_msgs = [p for p in dummy.published if p["topic"] == c.vault_topic]
-    assert vault_msgs, "no reminder published to vault topic"
-    payload = json.loads(vault_msgs[-1]["payload"])
-    assert payload.get("selected_sensors") == ["sensor.temp"]
+
+# --- helpers for the secure sensors/set and registry/set behaviour ---------
+
+
+def _secure_final_ack(records):
+    """Last non-"acknowledged" ACK body among recorded publishes (any record shape)."""
+    last = None
+    for r in records:
+        topic, payload = (r["topic"], r["payload"]) if isinstance(r, dict) else (r[0], r[1])
+        if "/ack/" not in topic:
+            continue
+        body = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+        if isinstance(body, dict) and body.get("status") != "acknowledged":
+            last = body
+    return last
+
+
+class _RecordingRequests:
+    """A `requests` stand-in that records calls and refuses every one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, *a, **k):
+        self.calls.append(("POST", url))
+        raise AssertionError(f"hub must not POST to Home Assistant: {url}")
+
+    def get(self, url, *a, **k):
+        self.calls.append(("GET", url))
+        raise AssertionError(f"sensors/set must not call Home Assistant per entity: {url}")
