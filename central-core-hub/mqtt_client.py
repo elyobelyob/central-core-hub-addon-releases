@@ -1693,7 +1693,7 @@ class CentralCoreClient:
                 dc = None
         if dc:
             device_classes_map[entity_id] = dc
-        obs_ts = _normalize_timestamp(attrs.get("last_changed") or attrs.get("last_updated")) or now_iso
+        obs_ts = _normalize_timestamp(new_state.get("last_changed") or new_state.get("last_updated")) or now_iso
         telemetry_payload = {
             "data": {entity_id: raw_state},
             "names": {entity_id: name},
