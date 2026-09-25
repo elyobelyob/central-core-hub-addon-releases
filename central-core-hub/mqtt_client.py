@@ -849,6 +849,18 @@ def get_cpu_percent():  # noqa: F811
         return None
 
 
+def _sanitize_attributes(attrs):
+    import ha_client
+
+    return ha_client.sanitize_attributes(attrs)
+
+
+def _is_selectable_entity(entity_id):
+    import ha_client
+
+    return ha_client.is_selectable_entity(entity_id)
+
+
 def fetch_sensors(ha_api_url, ha_api_token, _safe_device_classes=None):
     if not ha_api_url or not ha_api_token or requests is None:
         return None
@@ -871,7 +883,7 @@ def fetch_sensors(ha_api_url, ha_api_token, _safe_device_classes=None):
             if not (ent_id.startswith("sensor.") or ent_id.startswith("binary_sensor.")):
                 continue
 
-            attrs = ent.get("attributes", {}) or {}
+            attrs = _sanitize_attributes(ent.get("attributes"))
             # Device class resolution deferred until after registry check
             sensors.append(
                 {
@@ -1475,13 +1487,16 @@ class CentralCoreClient:
             # If registry check fails, fall back to previous behavior
             pass
 
+        if not _is_selectable_entity(entity_id):
+            return
+
         raw_state = new_state.get("state")
         prev_value = self._selected_sensor_cache.get(entity_id)
         if prev_value == raw_state:
             return
         self._selected_sensor_cache[entity_id] = raw_state
 
-        attrs = new_state.get("attributes") or {}
+        attrs = _sanitize_attributes(new_state.get("attributes"))
         name = attrs.get("friendly_name") or new_state.get("name") or entity_id
         enabled = not bool(attrs.get("disabled_by"))
         now_iso = datetime.now(timezone.utc).isoformat()
