@@ -1193,6 +1193,11 @@ class CentralCoreClient:
                 domain="+",
                 action="+",
             )
+            self.status_offline_topic = topics.build_topic(
+                getattr(topics, "STATUS_OFFLINE", "hubs/{hub_id}/v{version}/status/offline"),
+                hub_id=self.client_id,
+                version=ver,
+            )
             # Commands topic (logical base) - alias for subscription pattern
             self.commands_topic = self.cmd_sub_topic
             # expose sensors_topic for compatibility; prefer preferred_sensors_topic
@@ -1906,8 +1911,10 @@ class CentralCoreClient:
                 traceback.print_exc()
 
     def connect(self):
-        # Backwards-compatible public connect method implemented in
-        # terms of smaller helpers: `connect_once` and `wait_for_connected`.
+        """Make the first connection, retrying with backoff until it succeeds
+        or the client is stopped. After that, paho's network loop reconnects
+        by itself (see connect_once)."""
+        delay = 1.0
         while not self._stop_event.is_set():
             if getattr(self, "_tls_error", None):
                 self.connect_once()  # logs why
@@ -1917,41 +1924,34 @@ class CentralCoreClient:
                 # wait for connection signal from on_connect handler
                 if self.wait_for_connected(timeout=5):
                     return True
-                # timed out waiting for on_connect
-                try:
-                    _log("Connection timed out, retrying in 5s")
-                except Exception:
-                    pass
-                try:
-                    self._client.loop_stop()
-                except Exception:
-                    pass
+                _log("Connection not confirmed yet; paho keeps trying")
             else:
-                try:
-                    _log("MQTT connect failed, retrying in 5s")
-                except Exception:
-                    pass
+                _log(f"MQTT connect failed, retrying in {int(delay)}s")
             # Interruptible sleep: exits early if stop is requested
-            self._stop_event.wait(timeout=5)
+            self._stop_event.wait(timeout=delay)
+            delay = min(delay * 2, 120.0)
         return False
 
     def connect_once(self):
-        """Attempt a single connect + loop_start. Returns True on no exception.
+        """Connect and start paho's network loop, once.
 
-        This helper is small and easy to unit-test (e.g. when the client
-        shim raises or returns errors).
+        Returns True when the loop is running (then paho handles reconnects
+        with reconnect_delay_set backoff), False if the connect attempt failed.
         """
         tls_error = getattr(self, "_tls_error", None)
         if tls_error:
             _log(f"Not connecting: MQTT TLS is enabled but could not be set up ({tls_error})", sys.stderr)
             return False
+        if getattr(self, "_loop_started", False):
+            return True
         try:
             _log(f"Connecting to {self.mqtt_host}:{self.mqtt_port} as {self.client_id}")
             self._client.connect(self.mqtt_host, self.mqtt_port, keepalive=60)
             self._client.loop_start()
+            self._loop_started = True
             return True
-        except Exception:
-            traceback.print_exc()
+        except Exception as exc:
+            _log(f"MQTT connect to {self.mqtt_host}:{self.mqtt_port} failed: {type(exc).__name__}: {exc}")
             return False
 
     def wait_for_connected(self, timeout=5):
@@ -2413,11 +2413,10 @@ class CentralCoreClient:
         except Exception:
             pass
         if not self._connected:
-            try:
-                _log("Not connected, attempting reconnect")
-            except Exception:
-                pass
-            self.connect()
+            if getattr(self, "_loop_started", False):
+                _log("MQTT not connected; paho is reconnecting")
+            else:
+                self.connect()
         try:
             self._flush_outbox()
         except Exception:

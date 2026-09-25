@@ -201,7 +201,8 @@ def test_connect_loop_handles_timed_out_wait(monkeypatch):
 
     c.connect()
 
-    assert called["stopped"] is True
+    # paho's network loop keeps reconnecting on its own; it is not stopped
+    assert called["stopped"] is False
 
 
 def test_paho_import_absent_sets_mqtt_none():
