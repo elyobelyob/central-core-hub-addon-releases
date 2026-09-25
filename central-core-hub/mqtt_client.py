@@ -14,6 +14,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import queue
 import re
 import socket
 import sys
@@ -26,7 +27,6 @@ from datetime import datetime, timezone
 from typing import cast
 
 # Get the local timezone for timestamp normalization
-_LOCAL_TZ = datetime.now().astimezone().tzinfo
 
 # Device class filtering is handled by MQTT vault requests (authoritative source).
 # fetch_sensors() returns all sensors without client-side device class restrictions.
@@ -35,13 +35,14 @@ _LOCAL_TZ = datetime.now().astimezone().tzinfo
 # Default file is under the add-on data directory so it survives upgrades.
 OUTBOX_FILE = pathlib.Path(os.environ.get("MQTT_OUTBOX_FILE") or "/data/outbox.jsonl")
 OUTBOX_MAX = int(os.environ.get("MQTT_OUTBOX_MAX") or "1000")
+OUTBOX_MAX_BYTES = int(os.environ.get("MQTT_OUTBOX_MAX_BYTES") or str(1024 * 1024))
 OUTBOX_TOPICS = os.environ.get("MQTT_OUTBOX_TOPICS")
 
 
 def _normalize_timestamp(ts_str):
-    """Normalize timestamp string to hub's local timezone ISO format.
+    """Normalize a timestamp string to UTC ISO format.
 
-    Parses ISO timestamp strings, ensures local timezone, and formats accordingly.
+    Parses ISO timestamp strings and converts them to UTC.
     If parsing fails, returns the original string.
     """
     if not ts_str:
@@ -50,12 +51,9 @@ def _normalize_timestamp(ts_str):
         # Handle 'Z' suffix by replacing with +00:00 for parsing
         dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
         if dt.tzinfo is None:
-            # Assume naive timestamps are in local timezone
-            dt = dt.replace(tzinfo=_LOCAL_TZ)
-        else:
-            # Convert aware timestamps to local timezone
-            dt = dt.astimezone(_LOCAL_TZ)
-        return dt.isoformat()
+            # A naive time is local, with that date's rules (DST included)
+            dt = dt.astimezone()
+        return dt.astimezone(timezone.utc).isoformat()
     except ValueError:
         return ts_str
 
@@ -92,79 +90,101 @@ def _should_persist_topic(topic: str) -> bool:
 
 
 class PersistentOutbox:
-    """Simple newline-delimited JSON persistent outbox.
+    """Newline-delimited JSON outbox for messages that could not be sent.
 
-    Format: each line is a JSON object with keys: topic, payload, qos, ts
+    Each line is {"topic", "payload", "qos", "ts"}. Appends are plain appends;
+    the file is rewritten only when it goes over `max_items` or `max_bytes`
+    (keeping the newest entries) and when a flush removes what was sent.
     """
 
-    def __init__(self, path: pathlib.Path, max_items: int = 1000):
+    def __init__(self, path: pathlib.Path, max_items: int = 1000, max_bytes: int = 1_000_000):
         self.path = pathlib.Path(path)
         self.max_items = int(max_items)
-        # make sure directory exists
+        self.max_bytes = int(max_bytes)
+        self._count = None  # lines in the file; read once, then tracked
+        self._lock = threading.Lock()
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
         except Exception:
             pass
 
-    def append(self, topic: str, payload: str, qos: int = 0) -> bool:
-        """Append a message to the outbox. Returns True on success.
-
-        If the outbox exceeds `max_items`, the oldest entries are discarded.
-        """
+    def has_entries(self) -> bool:
         try:
-            # Read current count (best-effort) and rotate if needed
-            lines = []
-            if self.path.exists():
-                try:
-                    with open(self.path, "r") as f:
-                        lines = f.read().splitlines()
-                except Exception:
-                    lines = []
-            # prune oldest if needed
-            if len(lines) >= self.max_items:
-                lines = lines[-(self.max_items - 1) :]
-            entry = json.dumps({"topic": topic, "payload": payload, "qos": qos, "ts": time.time()})
-            lines.append(entry)
-            # atomic write
-            import tempfile as _temp
+            return self.path.exists() and self.path.stat().st_size > 0
+        except Exception:
+            return False
 
-            with _temp.NamedTemporaryFile(mode="w", dir=str(self.path.parent), delete=False) as tf:
-                tf.write("\n".join(lines) + "\n")
-                tmp = tf.name
-            pathlib.Path(tmp).replace(self.path)
+    def append(self, topic: str, payload: str, qos: int = 0) -> bool:
+        """Append a message. Returns True on success, False if it cannot be stored."""
+        line = json.dumps({"topic": topic, "payload": payload, "qos": qos, "ts": time.time()}) + "\n"
+        if len(line.encode("utf-8")) > self.max_bytes:
+            return False
+        try:
+            with self._lock:
+                if self._count is None:
+                    self._count = len(self._read_all())
+                with open(self.path, "a") as f:
+                    f.write(line)
+                self._count += 1
+                if self._count > self.max_items or self.path.stat().st_size > self.max_bytes:
+                    self._trim()
             return True
         except Exception:
             return False
+
+    def _trim(self):
+        """Keep the newest entries that fit both caps (caller holds the lock)."""
+        entries = self._read_all()
+        kept, size = [], 0
+        for e in reversed(entries):
+            n = len(json.dumps(e).encode("utf-8")) + 1
+            if len(kept) >= self.max_items or size + n > self.max_bytes:
+                break
+            kept.append(e)
+            size += n
+        kept.reverse()
+        self._write(kept)
 
     def _read_all(self):
         try:
             if not self.path.exists():
                 return []
             with open(self.path, "r") as f:
-                return [json.loads(line) for line in f.read().splitlines() if line.strip()]
+                out = []
+                for line in f.read().splitlines():
+                    if not line.strip():
+                        continue
+                    try:
+                        out.append(json.loads(line))
+                    except Exception:
+                        continue
+                return out
         except Exception:
             return []
 
+    def _write(self, entries):
+        lines = [json.dumps(e) for e in entries]
+        with tempfile.NamedTemporaryFile(mode="w", dir=str(self.path.parent), delete=False) as tf:
+            tf.write("\n".join(lines) + ("\n" if lines else ""))
+            tmp = tf.name
+        pathlib.Path(tmp).replace(self.path)
+        self._count = len(entries)
+
     def replace_all(self, entries):
         try:
-            import tempfile as _temp
-
-            lines = [json.dumps(e) for e in entries]
-            with _temp.NamedTemporaryFile(mode="w", dir=str(self.path.parent), delete=False) as tf:
-                tf.write("\n".join(lines) + ("\n" if lines else ""))
-                tmp = tf.name
-            pathlib.Path(tmp).replace(self.path)
+            with self._lock:
+                self._write(list(entries))
             return True
         except Exception:
             return False
 
     def flush_with_sender(self, sender_fn):
-        """Attempt to flush outbox by calling sender_fn(topic,payload,qos).
+        """Send queued messages in order with sender_fn(topic, payload, qos) -> bool.
 
-        sender_fn should return True on success, False on failure/exception.
-        Returns number of messages successfully flushed.
+        Messages the sender refuses stay queued. Returns how many were sent.
         """
-        entries = self._read_all()
+        with self._lock:
+            entries = self._read_all()
         if not entries:
             return 0
         remaining = []
@@ -178,15 +198,44 @@ class PersistentOutbox:
                 success += 1
             else:
                 remaining.append(e)
-        # replace file with remaining entries
-        self.replace_all(remaining)
+        with self._lock:
+            # keep anything appended while we were sending
+            appended = self._read_all()[len(entries):]
+            try:
+                self._write(remaining + appended)
+            except Exception:
+                pass
         return success
 
 
-def _log(msg, file=sys.stdout):
+def _log(msg, file=None):
     """Log a message with UTC timestamp."""
     ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    print(f"[{ts}] {msg}", file=file, flush=True)
+    print(f"[{ts}] {msg}", file=file or sys.stdout, flush=True)
+
+
+# Payloads (sensor states, attributes, command bodies) are logged only when
+# debug logging is on: the `debug_logging` add-on option or CC_HUB_DEBUG=1.
+_DEBUG_LOGGING = os.environ.get("CC_HUB_DEBUG", "").lower() in ("1", "true", "yes")
+_PREVIEW_CHARS = 300
+_PEM_RE = re.compile(r"-----BEGIN [^-]+-----.*?-----END [^-]+-----", re.DOTALL)
+
+
+def _log_debug(msg):
+    if _DEBUG_LOGGING:
+        _log(msg)
+
+
+def _preview(payload, limit=_PREVIEW_CHARS):
+    """A short, PEM-redacted rendering of a payload for debug logs."""
+    if payload is None:
+        return "<none>"
+    try:
+        text = payload.decode("utf-8", errors="replace") if isinstance(payload, (bytes, bytearray)) else str(payload)
+    except Exception:
+        return "<unprintable>"
+    text = _PEM_RE.sub("[PEM REDACTED]", text)
+    return text if len(text) <= limit else text[:limit] + f"...(+{len(text) - limit} chars)"
 
 
 try:
@@ -195,107 +244,57 @@ except Exception:
     requests = None
 
 
-try:
-    import central_core_mqtt_shared as mqtt_shared
-except Exception:
-    mqtt_shared = None
+class _FallbackTopics:
+    """The v1 topic templates of central_core_mqtt_shared.topics, used only if
+    that module cannot be found (a test keeps them equal to the package's)."""
 
-# Attempt to resolve `topics` from the shared package when available.
-topics: typing.Any = None
-if mqtt_shared is not None:
+    TELEMETRY_SYSTEM = "hubs/{hub_id}/v{version}/telemetry/system"
+    TELEMETRY_SENSORS = "hubs/{hub_id}/v{version}/telemetry/sensors"
+    CMD_GENERIC = "hubs/{hub_id}/v{version}/cmd/{domain}/{action}"
+    ACK_GENERIC = "hubs/{hub_id}/v{version}/ack/{command_name}/{command_id}"
+    STATUS_OFFLINE = "hubs/{hub_id}/v{version}/status/offline"
+
+    @staticmethod
+    def build_topic(tpl, **kwargs):
+        return tpl.format(**kwargs)
+
+
+def _load_topics_file(spec):
+    """Load topics.py from the package located by `spec`, without running the
+    package's __init__ (which imports aiohttp and websockets for its `ha`
+    module, ~160 ms and ~14 MB the hub does not need)."""
+    for location in spec.submodule_search_locations or []:
+        path = pathlib.Path(location) / "topics.py"
+        if not path.exists():
+            continue
+        file_spec = importlib.util.spec_from_file_location("_cc_shared_topics", str(path))
+        if file_spec is None or file_spec.loader is None:
+            continue
+        module = importlib.util.module_from_spec(file_spec)
+        file_spec.loader.exec_module(module)
+        return module
+    return None
+
+
+def _load_shared_topics():
+    """central_core_mqtt_shared.topics (already imported, or loaded on its own),
+    else the built-in templates."""
+    loaded = sys.modules.get("central_core_mqtt_shared.topics")
+    if loaded is not None:
+        return loaded
     try:
-        topics = getattr(mqtt_shared, "topics")
+        from importlib.machinery import PathFinder
+
+        spec = PathFinder.find_spec("central_core_mqtt_shared")
+        module = _load_topics_file(spec) if spec is not None else None
+        if module is not None:
+            return module
     except Exception:
-        try:
-            import importlib
+        pass
+    return _FallbackTopics
 
-            topics = importlib.import_module("central_core_mqtt_shared.topics")
-        except Exception:
-            topics = None
 
-# If the shared package (or its topics submodule) isn't available, prefer
-# a local `mqtt_topics.py` shim next to this file (used by tests), and
-# finally fall back to a minimal in-module shim.
-if topics is None:
-    try:
-        import importlib.util as _il
-
-        _local = pathlib.Path(__file__).parent / "mqtt_topics.py"
-        if _local.exists():
-            spec = _il.spec_from_file_location("local_mqtt_topics", str(_local))
-            if not spec or not getattr(spec, "loader", None):
-                raise RuntimeError("Could not load local mqtt_topics spec")
-            lm = _il.module_from_spec(spec)
-            spec.loader.exec_module(lm)  # type: ignore
-
-            class _LocalTopics:
-                TELEMETRY_SYSTEM = getattr(
-                    lm, "TELEMETRY_SYSTEM", getattr(lm, "TELEMETRY_TOPIC_TMPL", "telemetry/{client_id}")
-                )
-                TELEMETRY_SENSORS = getattr(
-                    lm,
-                    "TELEMETRY_SENSORS",
-                    getattr(lm, "PREFERRED_SENSORS_TOPIC_TMPL", "hubs/{hub_id}/telemetry/sensors"),
-                )
-                CMD_GENERIC = getattr(
-                    lm, "CMD_GENERIC", getattr(lm, "CMD_BASE_TMPL", "hubs/{hub_id}/v{version}/cmd/{domain}/{action}")
-                )
-                ACK_GENERIC = getattr(lm, "ACK_GENERIC", "hubs/{hub_id}/v{version}/ack/{command_name}/{command_id}")
-
-                @staticmethod
-                def build_topic(tpl, **kwargs):
-                    try:
-                        if isinstance(tpl, str):
-                            return tpl.format(**kwargs)
-                        return str(tpl)
-                    except Exception:
-                        # Best-effort: fallback to joining parts
-                        return str(tpl)
-
-            topics = _LocalTopics()
-        else:
-            # Final fallback: provide a tiny shim with sensible defaults
-            class _FallbackTopics:
-                TELEMETRY_SYSTEM = "hubs/{hub_id}/v{version}/telemetry/system"
-                TELEMETRY_SENSORS = "hubs/{hub_id}/v{version}/telemetry/sensors"
-                CMD_GENERIC = "hubs/{hub_id}/v{version}/cmd/{domain}/{action}"
-                ACK_GENERIC = "hubs/{hub_id}/v{version}/ack/{command_name}/{command_id}"
-
-                @staticmethod
-                def build_topic(tpl, **kwargs):
-                    try:
-                        if isinstance(tpl, str):
-                            return tpl.format(**kwargs)
-                        return str(tpl)
-                    except Exception:
-                        return str(tpl)
-
-            topics = _FallbackTopics()
-    except Exception:
-        # As a last-resort shim that never fails import.
-        class _EmptyTopics:
-            TELEMETRY_SYSTEM = "telemetry/{client_id}"
-            TELEMETRY_SENSORS = "hubs/{hub_id}/telemetry/sensors"
-            CMD_GENERIC = "hubs/{hub_id}/v{version}/cmd/{domain}/{action}"
-            ACK_GENERIC = "hubs/{hub_id}/v{version}/ack/{command_name}/{command_id}"
-
-            @staticmethod
-            def build_topic(tpl, **kwargs):
-                try:
-                    if isinstance(tpl, str):
-                        return tpl.format(**kwargs)
-                    return str(tpl)
-                except Exception:
-                    return str(tpl)
-
-        topics = _EmptyTopics()
-
-# If the environment requests strict enforcement, fail import when the
-# shared package is not available. This lets CI or production environments
-# opt into a strict policy while leaving development/tests permissive by
-# default. Set `STRICT_SHARED=1` or `REQUIRE_SHARED=1` to enable.
-if topics is None and os.environ.get("STRICT_SHARED", os.environ.get("REQUIRE_SHARED", "")):
-    raise ImportError("`central_core_mqtt_shared` is required in strict mode; install it or unset STRICT_SHARED")
+topics: typing.Any = _load_shared_topics()
 
 try:
     import paho.mqtt.client as mqtt
@@ -311,6 +310,11 @@ except Exception:
     mqtt = None
 
 OPTIONS_PATH = "/data/options.json"
+# Where a generated client id is kept when none is configured (see _derive_client_id).
+CLIENT_ID_FILE = pathlib.Path(os.environ.get("CLIENT_ID_FILE") or "/data/client_id")
+# Shipped as the default in earlier versions, so many hubs may share it.
+SHARED_DEFAULT_CLIENT_ID = "home-assistant"
+_GENERIC_HOSTNAMES = {"", "localhost", "homeassistant", "home-assistant", "hassio", "supervisor"}
 MQTT_OPTIONS_ENV = "MQTT_OPTIONS_PATH"
 SENSOR_REGISTRY = pathlib.Path(__file__).parent / "SENSOR_REGISTRY.yaml"
 
@@ -355,56 +359,34 @@ _SENSOR_REGISTRY_DOC_MTIME = None
 
 
 def _load_sensor_registry():
-    """Read and parse the SENSOR_REGISTRY.yaml file.
+    """Registry entries (entity_id, type, provide, attributes, device_class).
 
-    Returns a list of registry entry dicts (with keys: entity_id, type, provide)
-    or an empty list if the registry is not present, malformed, or not
-    opted-in.
+    Empty when the registry is absent, malformed, or not opted in. Built from
+    the cached document (_load_sensor_registry_doc), so the file is parsed
+    once per change.
     """
+    global _SENSOR_REGISTRY_CACHE, _SENSOR_REGISTRY_MTIME
     try:
-        import yaml
-
-        # Use mtime-based caching to avoid re-parsing the file every call.
-        global _SENSOR_REGISTRY_CACHE, _SENSOR_REGISTRY_MTIME
-        if not SENSOR_REGISTRY.exists():
-            _SENSOR_REGISTRY_CACHE = []
-            _SENSOR_REGISTRY_MTIME = None
-            return []
-        try:
-            mtime = SENSOR_REGISTRY.stat().st_mtime
-        except Exception:
-            mtime = None
-        if _SENSOR_REGISTRY_CACHE is not None and mtime is not None and mtime == _SENSOR_REGISTRY_MTIME:
+        doc = _load_sensor_registry_doc()
+        if _SENSOR_REGISTRY_CACHE is not None and _SENSOR_REGISTRY_MTIME == _SENSOR_REGISTRY_DOC_MTIME and doc:
             return _SENSOR_REGISTRY_CACHE
-        with open(SENSOR_REGISTRY, "r") as f:
-            doc = yaml.safe_load(f) or {}
-        if not isinstance(doc, dict):
-            _SENSOR_REGISTRY_CACHE = []
-            _SENSOR_REGISTRY_MTIME = mtime
-            return []
-        mode = doc.get("registry_mode")
-        apply_registry = bool(doc.get("apply_registry", False))
-        if mode is None and not apply_registry:
-            _SENSOR_REGISTRY_CACHE = []
-            _SENSOR_REGISTRY_MTIME = mtime
-            return []
-        entries = doc.get("entries") or []
         results = []
-        for e in entries:
-            if not isinstance(e, dict):
-                continue
-            results.append(
-                {
-                    "entity_id": e.get("entity_id"),
-                    "type": e.get("type"),
-                    "provide": e.get("provide"),
-                    # optional metadata which may include device_class
-                    "attributes": e.get("attributes") or {},
-                    "device_class": e.get("device_class"),
-                }
-            )
+        if doc and (doc.get("registry_mode") is not None or bool(doc.get("apply_registry", False))):
+            for e in doc.get("entries") or []:
+                if not isinstance(e, dict):
+                    continue
+                results.append(
+                    {
+                        "entity_id": e.get("entity_id"),
+                        "type": e.get("type"),
+                        "provide": e.get("provide"),
+                        # optional metadata which may include device_class
+                        "attributes": e.get("attributes") or {},
+                        "device_class": e.get("device_class"),
+                    }
+                )
         _SENSOR_REGISTRY_CACHE = results
-        _SENSOR_REGISTRY_MTIME = mtime
+        _SENSOR_REGISTRY_MTIME = _SENSOR_REGISTRY_DOC_MTIME
         return results
     except Exception:
         return []
@@ -441,19 +423,19 @@ def _load_sensor_registry_doc():
 
 def reload_sensor_registry():
     """Invalidate any cached sensor registry so subsequent calls read disk."""
-    global _SENSOR_REGISTRY_CACHE, _SENSOR_REGISTRY_MTIME
+    global _SENSOR_REGISTRY_CACHE, _SENSOR_REGISTRY_MTIME, _SENSOR_REGISTRY_DOC_CACHE, _SENSOR_REGISTRY_DOC_MTIME
     _SENSOR_REGISTRY_CACHE = None
     _SENSOR_REGISTRY_MTIME = None
+    _SENSOR_REGISTRY_DOC_CACHE = None
+    _SENSOR_REGISTRY_DOC_MTIME = None
 
     # Immediately reload and log what we're monitoring so operators can see
     # the active sensor set when a runtime update occurs.
     try:
         entries = _load_sensor_registry() or []
         provided = [e.get("entity_id") for e in entries if e.get("entity_id") and e.get("provide")]
-        if provided:
-            _log(f"Monitored sensors: {', '.join(provided)}")
-        else:
-            _log("Monitored sensors: none")
+        _log(f"Monitored sensors: {len(provided) or 'none'}")
+        _log_debug(f"Monitored sensors: {', '.join(provided)}")
     except Exception:
         _log("Monitored sensors: none")
 
@@ -543,6 +525,54 @@ def is_entity_allowed(entity_id: str) -> bool:
         return True
     except Exception:
         return True
+
+
+def _certificate_common_name(cert_path):
+    """The subject CN of a PEM certificate file, or None."""
+    if not cert_path:
+        return None
+    try:
+        import ssl
+
+        decoded = ssl._ssl._test_decode_cert(str(cert_path))  # type: ignore[attr-defined]
+    except Exception:
+        return None
+    for rdn in decoded.get("subject", ()):
+        for key, value in rdn:
+            if key == "commonName" and value:
+                return str(value)
+    return None
+
+
+def _derive_client_id(cert_path=None):
+    """A client id for a hub whose client_id option is unset.
+
+    The vault issues each hub a certificate with CN = hub id, so that comes
+    first. Otherwise a specific hostname, and for generic ones (an HA OS host
+    is usually "homeassistant") a random id kept in CLIENT_ID_FILE so it
+    survives restarts and upgrades.
+    """
+    cn = _certificate_common_name(cert_path)
+    if cn:
+        return cn
+    host = (socket.gethostname() or "").strip().lower().replace(" ", "-")
+    if host not in _GENERIC_HOSTNAMES:
+        return host
+    try:
+        saved = CLIENT_ID_FILE.read_text().strip()
+        if saved:
+            return saved
+    except Exception:
+        pass
+    import secrets
+
+    generated = f"hub-{secrets.token_hex(6)}"
+    try:
+        CLIENT_ID_FILE.parent.mkdir(parents=True, exist_ok=True)
+        CLIENT_ID_FILE.write_text(generated + "\n")
+    except Exception:
+        _log(f"WARNING: could not save generated client_id to {CLIENT_ID_FILE}; it will change on restart")
+    return generated
 
 
 def get_addon_version():
@@ -639,6 +669,7 @@ try:
         disk_info_fn=None,
         version=None,
         telemetry_interval=None,
+        home_assistant=None,
     ):
         return _tele_mod.build_telemetry(
             client_id,
@@ -649,6 +680,7 @@ try:
             disk_info_fn=disk_info_fn,
             version=version or get_addon_version(),
             telemetry_interval=telemetry_interval if telemetry_interval is not None else 30,
+            home_assistant=home_assistant,
         )
 
     build_vault_payload = _tele_mod.build_vault_payload
@@ -729,6 +761,7 @@ except Exception:
             disk_info_fn=None,
             version=None,
             telemetry_interval=None,
+            home_assistant=None,
         ):
             return _tele.build_telemetry(
                 client_id,
@@ -739,6 +772,7 @@ except Exception:
                 disk_info_fn=disk_info_fn,
                 version=version or get_addon_version(),
                 telemetry_interval=telemetry_interval or 30,
+                home_assistant=home_assistant,
             )
 
         build_vault_payload = _tele.build_vault_payload
@@ -849,6 +883,44 @@ def get_cpu_percent():  # noqa: F811
         return None
 
 
+def _ha_safety():
+    """The sibling ha_safety module, also when this file was loaded by path
+    (the add-on directory not on sys.path)."""
+    try:
+        import ha_safety
+    except ImportError:
+        import importlib.util as _ilu
+        import pathlib as _pl
+
+        spec = _ilu.spec_from_file_location("ha_safety", str(_pl.Path(__file__).with_name("ha_safety.py")))
+        if spec is None or spec.loader is None:
+            raise
+        ha_safety = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(ha_safety)
+        sys.modules["ha_safety"] = ha_safety
+    return ha_safety
+
+
+def _sanitize_attributes(attrs):
+    return _ha_safety().sanitize_attributes(attrs)
+
+
+def _is_selectable_entity(entity_id):
+    return _ha_safety().is_selectable_entity(entity_id)
+
+
+def fetch_selected_sensors(ha_api_url, ha_api_token, entity_ids):
+    """States of just `entity_ids` (one GET per id), minus registry-denied ones."""
+    if not ha_api_url or not ha_api_token or requests is None:
+        return None
+    import ha_client
+
+    states = ha_client.fetch_sensors_by_ids(ha_api_url, ha_api_token, entity_ids, requests_mod=requests)
+    if states is None:
+        return None
+    return [s for s in states if is_entity_allowed(s.get("entity_id"))]
+
+
 def fetch_sensors(ha_api_url, ha_api_token, _safe_device_classes=None):
     if not ha_api_url or not ha_api_token or requests is None:
         return None
@@ -871,7 +943,7 @@ def fetch_sensors(ha_api_url, ha_api_token, _safe_device_classes=None):
             if not (ent_id.startswith("sensor.") or ent_id.startswith("binary_sensor.")):
                 continue
 
-            attrs = ent.get("attributes", {}) or {}
+            attrs = _sanitize_attributes(ent.get("attributes"))
             # Device class resolution deferred until after registry check
             sensors.append(
                 {
@@ -909,17 +981,8 @@ def fetch_sensors(ha_api_url, ha_api_token, _safe_device_classes=None):
 
         import fnmatch
 
-        # obtain the registry_mode from the file top-level if present
-        mode = None
-        try:
-            with open(SENSOR_REGISTRY, "r") as _f:
-                import yaml as _yaml
-
-                _doc = _yaml.safe_load(_f) or {}
-                if isinstance(_doc, dict):
-                    mode = _doc.get("registry_mode")
-        except Exception:
-            mode = None
+        # registry_mode from the (cached) registry document
+        mode = (_load_sensor_registry_doc() or {}).get("registry_mode")
 
         active_mode = str(mode).lower() if mode else "deny"
 
@@ -975,6 +1038,8 @@ class CentralCoreClient:
         self.mqtt_username = options.get("mqtt_username") or ""
         self.mqtt_password = options.get("mqtt_password") or ""
         self.mqtt_tls = bool(options.get("mqtt_tls"))
+        if not self.mqtt_tls:
+            _log("WARNING: mqtt_tls is off; the MQTT password and all telemetry travel unencrypted")
         self.mqtt_ca = ""
         self.mqtt_cert = ""
         self.mqtt_key = ""
@@ -983,9 +1048,36 @@ class CentralCoreClient:
         self._temp_cert_files = []
         # Handle certificate content vs paths
         self._setup_cert_files()
-        self.client_id = options.get("client_id") or socket.gethostname().lower().replace(" ", "-")
+        configured_id = str(options.get("client_id") or "").strip()
+        if configured_id:
+            self.client_id = configured_id
+            if configured_id == SHARED_DEFAULT_CLIENT_ID:
+                _log(
+                    f"WARNING: client_id is the shared default {configured_id!r}; hubs using it receive "
+                    "each other's commands. Set a unique client_id (the vault's hub id)."
+                )
+        else:
+            self.client_id = _derive_client_id(self.mqtt_cert)
+            _log(f"client_id not set; using {self.client_id!r}")
+        cert_cn = _certificate_common_name(self.mqtt_cert)
+        if cert_cn and cert_cn != self.client_id:
+            _log(f"WARNING: client_id {self.client_id!r} differs from the client certificate CN {cert_cn!r}")
         self.ha_api_url = options.get("ha_api_url") or ""
         self.ha_api_token = options.get("ha_api_token") or ""
+        if self.ha_api_url and self.ha_api_token:
+            ok, why = _ha_safety().check_token_transport(self.ha_api_url)
+            if not ok:
+                _log(
+                    f"ERROR: not sending the Home Assistant token over unencrypted {self.ha_api_url!r}: {why}. "
+                    "Use http://localhost:8123 (or https://). Home Assistant integration is disabled."
+                )
+                self.ha_api_url = ""
+                self.ha_api_token = ""
+            elif why != "encrypted" and why != "local name" and why != "local address":
+                _log(f"WARNING: Home Assistant URL {self.ha_api_url!r}: {why}")
+        if options.get("debug_logging"):
+            global _DEBUG_LOGGING
+            _DEBUG_LOGGING = True
         # Load safe device classes from options (vault is authoritative for filtering)
         # Default to common safe device classes if not configured
         configured_safe = options.get("safe_device_classes")
@@ -1034,8 +1126,11 @@ class CentralCoreClient:
                 domain="+",
                 action="+",
             )
-            # Commands topic (logical base) - alias for subscription pattern
-            self.commands_topic = self.cmd_sub_topic
+            self.status_offline_topic = topics.build_topic(
+                getattr(topics, "STATUS_OFFLINE", "hubs/{hub_id}/v{version}/status/offline"),
+                hub_id=self.client_id,
+                version=ver,
+            )
             # expose sensors_topic for compatibility; prefer preferred_sensors_topic
             self.sensors_topic = self.preferred_sensors_topic
         except Exception as e:
@@ -1105,12 +1200,16 @@ class CentralCoreClient:
 
         # Persistent outbox for queued outbound messages (best-effort)
         try:
-            self._outbox = PersistentOutbox(OUTBOX_FILE, max_items=OUTBOX_MAX)
+            self._outbox = PersistentOutbox(OUTBOX_FILE, max_items=OUTBOX_MAX, max_bytes=OUTBOX_MAX_BYTES)
         except Exception:
             self._outbox = None
 
         self._connected = False
         self._stop_event = threading.Event()
+        # Work that may wait on Home Assistant (command handlers, the
+        # on-connect sensor publish) runs here, not on paho's network thread.
+        self._work_queue = queue.Queue()
+        self._worker = None
         # Cache the last HA version we observed so telemetry can reuse it
         self._ha_version_cache = None
         # track last sensors publish time (epoch seconds)
@@ -1141,7 +1240,6 @@ class CentralCoreClient:
             self.selected_sensors = []
         # HA websocket listener instance (populated when HA integration configured)
         self._ha_ws_listener = None
-        self._addon_slug = None
         # Try to start HA websocket listener if HA API config present
         try:
             _log("Evaluating HA websocket startup conditions")
@@ -1155,24 +1253,26 @@ class CentralCoreClient:
                         # listener implementation. Older test fakes may not accept
                         # the kwarg, so fall back to constructing without it.
                         cls = getattr(_ha, "HAWebSocketListener")
-                        self._ha_ws_listener = cls(
-                            self.ha_api_url,
-                            self.ha_api_token,
+                        listener_kwargs = dict(
                             on_event=self._on_ha_state_event,
                             log_fn=_log,
                             selectors=self._selected_sensors_set,
                             on_ha_version=self._on_ha_version,
                         )
+                        try:
+                            self._ha_ws_listener = cls(
+                                self.ha_api_url,
+                                self.ha_api_token,
+                                on_snapshot=self._on_ha_snapshot,
+                                **listener_kwargs,
+                            )
+                        except TypeError:
+                            # listener without snapshot support: per-entity events only
+                            self._ha_ws_listener = cls(self.ha_api_url, self.ha_api_token, **listener_kwargs)
                         started = self._ha_ws_listener.start()
                         _log(f"HA WS listener started={started}")
                         # Log which sensors the websocket is currently monitoring
-                        try:
-                            if self._selected_sensors_set:
-                                _log(f"HA WS monitoring sensors: {', '.join(sorted(self._selected_sensors_set))}")
-                            else:
-                                _log("HA WS monitoring sensors: none")
-                        except Exception:
-                            pass
+                        _log(f"HA WS monitoring sensors: {len(self._selected_sensors_set) or 'none'}")
                     except Exception:
                         _log("Failed to start HA WS listener")
                         traceback.print_exc()
@@ -1189,6 +1289,59 @@ class CentralCoreClient:
             _log("Unexpected error during HA WS setup")
             traceback.print_exc()
             self._ha_ws_listener = None
+
+    def start_worker(self):
+        """Start the worker thread; from now on _submit() queues instead of running inline."""
+        worker = getattr(self, "_worker", None)
+        if worker is not None and worker.is_alive():
+            return
+        if getattr(self, "_work_queue", None) is None:
+            self._work_queue = queue.Queue()
+        self._worker = threading.Thread(target=self._work_loop, name="hub-worker", daemon=True)
+        self._worker.start()
+
+    def stop_worker(self, timeout=5):
+        worker = getattr(self, "_worker", None)
+        if worker is None:
+            return
+        self._work_queue.put(None)
+        worker.join(timeout)
+        self._worker = None
+
+    def _work_loop(self):
+        while True:
+            job = self._work_queue.get()
+            try:
+                if job is None:
+                    return
+                fn, args = job
+                try:
+                    fn(*args)
+                except Exception:
+                    _log(f"Worker job {getattr(fn, '__name__', fn)} failed", sys.stderr)
+                    traceback.print_exc()
+            finally:
+                self._work_queue.task_done()
+
+    def _submit(self, fn, *args):
+        """Run `fn(*args)` on the worker thread, or inline when no worker runs."""
+        worker = getattr(self, "_worker", None)
+        if worker is not None and worker.is_alive():
+            self._work_queue.put((fn, args))
+        else:
+            fn(*args)
+
+    def wait_for_commands(self, timeout=None):
+        """Wait until queued work is done; True if it finished within `timeout`."""
+        q = getattr(self, "_work_queue", None)
+        if q is None:
+            return True
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while q.unfinished_tasks:
+            if deadline is not None and time.monotonic() >= deadline:
+                return False
+            time.sleep(0.01)
+        return True
 
     def _update_ha_listener_selectors(self):
         listener = getattr(self, "_ha_ws_listener", None)
@@ -1368,17 +1521,20 @@ class CentralCoreClient:
         if not self.mqtt_key and keys:
             self.mqtt_key = keys[0]
 
-    def _publish(self, topic, payload, qos=0):
-        """Publish and log the MQTT publish action and result."""
-        # If this topic is eligible for persistence and the outbox is
-        # configured, attempt publish but fall back to enqueuing the
-        # message for later delivery on connect.
+    def _publish(self, topic, payload, qos=0, persist=None):
+        """Publish, log topic/length/result, and queue eligible messages that fail.
+
+        `persist=False` never queues the message (full sensor dumps: the next
+        one supersedes it); None decides by topic (_should_persist_topic).
+        """
         try:
             outbox = getattr(self, "_outbox", None)
         except Exception:
             outbox = None
+        length = len(payload) if payload is not None else 0
+        eligible = persist is not False and _should_persist_topic(topic)
         try:
-            _log(f"MQTT -> PUBLISH to {topic} qos={qos} len={len(payload) if payload is not None else 0}")
+            _log_debug(f"MQTT -> PUBLISH {topic} qos={qos} len={length} payload={_preview(payload)}")
             # If not connected, only enqueue when we have a real paho MQTT
             # client (i.e. runtime) and the topic is eligible for persistence.
             # In tests the client is often a dummy shim; allow those publishes
@@ -1386,14 +1542,14 @@ class CentralCoreClient:
             if (
                 outbox
                 and (not getattr(self, "_connected", False))
-                and _should_persist_topic(topic)
+                and eligible
                 and (
                     mqtt is not None and isinstance(getattr(self, "_client", None), getattr(mqtt, "Client", type(None)))
                 )
             ):
                 try:
                     outbox.append(topic, payload if payload is not None else "", qos)
-                    _log(f"MQTT OUTBOX -> queued for {topic}")
+                    _log(f"MQTT OUTBOX <- {topic} len={length} (not connected)")
                     return None
                 except Exception:
                     pass
@@ -1404,56 +1560,25 @@ class CentralCoreClient:
                 rc = getattr(result, "rc", None)
             except Exception:
                 rc = None
-            # Prepare a sanitized, human-readable payload for logging
-            try:
-                if payload is None:
-                    disp = "<none>"
-                elif isinstance(payload, (bytes, bytearray)):
-                    try:
-                        disp = payload.decode("utf-8", errors="replace")
-                    except Exception:
-                        disp = str(payload)
-                else:
-                    disp = str(payload)
-
-                # Redact certificate/private key blocks to avoid leaking secrets
-                import re
-
-                disp = re.sub(
-                    r"-----BEGIN CERTIFICATE-----[^-]*-----END CERTIFICATE-----",
-                    "[CERTIFICATE REDACTED]",
-                    disp,
-                    flags=re.DOTALL,
-                )
-                disp = re.sub(
-                    r"-----BEGIN PRIVATE KEY-----[^-]*-----END PRIVATE KEY-----",
-                    "[PRIVATE KEY REDACTED]",
-                    disp,
-                    flags=re.DOTALL,
-                )
-            except Exception:
-                disp = "<unserializable>"
-
-            _log(f"MQTT <- PUBLISH result for {topic} rc={rc} payload={disp}")
+            _log(f"MQTT -> {topic} qos={qos} len={length} rc={rc}")
             # If publish returned an rc indicating failure and outbox is enabled,
             # persist the message for retry if the topic is eligible.
             try:
-                if outbox and getattr(result, "rc", 0) != 0 and _should_persist_topic(topic):
+                if outbox and getattr(result, "rc", 0) != 0 and eligible:
                     outbox.append(topic, payload if payload is not None else "", qos)
             except Exception:
                 pass
             return result
-        except Exception:
-            _log(f"MQTT ERROR publishing to {topic}", sys.stderr)
+        except Exception as exc:
+            _log(f"MQTT ERROR publishing to {topic} len={length}: {type(exc).__name__}", sys.stderr)
             # On exception, persist the message if appropriate
             try:
                 outbox = getattr(self, "_outbox", None)
-                if outbox and _should_persist_topic(topic):
+                if outbox and eligible:
                     outbox.append(topic, payload if payload is not None else "", qos)
-                    _log(f"MQTT OUTBOX -> queued for {topic} after error")
+                    _log(f"MQTT OUTBOX <- {topic} len={length} (after error)")
             except Exception:
                 pass
-            traceback.print_exc()
             return None
 
     def _on_ha_state_event(self, entity_id, new_state):
@@ -1475,13 +1600,16 @@ class CentralCoreClient:
             # If registry check fails, fall back to previous behavior
             pass
 
+        if not _is_selectable_entity(entity_id):
+            return
+
         raw_state = new_state.get("state")
         prev_value = self._selected_sensor_cache.get(entity_id)
         if prev_value == raw_state:
             return
         self._selected_sensor_cache[entity_id] = raw_state
 
-        attrs = new_state.get("attributes") or {}
+        attrs = _sanitize_attributes(new_state.get("attributes"))
         name = attrs.get("friendly_name") or new_state.get("name") or entity_id
         enabled = not bool(attrs.get("disabled_by"))
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -1495,7 +1623,7 @@ class CentralCoreClient:
                 dc = None
         if dc:
             device_classes_map[entity_id] = dc
-        obs_ts = _normalize_timestamp(attrs.get("last_changed") or attrs.get("last_updated")) or now_iso
+        obs_ts = _normalize_timestamp(new_state.get("last_changed") or new_state.get("last_updated")) or now_iso
         telemetry_payload = {
             "data": {entity_id: raw_state},
             "names": {entity_id: name},
@@ -1511,36 +1639,10 @@ class CentralCoreClient:
                 json.dumps(telemetry_payload),
                 qos=0,
             )
-            try:
-                _log(f"HA WS -> Sent sensor update for {entity_id}: {raw_state}")
-            except Exception:
-                pass
+            _log_debug(f"HA WS -> sent change for {entity_id}: {raw_state!r}")
         except Exception:
             _log("Failed to publish selected sensor change via HA WS", sys.stderr)
         return
-
-    def _call_ha_service(
-        self,
-        domain,
-        service,
-        service_data=None,
-        timeout=15.0,
-    ):
-        listener = getattr(self, "_ha_ws_listener", None)
-        if listener is None:
-            return None
-        call_srv = getattr(listener, "call_service", None)
-        if not callable(call_srv):
-            return None
-        try:
-            return call_srv(
-                domain,
-                service,
-                service_data=service_data,
-                timeout=timeout,
-            )
-        except Exception:
-            return None
 
     def _on_ha_version(self, version):
         """Callback invoked when the HA websocket listener discovers a HA version.
@@ -1606,33 +1708,40 @@ class CentralCoreClient:
             except Exception:
                 _log("Subscription failed", sys.stderr)
             self._connected = True
-            # Attempt to flush any persisted outbox messages on connect.
-            try:
-                outbox = getattr(self, "_outbox", None)
-                if outbox is not None:
-
-                    def _sender(t, p, q):
-                        try:
-                            r = self._client.publish(t, p, qos=q)
-                            rc = getattr(r, "rc", 0)
-                            return rc == 0
-                        except Exception:
-                            return False
-
-                    flushed = outbox.flush_with_sender(_sender)
-                    if flushed:
-                        _log(f"Flushed {flushed} messages from outbox")
-            except Exception:
-                pass
-            # Publish initial sensors with default device_class filtering on connect
-            try:
-                self.publish_sensors_with_default_filter()
-            except Exception:
-                _log("Failed to publish default sensors on connect", sys.stderr)
+            # Anything that may wait (outbox, Home Assistant) runs on the worker.
+            self._submit(self._after_connect)
         except Exception:
             # Ensure no exceptions escape the callback into paho's thread
             _log("Unhandled exception in on_connect", sys.stderr)
             traceback.print_exc()
+
+    def _after_connect(self):
+        """Work to do once connected; runs on the worker thread. (The outbox
+        is flushed by the main loop.)"""
+        try:
+            self.publish_sensors_with_default_filter()
+        except Exception:
+            _log("Failed to publish default sensors on connect", sys.stderr)
+
+    def _flush_outbox(self):
+        """Send messages queued while offline (main loop, when connected)."""
+        outbox = getattr(self, "_outbox", None)
+        if outbox is None or not self._connected:
+            return 0
+        has_entries = getattr(outbox, "has_entries", None)
+        if callable(has_entries) and not has_entries():
+            return 0
+
+        def _sender(t, p, q):
+            try:
+                return getattr(self._client.publish(t, p, qos=q), "rc", 0) == 0
+            except Exception:
+                return False
+
+        flushed = outbox.flush_with_sender(_sender)
+        if flushed:
+            _log(f"Flushed {flushed} messages from outbox")
+        return flushed
 
     def on_disconnect(self, _client, _userdata, *args, **kwargs):
         """MQTT on_disconnect callback.
@@ -1667,52 +1776,35 @@ class CentralCoreClient:
             except Exception:
                 payload = "<binary>"
 
-            # Sanitize payload for logging to avoid exposing certificates
-            def _sanitize_payload_for_logging(text):
-                import re
-
-                # Redact certificate content
-                text = re.sub(
-                    r"-----BEGIN CERTIFICATE-----[^-]*-----END CERTIFICATE-----",
-                    "[CERTIFICATE REDACTED]",
-                    text,
-                    flags=re.DOTALL,
-                )
-                text = re.sub(
-                    r"-----BEGIN PRIVATE KEY-----[^-]*-----END PRIVATE KEY-----",
-                    "[PRIVATE KEY REDACTED]",
-                    text,
-                    flags=re.DOTALL,
-                )
-                text = re.sub(
-                    r"-----BEGIN [^-]*-----[^-]*-----END [^-]*-----",
-                    "[CERT DATA REDACTED]",
-                    text,
-                    flags=re.DOTALL,
-                )
-                return text
-
-            safe_payload = _sanitize_payload_for_logging(payload)
-            _log(f"Received message on {msg.topic}: {safe_payload}")
-            # Prefer a local import of the handlers module; fall back to
-            # loading relative to the file for test contexts.
             try:
-                from handlers import handle_message as _hm
+                size = len(msg.payload)
             except Exception:
-                try:
-                    _base = pathlib.Path(__file__).parent
-                    spec_h = importlib.util.spec_from_file_location("cc_handlers", str(_base / "handlers.py"))
-                    if spec_h is None or spec_h.loader is None:
-                        raise ImportError("could not load handlers spec")
-                    _hmod = importlib.util.module_from_spec(spec_h)
-                    if getattr(spec_h, "name", None):
-                        sys.modules[spec_h.name] = _hmod
-                    spec_h.loader.exec_module(_hmod)
-                    _hm = _hmod.handle_message
-                except Exception:
-                    _hm = None
+                size = "?"
+            _log(f"MQTT <- {msg.topic} len={size} retain={getattr(msg, 'retain', False) is True}")
+            _log_debug(f"MQTT <- {msg.topic} payload={_preview(payload)}")
+            # Handlers may call Home Assistant: run them on the worker.
+            self._submit(self._dispatch_message, msg, payload)
+        except Exception:
+            traceback.print_exc()
 
-            if _hm is not None:
+    def _dispatch_message(self, msg, payload):
+        try:
+            from handlers import handle_message as _hm
+        except Exception:
+            try:
+                _base = pathlib.Path(__file__).parent
+                spec_h = importlib.util.spec_from_file_location("cc_handlers", str(_base / "handlers.py"))
+                if spec_h is None or spec_h.loader is None:
+                    raise ImportError("could not load handlers spec")
+                _hmod = importlib.util.module_from_spec(spec_h)
+                if getattr(spec_h, "name", None):
+                    sys.modules[spec_h.name] = _hmod
+                spec_h.loader.exec_module(_hmod)
+                _hm = _hmod.handle_message
+            except Exception:
+                _hm = None
+        if _hm is not None:
+            try:
                 _hm(
                     self,
                     msg,
@@ -1722,50 +1814,51 @@ class CentralCoreClient:
                     build_vault_payload,
                     requests,
                 )
-                return
-        except Exception:
-            traceback.print_exc()
+            except Exception:
+                traceback.print_exc()
 
     def connect(self):
-        # Backwards-compatible public connect method implemented in
-        # terms of smaller helpers: `connect_once` and `wait_for_connected`.
+        """Make the first connection, retrying with backoff until it succeeds
+        or the client is stopped. After that, paho's network loop reconnects
+        by itself (see connect_once)."""
+        delay = 1.0
         while not self._stop_event.is_set():
+            if getattr(self, "_tls_error", None):
+                self.connect_once()  # logs why
+                return False
             ok = self.connect_once()
             if ok:
                 # wait for connection signal from on_connect handler
                 if self.wait_for_connected(timeout=5):
                     return True
-                # timed out waiting for on_connect
-                try:
-                    _log("Connection timed out, retrying in 5s")
-                except Exception:
-                    pass
-                try:
-                    self._client.loop_stop()
-                except Exception:
-                    pass
+                _log("Connection not confirmed yet; paho keeps trying")
             else:
-                try:
-                    _log("MQTT connect failed, retrying in 5s")
-                except Exception:
-                    pass
+                _log(f"MQTT connect failed, retrying in {int(delay)}s")
             # Interruptible sleep: exits early if stop is requested
-            self._stop_event.wait(timeout=5)
+            self._stop_event.wait(timeout=delay)
+            delay = min(delay * 2, 120.0)
         return False
 
     def connect_once(self):
-        """Attempt a single connect + loop_start. Returns True on no exception.
+        """Connect and start paho's network loop, once.
 
-        This helper is small and easy to unit-test (e.g. when the client
-        shim raises or returns errors).
+        Returns True when the loop is running (then paho handles reconnects
+        with reconnect_delay_set backoff), False if the connect attempt failed.
         """
+        tls_error = getattr(self, "_tls_error", None)
+        if tls_error:
+            _log(f"Not connecting: MQTT TLS is enabled but could not be set up ({tls_error})", sys.stderr)
+            return False
+        if getattr(self, "_loop_started", False):
+            return True
         try:
             _log(f"Connecting to {self.mqtt_host}:{self.mqtt_port} as {self.client_id}")
             self._client.connect(self.mqtt_host, self.mqtt_port, keepalive=60)
             self._client.loop_start()
+            self._loop_started = True
             return True
-        except Exception:
-            traceback.print_exc()
+        except Exception as exc:
+            _log(f"MQTT connect to {self.mqtt_host}:{self.mqtt_port} failed: {type(exc).__name__}: {exc}")
             return False
 
     def wait_for_connected(self, timeout=5):
@@ -1808,7 +1901,12 @@ class CentralCoreClient:
             version = self._read_ha_version_from_options(opts_path)
 
         if not version:
-            version = self._fetch_ha_version_from_api()
+            # At most every 10 minutes: the websocket normally supplies it.
+            now = time.monotonic()
+            last = getattr(self, "_last_ha_version_fetch", None)
+            if last is None or now - last >= 600:
+                self._last_ha_version_fetch = now
+                version = self._fetch_ha_version_from_api()
 
         if version:
             try:
@@ -1868,30 +1966,18 @@ class CentralCoreClient:
         return None
 
     def publish_telemetry(self):
-        # Reload telemetry_interval from HA options if it changed so the
-        # published payload reflects the user-defined cadence.
-        try:
-            self._refresh_telemetry_interval_from_options()
-        except Exception:
-            pass
-        # Attempt to include Home Assistant core version learned via the
-        # websocket listener. The websocket writes `ha_version` into the
-        # add-on options file (path configurable via `ha_client.OPTIONS_PATH`).
+        # (run_iteration refreshes telemetry_interval from the options file.)
+        # Include the Home Assistant core version learned via the websocket
+        # listener (memory, then the options file, then a throttled REST call).
         ha_version = self._resolve_ha_version()
-        # Defensive fallback: always try a direct read of the add-on
-        # options file so telemetry includes `ha_version` even if the
-        # in-memory cache isn't yet populated (cheap and reliable).
-        if not ha_version:
-            try:
-                ha_version = self._read_ha_version_from_options(None)
-            except Exception:
-                ha_version = None
         ha_info = {"core": ha_version} if ha_version else None
+        if getattr(self, "_addon_version", None) is None:
+            self._addon_version = get_addon_version()
 
         payload = build_telemetry(
             self.client_id,
             **{
-                "version": get_addon_version(),
+                "version": self._addon_version,
                 "telemetry_interval": self.telemetry_interval,
                 "home_assistant": ha_info,
             },
@@ -1906,12 +1992,7 @@ class CentralCoreClient:
         except Exception:
             pass
         try:
-            _log(f"Telemetry interval (effective): {self.telemetry_interval}")
-        except Exception:
-            pass
-        try:
             self._publish(self.telemetry_topic, payload)
-            _log(f"Published telemetry to {self.telemetry_topic}")
         except Exception:
             _log("Failed to publish telemetry")
         # Also publish to an optional vault-specific topic if configured.
@@ -1993,7 +2074,7 @@ class CentralCoreClient:
             "timestamp": now_iso,
         }
         try:
-            self._publish(self.preferred_sensors_topic, json.dumps(payload), qos=0)
+            self._publish(self.preferred_sensors_topic, json.dumps(payload), qos=0, persist=False)
             _log(f"Published default sensors to {self.preferred_sensors_topic} (count={len(data_map)})")
         except Exception:
             _log(
@@ -2020,12 +2101,12 @@ class CentralCoreClient:
         payload = {
             "schema_version": 1,
             "client_id": self.client_id,
-            "timestamp": datetime.now(_LOCAL_TZ).isoformat().replace("+00:00", "Z"),
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "sensors": sensors or [],
         }
         # Publish to preferred Vault topic (development-only; legacy dropped)
         try:
-            self._publish(self.preferred_sensors_topic, json.dumps(payload), qos=0)
+            self._publish(self.preferred_sensors_topic, json.dumps(payload), qos=0, persist=False)
             _log(f"Published sensors list to {self.preferred_sensors_topic} (count={len(payload['sensors'])})")
         except Exception:
             _log(
@@ -2034,18 +2115,52 @@ class CentralCoreClient:
             )
         self._last_sensors_sent = int(time.time())
 
+    def _ws_streaming(self):
+        """True while the HA websocket delivers the selected entities' changes."""
+        listener = getattr(self, "_ha_ws_listener", None)
+        check = getattr(listener, "is_streaming", None)
+        try:
+            return bool(check()) if callable(check) else False
+        except Exception:
+            return False
+
     def publish_selected_sensor_changes(self):
-        """Publish telemetry for selected sensors when their state changes."""
+        """REST fallback for selected sensors while the websocket is not streaming.
+
+        Fetches only the selected entities (by id), and publishes the selected
+        set when any of them changed since the last publish.
+        """
         if not self.selected_sensors:
+            return
+        if self._ws_streaming():
             return
         # Require HA configuration and a functioning `requests` runtime
         # dependency. Tests should monkeypatch the module-level `requests`
         # symbol when they intend to bypass network calls.
         if not self.ha_api_url or not self.ha_api_token or requests is None:
             return
-        sensors = fetch_sensors(self.ha_api_url, self.ha_api_token) or []
+        wanted = [e for e in self.selected_sensors if _is_selectable_entity(e)]
+        sensors = fetch_selected_sensors(self.ha_api_url, self.ha_api_token, wanted) or []
+        self._publish_selected_states(sensors)
+
+    def _on_ha_snapshot(self, states):
+        """Current states of the watched entities, sent by HA when a websocket
+        subscription starts (startup, reconnect, selection change)."""
+        try:
+            self._publish_selected_states(states or [])
+        except Exception:
+            _log("Failed to publish websocket snapshot", sys.stderr)
+
+    def _publish_selected_states(self, sensors):
+        """Publish the selected entities among `sensors` if any value changed."""
         selected_set = set(self.selected_sensors)
-        filtered = [s for s in sensors if s.get("entity_id") in selected_set and is_entity_allowed(s.get("entity_id"))]
+        filtered = [
+            s
+            for s in sensors
+            if s.get("entity_id") in selected_set
+            and _is_selectable_entity(s.get("entity_id"))
+            and is_entity_allowed(s.get("entity_id"))
+        ]
 
         data_map = {}
         names_map = {}
@@ -2056,7 +2171,7 @@ class CentralCoreClient:
             ent = s.get("entity_id")
             if not ent:
                 continue
-            attrs = s.get("attributes", {}) or {}
+            attrs = _sanitize_attributes(s.get("attributes"))
             data_map[ent] = s.get("state")
             names_map[ent] = attrs.get("friendly_name") or s.get("name") or ent
             enabled_map[ent] = not bool(attrs.get("disabled_by"))
@@ -2068,10 +2183,10 @@ class CentralCoreClient:
             return
 
         snapshot = {k: data_map[k] for k in data_map.keys()}
-        if snapshot == self._selected_sensor_cache:
+        if snapshot == {k: self._selected_sensor_cache.get(k) for k in snapshot}:
             return
 
-        self._selected_sensor_cache = snapshot
+        self._selected_sensor_cache.update(snapshot)
         now_iso = datetime.now(timezone.utc).isoformat()
         telemetry_payload = {
             "data": data_map,
@@ -2114,6 +2229,7 @@ class CentralCoreClient:
         return True
 
     def run(self):
+        self.start_worker()
         # connect first
         self.connect()
         try:
@@ -2152,6 +2268,10 @@ class CentralCoreClient:
         """Stop background listeners and disconnect MQTT (safe to call multiple times)."""
         try:
             self._stop_event.set()
+        except Exception:
+            pass
+        try:
+            self.stop_worker()
         except Exception:
             pass
         for path in list(getattr(self, "_temp_cert_files", [])):
@@ -2193,11 +2313,14 @@ class CentralCoreClient:
         except Exception:
             pass
         if not self._connected:
-            try:
-                _log("Not connected, attempting reconnect")
-            except Exception:
-                pass
-            self.connect()
+            if getattr(self, "_loop_started", False):
+                _log("MQTT not connected; paho is reconnecting")
+            else:
+                self.connect()
+        try:
+            self._flush_outbox()
+        except Exception:
+            _log("Outbox flush exception", sys.stderr)
         try:
             self.publish_telemetry()
         except Exception:
@@ -2212,23 +2335,12 @@ class CentralCoreClient:
             now_ts = int(time.time())
             if now_ts - getattr(self, "_last_monitor_log", 0) >= 300:
                 self._last_monitor_log = now_ts
+                _log(f"Periodic: HA WS monitoring sensors: {len(self._selected_sensors_set) or 'none'}")
                 try:
-                    # Websocket-selected sensors
-                    if self._selected_sensors_set:
-                        _log(f"Periodic: HA WS monitoring sensors: {', '.join(sorted(self._selected_sensors_set))}")
-                    else:
-                        _log("Periodic: HA WS monitoring sensors: none")
-                except Exception:
-                    _log("Periodic: HA WS monitoring sensors: none")
-                try:
-                    # Registry-provided sensors (those marked provide=True)
                     provided = list_monitored_sensors()
-                    if provided:
-                        _log(f"Periodic: Registry provided sensors: {', '.join(provided)}")
-                    else:
-                        _log("Periodic: Registry provided sensors: none")
                 except Exception:
-                    _log("Periodic: Registry provided sensors: none")
+                    provided = []
+                _log(f"Periodic: Registry provided sensors: {len(provided) or 'none'}")
         except Exception:
             pass
         # send telemetry every 30s; send sensors every hour

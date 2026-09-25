@@ -2,7 +2,6 @@ import importlib.util
 import pathlib
 import json
 import sys
-import os
 import types
 
 
@@ -32,33 +31,59 @@ class FakeClient:
         return f"hubs/{self.client_id}/v1/ack/{action}/{command_id}"
 
 
-def test_registry_set_writes_local_when_mqtt_missing(tmp_path):
-    # ensure mqtt_client is not importable by replacing it with a dummy
-    orig = sys.modules.get("mqtt_client", None)
-    sys.modules["mqtt_client"] = types.SimpleNamespace()
-    # ensure no registry token is present in the env to avoid auth failures
-    orig_env = os.environ.pop("REGISTRY_TOKEN", None)
+def test_registry_set_writes_local_when_mqtt_missing(tmp_path, monkeypatch):
+    """Without mqtt_client, a token-authorised update goes next to handlers.py;
+    without a token nothing is written."""
+    monkeypatch.setitem(sys.modules, "mqtt_client", types.SimpleNamespace())
+    target = pathlib.Path(__file__).parents[2] / "SENSOR_REGISTRY_from_mqtt.json"
+    msg = type("M", (), {"topic": "hubs/cid/v1/cmd/registry/set"})
+    entries = [{"entity_id": "sensor.a", "provide": True}]
     try:
-        msg = type("M", (), {"topic": "hubs/cid/v1/cmd/registry/set"})
-        payload_obj = {"entries": [{"a": 1}]}
-        payload = {"command_id": "rnm1", "payload": payload_obj}
+        monkeypatch.delenv("REGISTRY_TOKEN", raising=False)
+        client = FakeClient()
+        handlers.handle_message(client, msg, json.dumps({"command_id": "rnm0", "payload": {"entries": entries}}), None, None, None)
+        assert not target.exists()
+        assert _secure_final_ack(client.publishes)["result"]["reason"] == "registry_updates_disabled"
 
+        monkeypatch.setenv("REGISTRY_TOKEN", "tok-1")
+        payload = {"command_id": "rnm1", "payload": {"token": "tok-1", "entries": entries}}
         handlers.handle_message(FakeClient(), msg, json.dumps(payload), None, None, None)
-
-        # file should be written next to handlers.py
-        target = pathlib.Path(__file__).parents[2] / "SENSOR_REGISTRY_from_mqtt.json"
         assert target.exists()
         data = json.loads(target.read_text())
-        assert data.get("entries") == payload_obj.get("entries")
+        assert data == {"entries": entries}
     finally:
-        # cleanup file and restore module
         try:
             target.unlink()
         except Exception:
             pass
-        if orig is not None:
-            sys.modules["mqtt_client"] = orig
-        else:
-            sys.modules.pop("mqtt_client", None)
-        if orig_env is not None:
-            os.environ["REGISTRY_TOKEN"] = orig_env
+
+
+# --- helpers for the secure sensors/set and registry/set behaviour ---------
+
+
+def _secure_final_ack(records):
+    """Last non-"acknowledged" ACK body among recorded publishes (any record shape)."""
+    last = None
+    for r in records:
+        topic, payload = (r["topic"], r["payload"]) if isinstance(r, dict) else (r[0], r[1])
+        if "/ack/" not in topic:
+            continue
+        body = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+        if isinstance(body, dict) and body.get("status") != "acknowledged":
+            last = body
+    return last
+
+
+class _RecordingRequests:
+    """A `requests` stand-in that records calls and refuses every one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, *a, **k):
+        self.calls.append(("POST", url))
+        raise AssertionError(f"hub must not POST to Home Assistant: {url}")
+
+    def get(self, url, *a, **k):
+        self.calls.append(("GET", url))
+        raise AssertionError(f"sensors/set must not call Home Assistant per entity: {url}")

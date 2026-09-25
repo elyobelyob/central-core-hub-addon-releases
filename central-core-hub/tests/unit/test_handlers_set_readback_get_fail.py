@@ -50,38 +50,57 @@ class _FakeResp:
         return self._data
 
 
-def test_sensors_set_readback_get_raises_fallbacks_to_sent_state():
+def test_sensors_set_list_when_ha_fetch_fails_completes_with_empty_report():
     client = DummyClient()
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
-    payload = json.dumps(
-        {"command_id": "c-getfail", "payload": {"sensors": [{"entity_id": "sensor.x", "state": "on"}]}}
-    )
+    req = _RecordingRequests()
 
-    # fake requests: post succeeds, get raises exception to trigger fallback
-    class FakeReq:
-        @staticmethod
-        def post(url, headers=None, json=None, timeout=None):
-            return _FakeResp({})
+    def failing_fetch(url, token):
+        raise RuntimeError("HA unreachable")
 
-        @staticmethod
-        def get(url, headers=None, timeout=None):
-            raise RuntimeError("readback failed")
+    payload = json.dumps({"command_id": "c-getfail", "payload": {"sensors": ["sensor.x"]}})
+    handlers.handle_message(client, Msg(topic), payload, failing_fetch, None, None, requests=req)
 
-    handlers.handle_message(client, Msg(topic), payload, None, None, None, requests=FakeReq)
+    assert req.calls == []
+    comp = _secure_final_ack(client.published)
+    assert comp["status"] == "completed"
+    # the selection is kept; no value is invented for it
+    assert comp["result"]["selected"] == ["sensor.x"]
+    assert comp["result"]["sensors_reported"] == []
+    assert comp["result"]["data"] == {}
 
-    # Expect completion ack published with detailed result including data
-    comp = None
-    for t, payload_str, qos in client.published:
-        try:
-            p = json.loads(payload_str)
-        except Exception:
+    # and the readback form itself is refused
+    payload = json.dumps({"command_id": "c-getfail2", "payload": {"sensors": [{"entity_id": "sensor.x", "state": "on"}]}})
+    handlers.handle_message(client, Msg(topic), payload, failing_fetch, None, None, requests=req)
+    assert _secure_final_ack(client.published)["result"]["reason"] == "invalid_payload"
+
+
+# --- helpers for the secure sensors/set and registry/set behaviour ---------
+
+
+def _secure_final_ack(records):
+    """Last non-"acknowledged" ACK body among recorded publishes (any record shape)."""
+    last = None
+    for r in records:
+        topic, payload = (r["topic"], r["payload"]) if isinstance(r, dict) else (r[0], r[1])
+        if "/ack/" not in topic:
             continue
-        if p.get("status") == "completed":
-            comp = p
-            break
-    assert comp is not None
-    # If readback failed, handlers should still include the sent state in the data
-    result = comp.get("result") or {}
-    data = result.get("data") or {}
-    # when readback failed, code assigns the requested state as readback value
-    assert data.get("sensor.x") == "on"
+        body = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+        if isinstance(body, dict) and body.get("status") != "acknowledged":
+            last = body
+    return last
+
+
+class _RecordingRequests:
+    """A `requests` stand-in that records calls and refuses every one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, *a, **k):
+        self.calls.append(("POST", url))
+        raise AssertionError(f"hub must not POST to Home Assistant: {url}")
+
+    def get(self, url, *a, **k):
+        self.calls.append(("GET", url))
+        raise AssertionError(f"sensors/set must not call Home Assistant per entity: {url}")

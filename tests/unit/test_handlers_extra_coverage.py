@@ -1,4 +1,6 @@
 import json
+import types
+import sys
 from pathlib import Path
 import importlib.util
 
@@ -71,39 +73,55 @@ def test_registry_missing_payload_publishes_failed(tmp_path):
     assert found, f"expected missing_payload in publishes: {client.publishes}"
 
 
-def test_sensors_set_readback_get_failure_falls_back(monkeypatch):
+def test_sensors_set_readback_form_is_refused_and_list_reports(monkeypatch, tmp_path):
     handlers = load_handlers_module()
+    # keep the persisted selection out of the add-on directory
+    monkeypatch.setitem(sys.modules, "mqtt_client", types.SimpleNamespace(SELECTED_SENSORS_FILE=tmp_path / "sel.json"))
     client = DummyClient("setcli")
     client.ha_api_url = "http://ha"
     client.ha_api_token = "tok"
     client.ha_readback_after_set = True
-
-    # fake requests: post succeeds, get raises
-    class FakeResp:
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return {"state": "on", "attributes": {}}
-
-    class FakeRequests:
-        def post(self, url, headers=None, json=None, timeout=None):
-            return FakeResp()
-
-        def get(self, url, headers=None, timeout=None):
-            raise RuntimeError("get failed")
-
-    requests = FakeRequests()
-
-    cmd = {
-        "command_id": "set1",
-        "payload": {"sensors": [{"entity_id": "sensor.x", "state": "on"}]},
-    }
-    payload_str = json.dumps(cmd)
+    requests = _RecordingRequests()
     msg = Msg(f"hubs/{client.client_id}/v1/cmd/sensors/set")
 
-    handlers.handle_message(client, msg, payload_str, None, None, None, requests=requests)
+    cmd = {"command_id": "set1", "payload": {"sensors": [{"entity_id": "sensor.x", "state": "on"}]}}
+    handlers.handle_message(client, msg, json.dumps(cmd), None, None, None, requests=requests)
+    assert requests.calls == []
+    assert _secure_final_ack(client.publishes)["result"]["reason"] == "invalid_payload"
 
-    # Should publish enhanced completion ACK including sensors_reported
-    joined = "\n".join(p[1] for p in client.publishes)
-    assert "sensor.x" in joined, f"expected sensor.x in publishes: {client.publishes}"
+    cmd = {"command_id": "set2", "payload": {"sensors": ["sensor.x"]}}
+    fetch = lambda url, token: [{"entity_id": "sensor.x", "state": "on", "attributes": {}}]  # noqa: E731
+    handlers.handle_message(client, msg, json.dumps(cmd), fetch, None, None, requests=requests)
+    comp = _secure_final_ack(client.publishes)
+    assert comp["result"]["sensors_reported"] == ["sensor.x"]
+
+
+# --- helpers for the secure sensors/set and registry/set behaviour ---------
+
+
+def _secure_final_ack(records):
+    """Last non-"acknowledged" ACK body among recorded publishes (any record shape)."""
+    last = None
+    for r in records:
+        topic, payload = (r["topic"], r["payload"]) if isinstance(r, dict) else (r[0], r[1])
+        if "/ack/" not in topic:
+            continue
+        body = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+        if isinstance(body, dict) and body.get("status") != "acknowledged":
+            last = body
+    return last
+
+
+class _RecordingRequests:
+    """A `requests` stand-in that records calls and refuses every one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, *a, **k):
+        self.calls.append(("POST", url))
+        raise AssertionError(f"hub must not POST to Home Assistant: {url}")
+
+    def get(self, url, *a, **k):
+        self.calls.append(("GET", url))
+        raise AssertionError(f"sensors/set must not call Home Assistant per entity: {url}")

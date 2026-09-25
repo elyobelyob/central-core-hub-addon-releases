@@ -39,9 +39,9 @@ jobs:
         shell: bash
         run: |
           if [ "${{ matrix.platform }}" = "linux/amd64" ]; then
-            echo "build_from=ghcr.io/home-assistant/amd64-base:latest" >> "$GITHUB_OUTPUT"
+            echo "build_from=ghcr.io/home-assistant/amd64-base:3.24" >> "$GITHUB_OUTPUT"
           elif [ "${{ matrix.platform }}" = "linux/arm64" ]; then
-            echo "build_from=ghcr.io/home-assistant/aarch64-base:latest" >> "$GITHUB_OUTPUT"
+            echo "build_from=ghcr.io/home-assistant/aarch64-base:3.24" >> "$GITHUB_OUTPUT"
           else
             echo "build_from=" >> "$GITHUB_OUTPUT"
           fi

@@ -35,32 +35,48 @@ class FakeClient:
         return f"hubs/{self.client_id}/v1/ack/{action}/{command_id}"
 
 
-def test_set_fallback_when_posts_fail():
+def test_set_write_form_refused_and_nothing_published():
     client = FakeClient()
-
-    class R:
-        @staticmethod
-        def post(url, headers=None, json=None, timeout=None):
-            raise Exception("network")
-
+    R = _RecordingRequests()
     msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/sensors/set"})
     payload = {"command_id": "f1", "payload": {"sensors": [{"entity_id": "sensor.z", "state": "x"}]}}
-
     handlers.handle_message(client, msg, json.dumps(payload), None, None, None, requests=R)
 
-    # fallback telemetry publish and completion ack with failed reason
+    assert R.calls == []
     topics = [t for t, _, _ in client.publishes]
-    assert client.preferred_sensors_topic in topics
-    # find completed ack with failed reason
-    found = False
-    for _, p, _ in client.publishes:
-        try:
-            obj = json.loads(p)
-        except Exception:
+    # only the command's ACKs: no fallback telemetry, no vault reminder
+    assert client.preferred_sensors_topic not in topics
+    assert client.vault_topic not in topics
+    comp = _secure_final_ack(client.publishes)
+    assert comp["status"] == "failed" and comp["result"]["reason"] == "invalid_payload"
+
+
+# --- helpers for the secure sensors/set and registry/set behaviour ---------
+
+
+def _secure_final_ack(records):
+    """Last non-"acknowledged" ACK body among recorded publishes (any record shape)."""
+    last = None
+    for r in records:
+        topic, payload = (r["topic"], r["payload"]) if isinstance(r, dict) else (r[0], r[1])
+        if "/ack/" not in topic:
             continue
-        if obj.get("status") == "completed":
-            res = obj.get("result")
-            if res and "failed" in res and res["failed"]:
-                found = True
-                break
-    assert found
+        body = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+        if isinstance(body, dict) and body.get("status") != "acknowledged":
+            last = body
+    return last
+
+
+class _RecordingRequests:
+    """A `requests` stand-in that records calls and refuses every one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, *a, **k):
+        self.calls.append(("POST", url))
+        raise AssertionError(f"hub must not POST to Home Assistant: {url}")
+
+    def get(self, url, *a, **k):
+        self.calls.append(("GET", url))
+        raise AssertionError(f"sensors/set must not call Home Assistant per entity: {url}")

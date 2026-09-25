@@ -63,57 +63,60 @@ def test_poll_malformed_payload_no_ack(monkeypatch):
     # also no telemetry since payload is malformed (no vault request with sensors list)
 
 
-def test_set_with_sensors_as_dict_and_readback_failure(monkeypatch):
+def test_set_with_sensors_as_dict_is_refused(monkeypatch):
     mc = _load_client_module()
     CentralCoreClient = mc.CentralCoreClient
+    req = _RecordingRequests()
+    monkeypatch.setattr(mc, "requests", req)
 
-    posts = []
-
-    class FakeResp:
-        def __init__(self, data=None):
-            self._data = data or {}
-
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return self._data
-
-    def fake_post(url, headers=None, json=None, timeout=10):
-        posts.append({"url": url, "json": json})
-        return FakeResp()
-
-    def fake_get(url, headers=None, timeout=10):
-        raise RuntimeError("readback failed")
-
-    monkeypatch.setattr(
-        mc,
-        "requests",
-        type("R", (), {"post": staticmethod(fake_post), "get": staticmethod(fake_get)}),
+    c = CentralCoreClient(
+        {"client_id": "unit-hub", "ha_api_url": "http://ha", "ha_api_token": "tok", "ha_readback_after_set": True}
     )
-
-    options = {
-        "client_id": "unit-hub",
-        "ha_api_url": "http://ha",
-        "ha_api_token": "tok",
-        "ha_readback_after_set": True,
-    }
-    c = CentralCoreClient(options)
     dummy = DummyClient()
     c._client = dummy
     c.vault_topic = "vault/unit"
+    c.selected_sensors = ["sensor.keep"]
 
-    # sensors payload as dict form
     payload = {"sensors": {"sensor.a": "10", "sensor.b": "20"}}
     cmd = {"command_id": "cid", "action": "sensors/set", "payload": payload}
-    msg = DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(cmd).encode("utf-8"))
+    c.on_message(None, None, DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(cmd).encode("utf-8")))
 
-    c.on_message(None, None, msg)
-
-    # POSTs should have occurred for each sensor
-    assert len(posts) == 2
-    # telemetry published to preferred topic
+    assert req.calls == []
+    comp = _secure_final_ack(dummy.published)
+    assert comp["status"] == "failed" and comp["result"]["reason"] == "invalid_payload"
     topics = [p["topic"] for p in dummy.published]
-    assert c.preferred_sensors_topic in topics
-    # reminder published to vault topic
-    assert any(p["topic"] == c.vault_topic for p in dummy.published)
+    # nothing but the command's own ACKs: no telemetry, no vault reminder
+    assert c.preferred_sensors_topic not in topics
+    assert c.vault_topic not in topics
+    assert c.selected_sensors == ["sensor.keep"]
+
+
+# --- helpers for the secure sensors/set and registry/set behaviour ---------
+
+
+def _secure_final_ack(records):
+    """Last non-"acknowledged" ACK body among recorded publishes (any record shape)."""
+    last = None
+    for r in records:
+        topic, payload = (r["topic"], r["payload"]) if isinstance(r, dict) else (r[0], r[1])
+        if "/ack/" not in topic:
+            continue
+        body = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+        if isinstance(body, dict) and body.get("status") != "acknowledged":
+            last = body
+    return last
+
+
+class _RecordingRequests:
+    """A `requests` stand-in that records calls and refuses every one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, *a, **k):
+        self.calls.append(("POST", url))
+        raise AssertionError(f"hub must not POST to Home Assistant: {url}")
+
+    def get(self, url, *a, **k):
+        self.calls.append(("GET", url))
+        raise AssertionError(f"sensors/set must not call Home Assistant per entity: {url}")

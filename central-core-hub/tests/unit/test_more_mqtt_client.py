@@ -46,7 +46,8 @@ def test_connect_handles_timeout_and_retries(monkeypatch):
     assert c.connect() is True
     assert calls["connect_once"] >= 1
     assert calls["wait_for_connected"] >= 2
-    assert calls["loop_stop"] >= 1
+    # paho's network loop keeps reconnecting on its own; it is not stopped and restarted
+    assert calls["loop_stop"] == 0
 
 
 def test_connect_reports_failed_then_succeeds(monkeypatch):

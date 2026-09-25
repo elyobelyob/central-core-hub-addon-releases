@@ -100,77 +100,35 @@ def test_ack_publish_raises_but_processing_continues(monkeypatch):
     # completion may or may not have been published depending on where the exception occurred
 
 
-def test_set_no_ha_config_reports_failed(monkeypatch):
+def test_set_write_form_without_ha_config_reports_failed(monkeypatch):
     handlers = _load_handlers()
     c = RecordingClient()
-    # remove HA config
     c.ha_api_url = None
     c.ha_api_token = None
-
-    cmd = {
-        "command_id": "set1",
-        "action": "sensors/set",
-        "payload": {"sensors": [{"entity_id": "sensor.x", "state": "2"}]},
-    }
+    cmd = {"command_id": "set1", "action": "sensors/set", "payload": {"sensors": [{"entity_id": "sensor.x", "state": "2"}]}}
     msg = DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(cmd).encode("utf-8"))
+    handlers.handle_message(c, msg, msg.payload.decode("utf-8"), lambda u, t: [], None, None, None)
 
-    handlers.handle_message(
-        c,
-        msg,
-        msg.payload.decode("utf-8"),
-        lambda u, t: [],
-        None,
-        None,
-        None,
-    )
-
-    # completion response should include failed result for no_ha_config
     resp_topic = build_ack_for_client_id(c.client_id, cmd["action"], cmd["command_id"])
-    matches = [p for p in c.published if p["topic"] == resp_topic]
+    matches = [json.loads(p["payload"]) for p in c.published if p["topic"] == resp_topic]
     assert matches, "expected completion response"
-    comp = json.loads(matches[-1]["payload"])
-    assert "result" in comp and comp["result"]["failed"], comp
+    assert matches[-1]["status"] == "failed"
+    assert matches[-1]["result"] == {"reason": "invalid_payload"}
 
 
-def test_set_requests_post_raises_results_failed(monkeypatch):
+def test_set_write_form_never_reaches_requests(monkeypatch):
     handlers = _load_handlers()
     c = RecordingClient()
-
-    class FakeResp:
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return {"state": "2", "attributes": {}}
-
-    def bad_post(url, headers=None, json=None, timeout=10):
-        raise RuntimeError("post fail")
-
-    monkeypatch.setattr("builtins.__import__", __import__)
-    requests = type(
-        "R",
-        (),
-        {
-            "post": staticmethod(bad_post),
-            "get": staticmethod(lambda *a, **k: FakeResp()),
-        },
-    )
-
-    cmd = {
-        "command_id": "set2",
-        "action": "sensors/set",
-        "payload": {"sensors": [{"entity_id": "sensor.y", "state": "3"}]},
-    }
+    requests = _RecordingRequests()
+    cmd = {"command_id": "set2", "action": "sensors/set", "payload": {"sensors": [{"entity_id": "sensor.y", "state": "3"}]}}
     msg = DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(cmd).encode("utf-8"))
-
     handlers.handle_message(c, msg, msg.payload.decode("utf-8"), lambda u, t: [], None, None, requests)
 
-    # completion should indicate failure for post error
+    assert requests.calls == []
     resp_topic = build_ack_for_client_id(c.client_id, cmd["action"], cmd["command_id"])
-    matches = [p for p in c.published if p["topic"] == resp_topic]
-    assert matches
-    comp = json.loads(matches[-1]["payload"])
-    assert comp["result"]["failed"], comp
+    matches = [json.loads(p["payload"]) for p in c.published if p["topic"] == resp_topic]
+    assert matches[-1]["status"] == "failed"
+    assert matches[-1]["result"]["reason"] == "invalid_payload"
 
 
 def test_fetch_sensors_raises_is_caught(monkeypatch):
@@ -188,3 +146,34 @@ def test_fetch_sensors_raises_is_caught(monkeypatch):
 
     # No publishes should have occurred due to fetch failure
     assert not c.published
+
+
+# --- helpers for the secure sensors/set and registry/set behaviour ---------
+
+
+def _secure_final_ack(records):
+    """Last non-"acknowledged" ACK body among recorded publishes (any record shape)."""
+    last = None
+    for r in records:
+        topic, payload = (r["topic"], r["payload"]) if isinstance(r, dict) else (r[0], r[1])
+        if "/ack/" not in topic:
+            continue
+        body = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+        if isinstance(body, dict) and body.get("status") != "acknowledged":
+            last = body
+    return last
+
+
+class _RecordingRequests:
+    """A `requests` stand-in that records calls and refuses every one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, *a, **k):
+        self.calls.append(("POST", url))
+        raise AssertionError(f"hub must not POST to Home Assistant: {url}")
+
+    def get(self, url, *a, **k):
+        self.calls.append(("GET", url))
+        raise AssertionError(f"sensors/set must not call Home Assistant per entity: {url}")

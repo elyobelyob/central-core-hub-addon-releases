@@ -184,7 +184,7 @@ def test_telemetry_cpu_and_vault(monkeypatch):
     assert tele.build_vault_payload("not-json") is None
 
 
-def test_handle_message_set_with_ha_readback(monkeypatch):
+def test_handle_message_set_write_form_refused_despite_publish_failures(monkeypatch):
     handlers = load_module(HANDLERS_P, "handlers_test_mod3")
 
     class FakeClient:
@@ -198,58 +198,22 @@ def test_handle_message_set_with_ha_readback(monkeypatch):
 
         def _publish(self, topic, payload, qos=0):
             self.pubs.append((topic, payload, qos))
-            if "response" in topic or topic == self.preferred_sensors_topic:
+            if topic == self.preferred_sensors_topic:
                 raise Exception("publish fail")
 
     c = FakeClient()
     msg = types.SimpleNamespace(topic=f"hubs/{c.client_id}/v1/cmd/sensors/set")
-
-    # Mock requests
-    class MockResponse:
-        def __init__(self, json_data, status=200):
-            self.json_data = json_data
-            self.status_code = status
-
-        def raise_for_status(self):
-            if self.status_code != 200:
-                raise Exception("bad status")
-
-        def json(self):
-            return self.json_data
-
-    class MockRequests:
-        def post(self, url, headers=None, json=None, timeout=None):
-            return MockResponse({"state": "new_state"})
-
-        def get(self, url, headers=None, timeout=None):
-            return MockResponse(
-                {
-                    "state": "read_state",
-                    "attributes": {"friendly_name": "Read Name", "disabled_by": None},
-                }
-            )
-
-    requests_mock = MockRequests()
-
+    requests_mock = _RecordingRequests()
     payload = json.dumps({"command_id": "set_cmd", "payload": {"sensors": {"ent1": "on"}}})
+    handlers.handle_message(c, msg, payload, lambda *a, **k: [], lambda *a, **k: None, lambda x: x, requests_mock)
 
-    handlers.handle_message(
-        c,
-        msg,
-        payload,
-        lambda *a, **k: [],
-        lambda *a, **k: None,
-        lambda x: x,
-        requests_mock,
-    )
-
-    # Should have published ack, completion and telemetry despite exceptions
+    assert requests_mock.calls == []
     ack_pubs = [p for p in c.pubs if "/v1/ack/" in p[0] and '"acknowledged"' in p[1]]
-    comp_pubs = [p for p in c.pubs if "/v1/ack/" in p[0] and '"completed"' in p[1]]
+    failed_pubs = [p for p in c.pubs if "/v1/ack/" in p[0] and '"failed"' in p[1]]
     tele_pubs = [p for p in c.pubs if p[0] == c.preferred_sensors_topic]
     assert len(ack_pubs) == 1
-    assert len(comp_pubs) == 1
-    assert len(tele_pubs) == 1
+    assert len(failed_pubs) == 1 and "invalid_payload" in failed_pubs[0][1]
+    assert tele_pubs == []
 
 
 def test_setup_mqtt_client_full_config(monkeypatch, capsys):
@@ -326,3 +290,34 @@ def test_telemetry_build_with_failing_helpers(monkeypatch):
     assert data["mem_free_kb"] is None
     assert data["disk_total_kb"] is None
     assert data["disk_free_kb"] is None
+
+
+# --- helpers for the secure sensors/set and registry/set behaviour ---------
+
+
+def _secure_final_ack(records):
+    """Last non-"acknowledged" ACK body among recorded publishes (any record shape)."""
+    last = None
+    for r in records:
+        topic, payload = (r["topic"], r["payload"]) if isinstance(r, dict) else (r[0], r[1])
+        if "/ack/" not in topic:
+            continue
+        body = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+        if isinstance(body, dict) and body.get("status") != "acknowledged":
+            last = body
+    return last
+
+
+class _RecordingRequests:
+    """A `requests` stand-in that records calls and refuses every one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, *a, **k):
+        self.calls.append(("POST", url))
+        raise AssertionError(f"hub must not POST to Home Assistant: {url}")
+
+    def get(self, url, *a, **k):
+        self.calls.append(("GET", url))
+        raise AssertionError(f"sensors/set must not call Home Assistant per entity: {url}")

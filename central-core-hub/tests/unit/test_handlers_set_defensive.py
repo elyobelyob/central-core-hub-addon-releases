@@ -39,62 +39,66 @@ class Msg:
         self.topic = topic
 
 
-def test_set_post_exception_results_failed():
+def test_set_write_form_never_posts():
     client = DummyClient()
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
     payload = json.dumps({"command_id": "t1", "payload": {"sensors": [{"entity_id": "sensor.x", "state": "on"}]}})
-
-    class BadReq:
-        @staticmethod
-        def post(url, headers=None, json=None, timeout=None):
-            raise RuntimeError("boom-post")
-
-    handlers.handle_message(client, Msg(topic), payload, None, None, None, requests=BadReq)
-
-    # Find completion ack and assert failed entry contains our error
-    comp = None
-    for t, p, qos in client.published:
-        try:
-            o = json.loads(p)
-        except Exception:
-            continue
-        if o.get("status") == "completed":
-            comp = o
-            break
-    assert comp is not None
-    res = comp.get("result") or {}
-    failed = res.get("failed") or []
-    assert any("boom-post" in f.get("reason", "") for f in failed)
+    req = _RecordingRequests()
+    handlers.handle_message(client, Msg(topic), payload, None, None, None, requests=req)
+    assert req.calls == []
+    comp = _secure_final_ack(client.published)
+    assert comp["status"] == "failed" and comp["result"]["reason"] == "invalid_payload"
 
 
-def test_set_list_with_missing_entity_id_skipped():
+def test_set_list_with_missing_entity_id_is_refused():
     client = DummyClient()
-    # Simulate no HA config so set operations are marked failed
     client.ha_api_url = None
     client.ha_api_token = None
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
     payload = json.dumps(
-        {
-            "command_id": "t2",
-            "payload": {"sensors": [{"state": "on"}, {"entity_id": "sensor.y", "state": "off"}]},
-        }
+        {"command_id": "t2", "payload": {"sensors": [{"state": "on"}, {"entity_id": "sensor.y", "state": "off"}]}}
     )
-
     handlers.handle_message(client, Msg(topic), payload, None, None, None)
+    comp = _secure_final_ack(client.published)
+    assert comp["status"] == "failed" and comp["result"] == {"reason": "invalid_payload"}
 
-    # Ensure the item without entity_id was skipped; completion ack should exist
-    comp = None
-    for t, p, qos in client.published:
-        try:
-            o = json.loads(p)
-        except Exception:
+
+def test_set_mixed_list_of_strings_and_objects_is_refused():
+    client = DummyClient()
+    topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
+    payload = json.dumps({"command_id": "t3", "payload": {"sensors": ["sensor.a", {"entity_id": "sensor.y", "state": "off"}]}})
+    req = _RecordingRequests()
+    handlers.handle_message(client, Msg(topic), payload, None, None, None, requests=req)
+    assert req.calls == []
+    assert _secure_final_ack(client.published)["result"]["reason"] == "invalid_payload"
+
+
+# --- helpers for the secure sensors/set and registry/set behaviour ---------
+
+
+def _secure_final_ack(records):
+    """Last non-"acknowledged" ACK body among recorded publishes (any record shape)."""
+    last = None
+    for r in records:
+        topic, payload = (r["topic"], r["payload"]) if isinstance(r, dict) else (r[0], r[1])
+        if "/ack/" not in topic:
             continue
-        if o.get("status") == "completed":
-            comp = o
-            break
-    assert comp is not None
-    res = comp.get("result") or {}
-    # since no HA config, results.failed should include the valid entity, and no entry for the missing one
-    failed = res.get("failed") or []
-    # the valid sensor should be in failed due to no_ha_config
-    assert any(f.get("entity_id") == "sensor.y" or f.get("reason") == "no_ha_config" for f in failed)
+        body = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+        if isinstance(body, dict) and body.get("status") != "acknowledged":
+            last = body
+    return last
+
+
+class _RecordingRequests:
+    """A `requests` stand-in that records calls and refuses every one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, *a, **k):
+        self.calls.append(("POST", url))
+        raise AssertionError(f"hub must not POST to Home Assistant: {url}")
+
+    def get(self, url, *a, **k):
+        self.calls.append(("GET", url))
+        raise AssertionError(f"sensors/set must not call Home Assistant per entity: {url}")

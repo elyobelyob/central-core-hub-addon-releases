@@ -22,8 +22,9 @@ def test_selected_sensor_changes_publish_on_change(monkeypatch):
     c = mc.CentralCoreClient({"client_id": "hub1", "ha_api_url": "http://ha", "ha_api_token": "tok"})
     # Ensure the module-level `requests` symbol is present so the
     # stricter runtime behavior in `publish_selected_sensor_changes`
-    # does not early-return during tests. Tests mock `fetch_sensors`
-    # directly; providing a dummy `requests` value is sufficient.
+    # does not early-return during tests. Tests mock `fetch_selected_sensors`
+    # (the by-id fetch used while the websocket is down); providing a dummy
+    # `requests` value is sufficient.
     monkeypatch.setattr(mc, "requests", object(), raising=False)
     publishes = []
     monkeypatch.setattr(
@@ -46,7 +47,7 @@ def test_selected_sensor_changes_publish_on_change(monkeypatch):
         },
         {"entity_id": "sensor.c", "state": "99", "attributes": {}},
     ]
-    monkeypatch.setattr(mc, "fetch_sensors", lambda url, token, safe_classes=None: sensors_first)
+    monkeypatch.setattr(mc, "fetch_selected_sensors", lambda url, token, ids: sensors_first)
 
     c.publish_selected_sensor_changes()
     assert len(publishes) == 1
@@ -74,7 +75,7 @@ def test_selected_sensor_changes_publish_on_change(monkeypatch):
             "attributes": {"friendly_name": "B", "disabled_by": None},
         },
     ]
-    monkeypatch.setattr(mc, "fetch_sensors", lambda url, token, safe_classes=None: sensors_second)
+    monkeypatch.setattr(mc, "fetch_selected_sensors", lambda url, token, ids: sensors_second)
     c.publish_selected_sensor_changes()
     assert len(publishes) == 2
     payload2 = publishes[-1]["payload"]

@@ -12,14 +12,28 @@ import threading
 import time
 import traceback
 import typing
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
-# Safe device classes allowed for sensor inclusion.
-# Sensors with device_class values in this set are considered safe for telemetry.
-# Sensors with device_class values NOT in this set are filtered out.
-# Sensors without a device_class attribute are excluded.
-SAFE_DEVICE_CLASSES = {"motion", "door", "battery", "occupancy", "presence", "opening"}
+try:
+    import ha_safety as _safety
+except ImportError:  # loaded by path without the add-on directory on sys.path
+    import importlib.util as _ilu
+    import pathlib as _pl
+    import sys as _sys
+
+    _spec = _ilu.spec_from_file_location("ha_safety", str(_pl.Path(__file__).with_name("ha_safety.py")))
+    assert _spec is not None and _spec.loader is not None
+    _safety = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_safety)
+    _sys.modules["ha_safety"] = _safety
+
+# re-exported for callers of ha_client
+SELECTABLE_DOMAINS = _safety.SELECTABLE_DOMAINS
+check_token_transport = _safety.check_token_transport
+is_selectable_entity = _safety.is_selectable_entity
+is_valid_entity_id = _safety.is_valid_entity_id
+sanitize_attributes = _safety.sanitize_attributes
 
 # Path to the add-on options file. Tests can monkeypatch this variable to
 # redirect writes to a temporary location.
@@ -31,13 +45,12 @@ OPTIONS_PATH = "/data/options.json"
 _HA_VERSION_CACHE: typing.Optional[dict] = None
 
 # Get the local timezone for timestamp normalization
-_LOCAL_TZ = datetime.now().astimezone().tzinfo
 
 
 def _normalize_timestamp(ts_str: Optional[str]) -> Optional[str]:
-    """Normalize timestamp string to hub's local timezone ISO format.
+    """Normalize a timestamp string to UTC ISO format.
 
-    Parses ISO timestamp strings, ensures local timezone, and formats accordingly.
+    Parses ISO timestamp strings and converts them to UTC.
     If parsing fails, returns the original string.
     """
     if not ts_str:
@@ -46,12 +59,9 @@ def _normalize_timestamp(ts_str: Optional[str]) -> Optional[str]:
         # Handle 'Z' suffix by replacing with +00:00 for parsing
         dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
         if dt.tzinfo is None:
-            # Assume naive timestamps are in local timezone
-            dt = dt.replace(tzinfo=_LOCAL_TZ)
-        else:
-            # Convert aware timestamps to local timezone
-            dt = dt.astimezone(_LOCAL_TZ)
-        return dt.isoformat()
+            # A naive time is local, with that date's rules (DST included)
+            dt = dt.astimezone()
+        return dt.astimezone(timezone.utc).isoformat()
     except ValueError:
         return ts_str
 
@@ -135,7 +145,7 @@ def fetch_sensors(ha_api_url, ha_api_token, requests_mod=None):
             # Include both sensor.* and binary_sensor.* entities
             if ent_id and (ent_id.startswith("sensor.") or ent_id.startswith("binary_sensor.")):
                 # Return all sensors. Device class filtering is handled by vault/MQTT layer.
-                attrs = ent.get("attributes", {})
+                attrs = sanitize_attributes(ent.get("attributes"))
                 sensors.append(
                     {
                         "entity_id": ent_id,
@@ -160,6 +170,8 @@ def fetch_sensors_by_ids(ha_api_url, ha_api_token, entity_ids, requests_mod=None
         return None
     results = []
     for ent_id in entity_ids or []:
+        if not is_valid_entity_id(ent_id):
+            continue
         try:
             url = ha_api_url.rstrip("/") + f"/api/states/{ent_id}"
             headers = {
@@ -170,12 +182,13 @@ def fetch_sensors_by_ids(ha_api_url, ha_api_token, entity_ids, requests_mod=None
             r.raise_for_status()
             data = r.json()
             if data.get("entity_id"):
+                attrs = sanitize_attributes(data.get("attributes"))
                 results.append(
                     {
                         "entity_id": data.get("entity_id"),
                         "state": data.get("state"),
-                        "name": data.get("attributes", {}).get("friendly_name") or data.get("entity_id"),
-                        "attributes": data.get("attributes", {}) or {},
+                        "name": attrs.get("friendly_name") or data.get("entity_id"),
+                        "attributes": attrs,
                         "last_changed": _normalize_timestamp(data.get("last_changed")),
                         "last_updated": _normalize_timestamp(data.get("last_updated")),
                     }
@@ -208,22 +221,141 @@ class HAWebSocketListener:
         log_fn=None,
         selectors=None,
         on_ha_version=None,
+        on_snapshot=None,
     ):
         self.ha_api_url = ha_api_url
         self.ha_api_token = ha_api_token
         self.on_event = on_event
         self.on_ha_version = on_ha_version
+        # Called with the list of current states when a subscription starts
+        # (HA sends them all at once); falls back to on_event per entity.
+        self.on_snapshot = on_snapshot
         self.log_fn = log_fn or (lambda m: None)
         self.selectors = set(selectors or [])
         self._thread = None
         self._stop = threading.Event()
         self._ws = None
         self._prot_req_lock = threading.Lock()
+        # Held from id allocation until the message is sent, so messages leave
+        # in id order whichever thread sends them.
+        self._send_order_lock = threading.RLock()
         self._next_request_id = 3
         self._pending_requests: dict[int, dict[str, typing.Any]] = {}
+        # subscribe_entities state: the live subscription id, whether its
+        # initial snapshot has arrived, and the expanded state per entity
+        # (needed to apply HA's compressed diffs).
+        self._authed = False
+        self._sub_id = None
+        self._streaming = threading.Event()
+        self._states: dict[str, dict] = {}
 
     def update_selectors(self, selectors):
-        self.selectors = set(selectors or [])
+        """Watch a new set of entities; re-subscribes when connected."""
+        new = set(selectors or [])
+        if new == self.selectors:
+            return
+        self.selectors = new
+        self._subscribe()
+
+    def is_streaming(self):
+        """True while a subscription is live and has delivered its snapshot."""
+        return self._ws is not None and self._streaming.is_set()
+
+    def _send_command(self, payload):
+        """Send a command with the next message id. Ids are allocated and sent
+        under one lock because Home Assistant requires them to increase."""
+        ws = self._ws
+        if ws is None:
+            return None
+        with self._send_order_lock:
+            with self._prot_req_lock:
+                req_id = self._next_request_id
+                self._next_request_id += 1
+            message = dict(payload)
+            message["id"] = req_id
+            ws.send(json.dumps(message))
+        return req_id
+
+    def _subscribe(self):
+        """(Re)subscribe to state changes of the selected entities only."""
+        if self._ws is None or not self._authed:
+            return  # _run subscribes after authenticating
+        old = self._sub_id
+        self._sub_id = None
+        self._streaming.clear()
+        try:
+            if old is not None:
+                self._send_command({"type": "unsubscribe_events", "subscription": old})
+            self._states = {k: v for k, v in self._states.items() if k in self.selectors}
+            entity_ids = sorted(e for e in self.selectors if is_valid_entity_id(e))
+            if entity_ids:
+                self._sub_id = self._send_command({"type": "subscribe_entities", "entity_ids": entity_ids})
+            self._log(f"HA WS watching {len(entity_ids)} entities")
+        except Exception as exc:
+            self._log(f"HA WS subscribe failed: {exc}")
+
+    @staticmethod
+    def _iso_from_epoch(value):
+        if value is None:
+            return None
+        try:
+            return datetime.fromtimestamp(float(value), timezone.utc).isoformat()
+        except (TypeError, ValueError, OverflowError, OSError):
+            return None
+
+    def _expand_state(self, entity_id, compressed):
+        """A state dict from subscribe_entities' compressed form."""
+        last_changed = self._iso_from_epoch(compressed.get("lc"))
+        return {
+            "entity_id": entity_id,
+            "state": compressed.get("s"),
+            "attributes": dict(compressed.get("a") or {}),
+            "last_changed": last_changed,
+            "last_updated": self._iso_from_epoch(compressed.get("lu")) or last_changed,
+        }
+
+    def _apply_diff(self, base, diff):
+        """Apply a subscribe_entities change ({"+": additions, "-": removals})."""
+        state = dict(base)
+        attrs = dict(base.get("attributes") or {})
+        plus = diff.get("+") or {}
+        minus = diff.get("-") or {}
+        if "s" in plus:
+            state["state"] = plus["s"]
+        if "lc" in plus:
+            state["last_changed"] = state["last_updated"] = self._iso_from_epoch(plus["lc"])
+        elif "lu" in plus:
+            state["last_updated"] = self._iso_from_epoch(plus["lu"])
+        attrs.update(plus.get("a") or {})
+        for key in minus.get("a") or []:
+            attrs.pop(key, None)
+        state["attributes"] = attrs
+        return state
+
+    def _handle_entities_event(self, event):
+        added = event.get("a")
+        if isinstance(added, dict):
+            snapshot = []
+            for eid, compressed in added.items():
+                st = self._expand_state(eid, compressed or {})
+                self._states[eid] = st
+                snapshot.append(st)
+            self._streaming.set()
+            if callable(self.on_snapshot):
+                self.on_snapshot(snapshot)
+            elif self.on_event:
+                for st in snapshot:
+                    self.on_event(st["entity_id"], st)
+        for eid, diff in (event.get("c") or {}).items():
+            base = self._states.get(eid)
+            if base is None:
+                continue
+            st = self._apply_diff(base, diff or {})
+            self._states[eid] = st
+            if self.on_event:
+                self.on_event(eid, st)
+        for eid in event.get("r") or []:
+            self._states.pop(eid, None)
 
     def _ws_url(self):
         base = (self.ha_api_url or "").strip().rstrip("/")
@@ -333,17 +465,18 @@ class HAWebSocketListener:
         }
         if service_data:
             payload["service_data"] = dict(service_data)
-        try:
-            req_id, event = self._register_request()
-        except Exception:
-            return None
-        payload["id"] = req_id
-        try:
-            self._send_json(self._ws, payload)
-        except Exception:
-            with self._prot_req_lock:
-                self._pending_requests.pop(req_id, None)
-            return None
+        with self._send_order_lock:
+            try:
+                req_id, event = self._register_request()
+            except Exception:
+                return None
+            payload["id"] = req_id
+            try:
+                self._send_json(self._ws, payload)
+            except Exception:
+                with self._prot_req_lock:
+                    self._pending_requests.pop(req_id, None)
+                return None
         completed = event.wait(timeout)
         with self._prot_req_lock:
             final = self._pending_requests.pop(req_id, None)
@@ -359,18 +492,19 @@ class HAWebSocketListener:
         """
         if not self._ws:
             return None
-        try:
-            req_id, event = self._register_request()
-        except Exception:
-            return None
-        message = dict(payload)
-        message["id"] = req_id
-        try:
-            self._send_json(self._ws, message)
-        except Exception:
-            with self._prot_req_lock:
-                self._pending_requests.pop(req_id, None)
-            return None
+        with self._send_order_lock:
+            try:
+                req_id, event = self._register_request()
+            except Exception:
+                return None
+            message = dict(payload)
+            message["id"] = req_id
+            try:
+                self._send_json(self._ws, message)
+            except Exception:
+                with self._prot_req_lock:
+                    self._pending_requests.pop(req_id, None)
+                return None
         completed = event.wait(timeout)
         with self._prot_req_lock:
             final = self._pending_requests.pop(req_id, None)
@@ -490,15 +624,15 @@ class HAWebSocketListener:
                     if self._stop.wait(1.0):
                         break
                     continue
-                # Subscribe to state_changed events
-                self._send_json(
-                    self._ws,
-                    {"id": 1, "type": "subscribe_events", "event_type": "state_changed"},
-                )
                 try:
                     self._send_json(self._ws, {"id": 2, "type": "get_config"})
                 except Exception:
                     pass
+                # Watch only the selected entities (not every state change).
+                self._authed = True
+                self._sub_id = None
+                self._states = {}
+                self._subscribe()
 
                 last_ping = time.time()
                 while not self._stop.is_set():
@@ -531,6 +665,10 @@ class HAWebSocketListener:
                         continue
                     if msg.get("type") == "result":
                         req_id = msg.get("id")
+                        if req_id is not None and req_id == self._sub_id:
+                            if not msg.get("success", True):
+                                self._log(f"HA WS subscribe_entities refused: {msg.get('error')}")
+                            continue
                         if req_id == 2 and not ha_version_written:
                             try:
                                 res = msg.get("result") or {}
@@ -550,7 +688,17 @@ class HAWebSocketListener:
                         continue
                     if msg.get("type") != "event":
                         continue
-                    data = msg.get("event", {}).get("data", {}) or {}
+                    event = msg.get("event") or {}
+                    if "data" not in event:
+                        # subscribe_entities: only the live subscription counts
+                        if msg.get("id") is not None and msg.get("id") == self._sub_id:
+                            try:
+                                self._handle_entities_event(event)
+                            except Exception:
+                                traceback.print_exc()
+                        continue
+                    # state_changed event format
+                    data = event.get("data", {}) or {}
                     ent_id = data.get("entity_id")
                     if self.selectors and ent_id not in self.selectors:
                         continue
@@ -561,6 +709,9 @@ class HAWebSocketListener:
                         except Exception:
                             traceback.print_exc()
             finally:
+                self._authed = False
+                self._sub_id = None
+                self._streaming.clear()
                 try:
                     if self._ws:
                         try:
