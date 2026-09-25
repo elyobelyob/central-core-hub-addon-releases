@@ -279,6 +279,85 @@ def _handle_sensors_set(client, cmd, fetch_sensors):
     _send_ack(client, action, command_id, {"status": "completed", "result": result, "timestamp": now_iso})
 
 
+def _registry_token(client):
+    """The token registry/set must carry, or None when updates are disabled."""
+    token = getattr(client, "registry_token", None)
+    if not token:
+        opts = getattr(client, "options", None)
+        if isinstance(opts, dict):
+            token = opts.get("registry_token") or opts.get("registryToken")
+    if not token:
+        token = os.environ.get("REGISTRY_TOKEN")
+    return token if isinstance(token, str) and token else None
+
+
+def _valid_registry_doc(doc):
+    if not isinstance(doc, dict):
+        return False
+    if doc.get("registry_mode") not in (None, "allow", "deny", "ALLOW", "DENY"):
+        return False
+    entries = doc.get("entries", [])
+    if not isinstance(entries, list):
+        return False
+    return all(isinstance(e, dict) and isinstance(e.get("entity_id"), str) for e in entries)
+
+
+def _handle_registry_set(client, cmd):
+    """registry/set: replace the local SENSOR_REGISTRY (privacy allow/deny list).
+
+    Refused unless a registry token is configured (client.registry_token, the
+    `registry_token` option or REGISTRY_TOKEN) and the payload carries the same
+    token. The token itself is never written to the registry file.
+    """
+    import hmac
+    import pathlib
+    import tempfile
+
+    action = "registry/set"
+    command_id = cmd.get("command_id")
+    _send_ack(client, action, command_id, {"status": "acknowledged"})
+
+    def finish(result):
+        status = "completed" if result.get("success") else "failed"
+        _send_ack(client, action, command_id, {"status": status, "result": result})
+
+    payload_obj = cmd.get("payload")
+    if not payload_obj:
+        return finish({"success": False, "reason": "missing_payload"})
+    expected = _registry_token(client)
+    if expected is None:
+        return finish({"success": False, "reason": "registry_updates_disabled"})
+    provided = payload_obj.get("token") if isinstance(payload_obj, dict) else None
+    if not isinstance(provided, str) or not hmac.compare_digest(provided.encode(), expected.encode()):
+        return finish({"success": False, "reason": "auth_failed"})
+    doc = {k: v for k, v in payload_obj.items() if k != "token"}
+    if not _valid_registry_doc(doc):
+        return finish({"success": False, "reason": "invalid_registry"})
+
+    try:
+        import mqtt_client as _mc
+    except Exception:
+        _mc = None
+    target = getattr(_mc, "SENSOR_REGISTRY", None) if _mc is not None else None
+    target = pathlib.Path(str(target)) if target else pathlib.Path(__file__).parent / "SENSOR_REGISTRY_from_mqtt.json"
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode="w", dir=str(target.parent), delete=False) as tf:
+            tf.write(json.dumps(doc, indent=2))
+            tmpname = tf.name
+        pathlib.Path(tmpname).replace(target)
+    except Exception as e:
+        return finish({"success": False, "reason": str(e)})
+    for owner in (_mc, client):
+        reload_fn = getattr(owner, "reload_sensor_registry", None) if owner is not None else None
+        if callable(reload_fn):
+            try:
+                reload_fn()
+            except Exception:
+                pass
+    return finish({"success": True, "entries": len(doc.get("entries", []))})
+
+
 def handle_message(
     client,
     msg,
@@ -535,141 +614,17 @@ def handle_message(
             _handle_sensors_set(client, cmd, fetch_sensors)
             return
 
-        # Allow Vault to update the SENSOR_REGISTRY via MQTT command.
+        # Local override of the SENSOR_REGISTRY. The vault never sends this;
+        # it is refused unless a registry token is configured on the hub.
         expected_registry_set = f"hubs/{client.client_id}/v1/cmd/registry/set"
         if topic == expected_registry_set:
             try:
                 cmd = json.loads(payload_str) if payload_str and payload_str != "<binary>" else {}
             except Exception:
                 cmd = {}
-
-            command_id = cmd.get("command_id")
-            action = cmd.get("action") or "registry/set"
-            if command_id:
-                try:
-                    v1_ack = client.build_ack_topic(action, command_id)
-                except Exception:
-                    v1_ack = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
-                try:
-                    client._publish(v1_ack, json.dumps({"status": "acknowledged"}), qos=1)
-                except Exception:
-                    pass
-
-            payload_obj = None
-            try:
-                payload_obj = cmd.get("payload") if isinstance(cmd, dict) else None
-            except Exception:
-                payload_obj = None
-
-            result = {"success": False}
-            try:
-                # Import mqtt_client module to locate SENSOR_REGISTRY and reload helper
-                try:
-                    import mqtt_client as _mc
-                except Exception:
-                    _mc = None
-
-                if not payload_obj:
-                    result = {"success": False, "reason": "missing_payload"}
-                else:
-                    # Optional token-based validation: if an expected token is
-                    # configured on the client (or via env `REGISTRY_TOKEN`),
-                    # require the incoming payload to include the same token.
-                    try:
-                        expected_token = None
-                        # Prefer explicit attribute on the client
-                        expected_token = getattr(client, "registry_token", None)
-                    except Exception:
-                        expected_token = None
-                    try:
-                        if not expected_token:
-                            opts = getattr(client, "options", None)
-                            if isinstance(opts, dict):
-                                expected_token = opts.get("registry_token") or opts.get("registryToken")
-                    except Exception:
-                        pass
-                    try:
-                        if not expected_token:
-                            expected_token = os.environ.get("REGISTRY_TOKEN")
-                    except Exception:
-                        expected_token = None
-
-                    if expected_token:
-                        provided = None
-                        try:
-                            if isinstance(payload_obj, dict):
-                                provided = payload_obj.get("token")
-                        except Exception:
-                            provided = None
-                        if provided != expected_token:
-                            result = {"success": False, "reason": "auth_failed"}
-                            # Skip persisting the file when auth fails
-                            if command_id:
-                                try:
-                                    try:
-                                        v1_comp = client.build_ack_topic(action, command_id)
-                                    except Exception:
-                                        v1_comp = (
-                                            f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
-                                        )
-                                    comp_payload = {"status": "failed", "result": result}
-                                    client._publish(v1_comp, json.dumps(comp_payload), qos=1)
-                                except Exception:
-                                    pass
-                            # bail out early
-                            result = result
-                            # ensure we do not attempt the write below
-                            raise RuntimeError("auth_failed")
-                    # Atomic write: write to temp file in same dir and rename
-                    try:
-                        import tempfile
-                        import pathlib
-
-                        target = getattr(_mc, "SENSOR_REGISTRY", None) if _mc is not None else None
-                        if not target:
-                            # If module not importable, persist to a local handlers-registry file
-                            target = pathlib.Path(__file__).parent / "SENSOR_REGISTRY_from_mqtt.json"
-                        else:
-                            target = pathlib.Path(str(target))
-
-                        d = target.parent
-                        d.mkdir(parents=True, exist_ok=True)
-                        with tempfile.NamedTemporaryFile(mode="w", dir=str(d), delete=False) as tf:
-                            tf.write(json.dumps(payload_obj, indent=2))
-                            tmpname = tf.name
-                        # Use atomic rename
-                        pathlib.Path(tmpname).replace(target)
-                        # ask runtime to reload registry if helper exists
-                        try:
-                            if _mc is not None and hasattr(_mc, "reload_sensor_registry"):
-                                try:
-                                    _mc.reload_sensor_registry()
-                                except Exception:
-                                    pass
-                            # Also provide client-level hook
-                            if hasattr(client, "reload_sensor_registry"):
-                                try:
-                                    client.reload_sensor_registry()
-                                except Exception:
-                                    pass
-                        except Exception:
-                            pass
-                        result = {"success": True, "entries": len(payload_obj.get("entries", []))}
-                    except Exception as e:
-                        result = {"success": False, "reason": str(e)}
-            except Exception as e:
-                result = {"success": False, "reason": str(e)}
-
-            if command_id:
-                try:
-                    try:
-                        v1_comp = client.build_ack_topic(action, command_id)
-                    except Exception:
-                        v1_comp = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
-                    comp_payload = {"status": "completed" if result.get("success") else "failed", "result": result}
-                    client._publish(v1_comp, json.dumps(comp_payload), qos=1)
-                except Exception:
-                    pass
+            if not isinstance(cmd, dict):
+                cmd = {}
+            _handle_registry_set(client, cmd)
             return
     except Exception:
         traceback.print_exc()  # pragma: no cover
