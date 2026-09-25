@@ -128,6 +128,151 @@ def _run_update_command(client, action, command_id, run):
     _update_thread.start()
 
 
+def _utc_now_iso():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _ack_topic(client, action, command_id):
+    try:
+        return client.build_ack_topic(action, command_id)
+    except Exception:
+        return f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
+
+
+def _send_ack(client, action, command_id, payload):
+    if not command_id:
+        return
+    try:
+        client._publish(_ack_topic(client, action, command_id), json.dumps(payload), qos=1)
+    except Exception:
+        pass
+
+
+def _persist_selection(selected):
+    """Write the selection so it survives restarts (atomic replace)."""
+    import pathlib
+    import tempfile
+
+    try:
+        import mqtt_client as _mc
+    except Exception:
+        _mc = None
+    target = getattr(_mc, "SELECTED_SENSORS_FILE", None) if _mc is not None else None
+    target = pathlib.Path(str(target)) if target else pathlib.Path(__file__).parent / "SELECTED_SENSORS.json"
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode="w", dir=str(target.parent), delete=False) as tf:
+            tf.write(json.dumps(list(selected), indent=2))
+            tmpname = tf.name
+        pathlib.Path(tmpname).replace(target)
+    except Exception:
+        pass
+
+
+def _states_report(states):
+    """The per-entity maps the vault stores with a sensors/set completion."""
+    report = {
+        "data": {},
+        "raw": {},
+        "names": {},
+        "enabled": {},
+        "attributes": {},
+        "observed": {},
+        "device_classes": {},
+    }
+    for s in states:
+        ent = s.get("entity_id")
+        if not ent:
+            continue
+        attrs = s.get("attributes") or {}
+        report["data"][ent] = s.get("state")
+        report["raw"][ent] = s.get("state")
+        report["names"][ent] = attrs.get("friendly_name") or s.get("name") or ent
+        report["enabled"][ent] = not bool(attrs.get("disabled_by"))
+        report["attributes"][ent] = attrs
+        obs = s.get("last_changed") or s.get("last_updated")
+        report["observed"][ent] = _normalize_ts(obs) or datetime.now().astimezone().isoformat()
+        if attrs.get("device_class"):
+            report["device_classes"][ent] = attrs.get("device_class")
+    return report
+
+
+def _handle_sensors_set(client, cmd, fetch_sensors):
+    """sensors/set: replace the list of entities the hub watches.
+
+    The only accepted form is `{"sensors": ["sensor.a", ...]}` (what the vault
+    sends). The hub never writes state to Home Assistant: any other shape is
+    refused, and every id must be a well-formed entity id before it is kept.
+    """
+    import ha_client
+
+    action = "sensors/set"
+    command_id = cmd.get("command_id")
+    _send_ack(client, action, command_id, {"status": "acknowledged", "timestamp": _utc_now_iso()})
+
+    payload_obj = cmd.get("payload")
+    requested = payload_obj.get("sensors") if isinstance(payload_obj, dict) else None
+    if not isinstance(requested, list) or not all(isinstance(x, str) for x in requested):
+        _send_ack(
+            client,
+            action,
+            command_id,
+            {"status": "failed", "result": {"reason": "invalid_payload"}, "timestamp": _utc_now_iso()},
+        )
+        return
+
+    accepted, rejected = [], []
+    for ent in requested:
+        if ha_client.is_valid_entity_id(ent):
+            if ent not in accepted:
+                accepted.append(ent)
+        else:
+            rejected.append(ent)
+
+    try:
+        client.selected_sensors = list(accepted)
+    except Exception:
+        pass
+
+    # Report which of the watched entities Home Assistant has right now, so
+    # the vault can show the ones it cannot find.
+    states = []
+    try:
+        wanted = set(accepted)
+        states = [
+            s
+            for s in (fetch_sensors(getattr(client, "ha_api_url", None), getattr(client, "ha_api_token", None)) or [])
+            if s.get("entity_id") in wanted and _is_entity_allowed(s.get("entity_id"))
+        ]
+    except Exception:
+        states = []
+    report = _states_report(states)
+
+    now_iso = _utc_now_iso()
+    try:
+        if getattr(client, "vault_topic", None):
+            reminder = {
+                "schema_version": 1,
+                "client_id": client.client_id,
+                "timestamp": now_iso,
+                "selected_sensors": list(accepted),
+            }
+            client._publish(client.vault_topic, json.dumps(reminder), qos=0)
+    except Exception:
+        pass
+    _persist_selection(accepted)
+
+    result = {
+        "selected": list(accepted),
+        "sensors_reported": list(report["data"].keys()),
+        "count": len(report["data"]),
+        **report,
+    }
+    if rejected:
+        result["rejected"] = rejected
+    _send_ack(client, action, command_id, {"status": "completed", "result": result, "timestamp": now_iso})
+
+
 def handle_message(
     client,
     msg,
@@ -379,399 +524,9 @@ def handle_message(
                 cmd = json.loads(payload_str) if payload_str and payload_str != "<binary>" else {}
             except Exception:
                 cmd = {}
-
-            command_id = cmd.get("command_id")
-            action = cmd.get("action") or "sensors/set"
-            if command_id:
-                # Publish versioned ack only
-                v1_ack = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
-                ack_payload = {
-                    "status": "acknowledged",
-                    "timestamp": datetime.now().astimezone().isoformat().replace("+00:00", "Z"),
-                }
-                try:
-                    client._publish(v1_ack, json.dumps(ack_payload), qos=1)
-                except Exception:
-                    pass
-
-            sensors_to_set = []
-            try:
-                payload_obj = cmd.get("payload") if isinstance(cmd, dict) else None
-                if isinstance(payload_obj, dict):
-                    s = payload_obj.get("sensors")
-                    # Accept dict mapping entity_id->state
-                    if isinstance(s, dict):
-                        for ent, st in s.items():
-                            sensors_to_set.append({"entity_id": ent, "state": st})
-                    # New: accept a list of plain entity-id strings and treat
-                    # it as a selection (equivalent to sensors/poll). In this
-                    # case we store the selection and publish a vault
-                    # reminder, then respond with a completed ack.
-                    elif isinstance(s, list) and all(isinstance(x, str) for x in s):
-                        try:
-                            client.selected_sensors = list(s)
-                        except Exception:
-                            pass
-                        # make a stable 'selected' value for reminder/persist
-                        selected = getattr(client, "selected_sensors", None) or list(s)
-                        # Immediately publish current values for the selected sensors
-                        monitor_telemetry = None
-                        try:
-                            sensors = fetch_sensors(client.ha_api_url, client.ha_api_token) or []
-                            sensors = [
-                                si
-                                for si in sensors
-                                if si.get("entity_id") in selected and _is_entity_allowed(si.get("entity_id"))
-                            ]
-                            data_map = {}
-                            raw_map = {}
-                            names_map = {}
-                            enabled_map = {}
-                            attrs_map = {}
-                            for si in sensors:
-                                ent = si.get("entity_id")
-                                if not ent:
-                                    continue
-                                st = si.get("state")
-                                # preserve raw state
-                                raw_map[ent] = st
-                                # Do not normalize — preserve the exact HA-provided state
-                                val = st
-                                data_map[ent] = val
-                            for si in sensors:
-                                ent = si.get("entity_id")
-                                if not ent:
-                                    continue
-                                attrs = si.get("attributes", {}) or {}
-                                names_map[ent] = attrs.get("friendly_name") or si.get("name") or ent
-                                enabled_map[ent] = not bool(attrs.get("disabled_by"))
-                                attrs_map[ent] = attrs
-                            # build observed timestamps for selected sensors
-                            observed_map = {}
-                            device_classes_map = {}
-                            for si in sensors:
-                                ent = si.get("entity_id")
-                                if not ent:
-                                    continue
-                                obs = si.get("last_changed") or si.get("last_updated")
-                                obs = _normalize_ts(obs) or datetime.now().astimezone().isoformat()
-                                observed_map[ent] = obs
-                                # Extract device_class from attributes
-                                attrs = si.get("attributes", {}) or {}
-                                dc = attrs.get("device_class")
-                                if dc:
-                                    device_classes_map[ent] = dc
-
-                            now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-                            telemetry_payload = {
-                                "data": data_map,
-                                "raw": raw_map,
-                                "names": names_map,
-                                "attributes": attrs_map,
-                                "enabled": enabled_map,
-                                "observed": observed_map,
-                                "device_classes": device_classes_map,
-                                "timestamp": now_iso,
-                            }
-                            # Do not publish this to the general telemetry topic here;
-                            # instead attach the telemetry payload to the completion ACK
-                            monitor_telemetry = telemetry_payload
-                            try:
-                                import mqtt_client as _mc
-
-                                sent_list = list(data_map.keys())
-                                if sent_list:
-                                    _mc._log(f"Sensors monitor -> Sent sensors: {', '.join(sent_list)}")
-                                else:
-                                    _mc._log("Sensors monitor -> Sent sensors: none")
-                            except Exception:
-                                pass
-                        except Exception:
-                            pass
-                        # Publish reminder to vault if configured
-                        now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-                        try:
-                            if getattr(client, "vault_topic", None):
-                                reminder = {
-                                    "schema_version": 1,
-                                    "client_id": client.client_id,
-                                    "timestamp": now_iso,
-                                    "selected_sensors": list(selected),
-                                }
-                                client._publish(client.vault_topic, json.dumps(reminder), qos=0)
-                        except Exception:
-                            pass
-                        # Persist the selected sensors so they survive restarts
-                        try:
-                            import tempfile
-                            import pathlib
-
-                            try:
-                                import mqtt_client as _mc
-                            except Exception:
-                                _mc = None
-
-                            target = getattr(_mc, "SELECTED_SENSORS_FILE", None) if _mc is not None else None
-                            if not target:
-                                target = pathlib.Path(__file__).parent / "SELECTED_SENSORS.json"
-                            else:
-                                target = pathlib.Path(str(target))
-
-                            d = target.parent
-                            d.mkdir(parents=True, exist_ok=True)
-                            with tempfile.NamedTemporaryFile(mode="w", dir=str(d), delete=False) as tf:
-                                tf.write(json.dumps(list(selected), indent=2))
-                                tmpname = tf.name
-                            pathlib.Path(tmpname).replace(target)
-                        except Exception:
-                            pass
-                        # Send completion ack for sensors/set
-                        if command_id:
-                            try:
-                                v1_comp = client.build_ack_topic(action, command_id)
-                            except Exception:
-                                v1_comp = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
-                            # If we built monitor_telemetry above, include it in the
-                            # completion ACK so callers receive the current values
-                            mt = monitor_telemetry
-                            if mt:
-                                comp_payload = {
-                                    "status": "completed",
-                                    "result": {
-                                        "selected": list(s),
-                                        "sensors_reported": list(mt.get("data", {}).keys()),
-                                        "count": len(mt.get("data", {})),
-                                        "data": mt.get("data", {}),
-                                        "raw": mt.get("raw", {}),
-                                        "names": mt.get("names", {}),
-                                        "enabled": mt.get("enabled", {}),
-                                        "attributes": mt.get("attributes", {}),
-                                        "observed": mt.get("observed", {}),
-                                        "device_classes": mt.get("device_classes", {}),
-                                    },
-                                    "timestamp": now_iso,
-                                }
-                            else:
-                                comp_payload = {
-                                    "status": "completed",
-                                    "result": {"selected": list(s)},
-                                    "timestamp": now_iso,
-                                }
-                            try:
-                                client._publish(v1_comp, json.dumps(comp_payload), qos=1)
-                            except Exception:
-                                pass
-                        return
-                    # Accept list of dicts with entity_id/state
-                    elif isinstance(s, list):
-                        for item in s:
-                            if isinstance(item, dict) and item.get("entity_id"):
-                                sensors_to_set.append(item)
-            except Exception:  # pragma: no cover - defensive branch hard to reproduce in tests
-                sensors_to_set = []
-
-            results = {"set": [], "failed": []}
-            readback_values = {}
-            readback_attrs = {}
-            readback_observed = {}
-
-            for item in sensors_to_set:
-                ent = item.get("entity_id")
-                st = item.get("state")
-                if not ent:
-                    continue
-                try:
-                    if client.ha_api_url and client.ha_api_token and requests is not None:
-                        url = client.ha_api_url.rstrip("/") + f"/api/states/{ent}"
-                        headers = {
-                            "Authorization": f"Bearer {client.ha_api_token}",
-                            "Content-Type": "application/json",
-                        }
-                        body = {"state": st}
-                        r = requests.post(url, headers=headers, json=body, timeout=10)
-                        r.raise_for_status()
-                        if client.ha_readback_after_set:
-                            try:
-                                r2 = requests.get(url, headers=headers, timeout=10)
-                                r2.raise_for_status()
-                                data = r2.json()
-                                read_state = data.get("state")
-                                readback_values[ent] = read_state
-                                readback_attrs[ent] = data.get("attributes", {}) or {}
-                                # prefer HA-provided timestamps if available
-                                obs = data.get("last_changed") or data.get("last_updated")
-                                obs = _normalize_ts(obs) or datetime.now().astimezone().isoformat()
-                                readback_observed[ent] = obs
-                            except Exception:
-                                readback_values[ent] = st
-                                readback_attrs[ent] = {}
-                                readback_observed[ent] = datetime.now().astimezone().isoformat()
-                        else:
-                            readback_values[ent] = st
-                            readback_attrs[ent] = {}
-                            readback_observed[ent] = datetime.now().astimezone().isoformat()
-                        results["set"].append(ent)
-                    else:
-                        results["failed"].append({"entity_id": ent, "reason": "no_ha_config"})
-                except Exception as e:
-                    results["failed"].append({"entity_id": ent, "reason": str(e)})
-
-            now_iso = datetime.now().astimezone().isoformat().replace("+00:00", "Z")
-
-            data_map = None
-            attrs_map = {}
-            names_map = {}
-            enabled_map = {}
-            try:
-                data_map = {}
-                raw_map = {}
-                attrs_map = {}
-                for item in sensors_to_set:
-                    ent = item.get("entity_id")
-                    if ent and ent in results.get("set", []):
-                        st = readback_values.get(ent, item.get("state"))
-                        # preserve the raw state reported/readback; do not normalize
-                        raw_map[ent] = st
-                        val = st
-                        data_map[ent] = val
-                        attrs_map[ent] = readback_attrs.get(ent, {})
-                # build friendly-name and enabled maps from readback attributes
-                names_map = {}
-                enabled_map = {}
-                device_classes_map = {}
-                for ent in data_map.keys():
-                    attrs = readback_attrs.get(ent, {}) or {}  # pragma: no cover
-                    names_map[ent] = attrs.get("friendly_name") or ent  # pragma: no cover
-                    enabled_map[ent] = not bool(attrs.get("disabled_by"))  # pragma: no cover
-                    dc = attrs.get("device_class")  # pragma: no cover
-                    if dc:  # pragma: no cover
-                        device_classes_map[ent] = dc  # pragma: no cover
-
-                if data_map:  # pragma: no cover
-                    telemetry_payload = {
-                        "data": data_map,
-                        "raw": raw_map,
-                        "attributes": attrs_map,
-                        "names": names_map,
-                        "enabled": enabled_map,
-                        "observed": readback_observed,
-                        "device_classes": device_classes_map,
-                        "timestamp": now_iso,
-                    }
-                    try:
-                        client._publish(
-                            client.preferred_sensors_topic,
-                            json.dumps(telemetry_payload),
-                            qos=0,
-                        )
-                    except Exception:
-                        pass  # pragma: no cover
-                    # Remind Vault of the sensors that were set/readback.
-                    # If the client has a Vault-authoritative selection, prefer
-                    # that list; otherwise fall back to the data_map keys.
-                    try:
-                        if getattr(client, "vault_topic", None):
-                            selected = getattr(client, "selected_sensors", None) or list(data_map.keys())
-                            reminder = {
-                                "schema_version": 1,
-                                "client_id": client.client_id,
-                                "timestamp": now_iso,
-                                "selected_sensors": list(selected),
-                            }
-                            client._publish(client.vault_topic, json.dumps(reminder), qos=0)
-                    except Exception:
-                        pass  # pragma: no cover
-                    # Also publish an enhanced completion ACK including the
-                    # readback telemetry so callers receive immediate context
-                    # about the set operation when readback produced data.
-                    try:
-                        if command_id and data_map:
-                            try:
-                                v1_comp = client.build_ack_topic(action, command_id)
-                            except Exception:
-                                v1_comp = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
-                            comp_payload = {
-                                "status": "completed",
-                                "result": {
-                                    "set": results.get("set", []),
-                                    "failed": results.get("failed", []),
-                                    "sensors_reported": list(data_map.keys()),
-                                    "count": len(data_map),
-                                    "data": data_map,
-                                    "raw": raw_map,
-                                    "names": names_map,
-                                    "enabled": enabled_map,
-                                    "attributes": attrs_map,
-                                    "observed": readback_observed,
-                                    "device_classes": device_classes_map,
-                                },
-                                "timestamp": now_iso,
-                            }
-                            try:
-                                client._publish(v1_comp, json.dumps(comp_payload), qos=1)
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
-            except Exception:  # pragma: no cover - defensive branch hard to reproduce in tests
-                traceback.print_exc()  # pragma: no cover
-            # Ensure we attempt to publish telemetry and vault reminder even
-            # if the detailed data_map construction above raised an
-            # exception. This improves robustness and preserves expected
-            # publishes for tests and consumers that rely on a
-            # `preferred_sensors_topic` publication.
-            try:
-                # Only publish fallback telemetry if the real data_map wasn't
-                # constructed and published above.
-                if not data_map:
-                    telemetry_payload = {
-                        "data": {},
-                        "raw": {},
-                        "attributes": attrs_map,
-                        "names": names_map,
-                        "enabled": enabled_map,
-                        "observed": {},
-                        "timestamp": now_iso,
-                    }
-                    try:
-                        client._publish(client.preferred_sensors_topic, json.dumps(telemetry_payload), qos=0)
-                    except Exception:
-                        pass
-                try:
-                    if getattr(client, "vault_topic", None):
-                        selected = getattr(client, "selected_sensors", None) or list((data_map or {}).keys())
-                        reminder = {
-                            "schema_version": 1,
-                            "client_id": client.client_id,
-                            "timestamp": now_iso,
-                            "selected_sensors": list(selected),
-                        }
-                        client._publish(client.vault_topic, json.dumps(reminder), qos=0)
-                except Exception:
-                    pass
-                # If we did not publish an enhanced completion earlier (i.e.
-                # there was no readback data), ensure we still publish a
-                # simple completion ACK with the results so callers receive
-                # an outcome for the set operation.
-                try:
-                    if command_id and not data_map:
-                        try:
-                            v1_comp = client.build_ack_topic(action, command_id)
-                        except Exception:
-                            v1_comp = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
-                        comp_payload = {
-                            "status": "completed",
-                            "result": results,
-                            "timestamp": now_iso,
-                        }
-                        try:
-                            client._publish(v1_comp, json.dumps(comp_payload), qos=1)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-            except Exception:
-                pass
+            if not isinstance(cmd, dict):
+                cmd = {}
+            _handle_sensors_set(client, cmd, fetch_sensors)
             return
 
         # Allow Vault to update the SENSOR_REGISTRY via MQTT command.

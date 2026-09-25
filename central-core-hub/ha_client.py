@@ -8,12 +8,28 @@ Responsibilities:
 """
 
 import json
+import re
 import threading
 import time
 import traceback
 import typing
 from datetime import datetime
 from typing import Optional
+
+# Home Assistant entity ids are `<domain>.<object_id>`, lower case letters,
+# digits and underscores only. Anything else (`/`, `..`, `?`, `%`, upper case)
+# is refused before an id is ever placed in a Home Assistant URL.
+_ENTITY_ID_RE = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
+_ENTITY_ID_MAX_LEN = 255
+
+
+def is_valid_entity_id(entity_id) -> bool:
+    """True only for a well-formed Home Assistant entity id."""
+    return (
+        isinstance(entity_id, str)
+        and len(entity_id) <= _ENTITY_ID_MAX_LEN
+        and _ENTITY_ID_RE.fullmatch(entity_id) is not None
+    )
 
 # Safe device classes allowed for sensor inclusion.
 # Sensors with device_class values in this set are considered safe for telemetry.
@@ -160,6 +176,8 @@ def fetch_sensors_by_ids(ha_api_url, ha_api_token, entity_ids, requests_mod=None
         return None
     results = []
     for ent_id in entity_ids or []:
+        if not is_valid_entity_id(ent_id):
+            continue
         try:
             url = ha_api_url.rstrip("/") + f"/api/states/{ent_id}"
             headers = {
