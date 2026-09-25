@@ -13,11 +13,10 @@ import threading
 import traceback
 from datetime import datetime, timezone
 
-_LOCAL_TZ = datetime.now().astimezone().tzinfo
 
 
 def _normalize_ts(ts_str):
-    """Normalize a HA timestamp to hub's local timezone ISO format.
+    """Normalize a HA timestamp to UTC ISO format.
 
     Returns ts_str unchanged if it is not a parseable string.
     """
@@ -26,10 +25,8 @@ def _normalize_ts(ts_str):
     try:
         dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=_LOCAL_TZ)
-        else:
-            dt = dt.astimezone(_LOCAL_TZ)
-        return dt.isoformat()
+            dt = dt.astimezone()
+        return dt.astimezone(timezone.utc).isoformat()
     except ValueError:
         return ts_str
 

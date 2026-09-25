@@ -45,13 +45,12 @@ OPTIONS_PATH = "/data/options.json"
 _HA_VERSION_CACHE: typing.Optional[dict] = None
 
 # Get the local timezone for timestamp normalization
-_LOCAL_TZ = datetime.now().astimezone().tzinfo
 
 
 def _normalize_timestamp(ts_str: Optional[str]) -> Optional[str]:
-    """Normalize timestamp string to hub's local timezone ISO format.
+    """Normalize a timestamp string to UTC ISO format.
 
-    Parses ISO timestamp strings, ensures local timezone, and formats accordingly.
+    Parses ISO timestamp strings and converts them to UTC.
     If parsing fails, returns the original string.
     """
     if not ts_str:
@@ -60,12 +59,9 @@ def _normalize_timestamp(ts_str: Optional[str]) -> Optional[str]:
         # Handle 'Z' suffix by replacing with +00:00 for parsing
         dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
         if dt.tzinfo is None:
-            # Assume naive timestamps are in local timezone
-            dt = dt.replace(tzinfo=_LOCAL_TZ)
-        else:
-            # Convert aware timestamps to local timezone
-            dt = dt.astimezone(_LOCAL_TZ)
-        return dt.isoformat()
+            # A naive time is local, with that date's rules (DST included)
+            dt = dt.astimezone()
+        return dt.astimezone(timezone.utc).isoformat()
     except ValueError:
         return ts_str
 
