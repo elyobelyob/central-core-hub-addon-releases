@@ -363,56 +363,34 @@ _SENSOR_REGISTRY_DOC_MTIME = None
 
 
 def _load_sensor_registry():
-    """Read and parse the SENSOR_REGISTRY.yaml file.
+    """Registry entries (entity_id, type, provide, attributes, device_class).
 
-    Returns a list of registry entry dicts (with keys: entity_id, type, provide)
-    or an empty list if the registry is not present, malformed, or not
-    opted-in.
+    Empty when the registry is absent, malformed, or not opted in. Built from
+    the cached document (_load_sensor_registry_doc), so the file is parsed
+    once per change.
     """
+    global _SENSOR_REGISTRY_CACHE, _SENSOR_REGISTRY_MTIME
     try:
-        import yaml
-
-        # Use mtime-based caching to avoid re-parsing the file every call.
-        global _SENSOR_REGISTRY_CACHE, _SENSOR_REGISTRY_MTIME
-        if not SENSOR_REGISTRY.exists():
-            _SENSOR_REGISTRY_CACHE = []
-            _SENSOR_REGISTRY_MTIME = None
-            return []
-        try:
-            mtime = SENSOR_REGISTRY.stat().st_mtime
-        except Exception:
-            mtime = None
-        if _SENSOR_REGISTRY_CACHE is not None and mtime is not None and mtime == _SENSOR_REGISTRY_MTIME:
+        doc = _load_sensor_registry_doc()
+        if _SENSOR_REGISTRY_CACHE is not None and _SENSOR_REGISTRY_MTIME == _SENSOR_REGISTRY_DOC_MTIME and doc:
             return _SENSOR_REGISTRY_CACHE
-        with open(SENSOR_REGISTRY, "r") as f:
-            doc = yaml.safe_load(f) or {}
-        if not isinstance(doc, dict):
-            _SENSOR_REGISTRY_CACHE = []
-            _SENSOR_REGISTRY_MTIME = mtime
-            return []
-        mode = doc.get("registry_mode")
-        apply_registry = bool(doc.get("apply_registry", False))
-        if mode is None and not apply_registry:
-            _SENSOR_REGISTRY_CACHE = []
-            _SENSOR_REGISTRY_MTIME = mtime
-            return []
-        entries = doc.get("entries") or []
         results = []
-        for e in entries:
-            if not isinstance(e, dict):
-                continue
-            results.append(
-                {
-                    "entity_id": e.get("entity_id"),
-                    "type": e.get("type"),
-                    "provide": e.get("provide"),
-                    # optional metadata which may include device_class
-                    "attributes": e.get("attributes") or {},
-                    "device_class": e.get("device_class"),
-                }
-            )
+        if doc and (doc.get("registry_mode") is not None or bool(doc.get("apply_registry", False))):
+            for e in doc.get("entries") or []:
+                if not isinstance(e, dict):
+                    continue
+                results.append(
+                    {
+                        "entity_id": e.get("entity_id"),
+                        "type": e.get("type"),
+                        "provide": e.get("provide"),
+                        # optional metadata which may include device_class
+                        "attributes": e.get("attributes") or {},
+                        "device_class": e.get("device_class"),
+                    }
+                )
         _SENSOR_REGISTRY_CACHE = results
-        _SENSOR_REGISTRY_MTIME = mtime
+        _SENSOR_REGISTRY_MTIME = _SENSOR_REGISTRY_DOC_MTIME
         return results
     except Exception:
         return []
@@ -449,9 +427,11 @@ def _load_sensor_registry_doc():
 
 def reload_sensor_registry():
     """Invalidate any cached sensor registry so subsequent calls read disk."""
-    global _SENSOR_REGISTRY_CACHE, _SENSOR_REGISTRY_MTIME
+    global _SENSOR_REGISTRY_CACHE, _SENSOR_REGISTRY_MTIME, _SENSOR_REGISTRY_DOC_CACHE, _SENSOR_REGISTRY_DOC_MTIME
     _SENSOR_REGISTRY_CACHE = None
     _SENSOR_REGISTRY_MTIME = None
+    _SENSOR_REGISTRY_DOC_CACHE = None
+    _SENSOR_REGISTRY_DOC_MTIME = None
 
     # Immediately reload and log what we're monitoring so operators can see
     # the active sensor set when a runtime update occurs.
@@ -991,17 +971,8 @@ def fetch_sensors(ha_api_url, ha_api_token, _safe_device_classes=None):
 
         import fnmatch
 
-        # obtain the registry_mode from the file top-level if present
-        mode = None
-        try:
-            with open(SENSOR_REGISTRY, "r") as _f:
-                import yaml as _yaml
-
-                _doc = _yaml.safe_load(_f) or {}
-                if isinstance(_doc, dict):
-                    mode = _doc.get("registry_mode")
-        except Exception:
-            mode = None
+        # registry_mode from the (cached) registry document
+        mode = (_load_sensor_registry_doc() or {}).get("registry_mode")
 
         active_mode = str(mode).lower() if mode else "deny"
 
