@@ -12,11 +12,12 @@ This add-on sends telemetry data to a configurable MQTT broker. You can set the 
 - **mqtt_port**: MQTT broker port (default: 1883)
 - **mqtt_username**: MQTT username (optional)
 - **mqtt_password**: MQTT password (optional)
-- **mqtt_tls**: Enable TLS (true/false)
+- **mqtt_tls**: Enable TLS (true/false). If TLS is on and cannot be set up (unreadable CA, bad certificate), the add-on does not connect rather than falling back to plaintext.
 - **mqtt_ca_cert**: CA certificate path (if TLS enabled)
 - **mqtt_client_cert**: Client certificate path (if TLS enabled)
 - **mqtt_client_key**: Client key path (if TLS enabled)
-- **client_id**: MQTT client ID (defaults to the HAOS hostname, lowercased and spaces replaced with dashes)
+- **client_id**: MQTT client ID and hub id in topics. Set it to the hub id the vault issued. When empty, the add-on uses the client certificate's CN, else the hostname (lowercased, spaces to dashes), and for generic hostnames such as `homeassistant` a random `hub-…` id saved in `/data/client_id`. The old default `home-assistant` is shared by every hub left at the default; it is still honoured but logged as a warning.
+- **debug_logging**: (optional) Log MQTT payloads (redacted, truncated to 300 characters). Off by default: logs carry topic, length and result code only.
 - **greeting**: Informational message (default: "Central Core Hub telemetry active.")
 
 ### Telemetry Topic and Payload
@@ -63,46 +64,28 @@ The add-on subscribes to Vault-style command topics and supports the following c
 	- Request: optional JSON payload with `command_id` and an optional `payload.sensors` list to request a subset.
 	- Behavior: publishes an immediate ACK to the versioned ACK topic `hubs/<client_id>/v1/ack/<action.replace('/', '.')>/<command_id>` (if `command_id` present), then publishes sensor telemetry to `hubs/<client_id>/telemetry/sensors`, and finally publishes a completion response with a result summary to the same versioned ACK topic.
 
-- `hubs/<client_id>/v1/cmd/sensors/set` (QoS 1)
-	- Request payload examples:
-
-		1) List form
+- `hubs/<client_id>/v1/cmd/sensors/set` (QoS 1): replace the list of entities the hub watches.
+	- Request (the only accepted form; it is what the vault sends):
 
 		```json
 		{
 			"command_id": "abc123",
 			"action": "sensors/set",
-			"payload": {
-				"sensors": [
-					{"entity_id": "sensor.temp", "state": "22.0"},
-					{"entity_id": "sensor.hum", "state": "43"}
-				]
-			}
-		}
-		```
-
-		2) Mapping form
-
-		```json
-		{
-			"command_id": "abc124",
-			"action": "sensors/set",
-			"payload": {
-				"sensors": {"sensor.temp": "22.0", "sensor.hum": "43"}
-			}
+			"payload": {"sensors": ["sensor.temp", "binary_sensor.front_door"]}
 		}
 		```
 
 	- Behavior:
-		- Immediately ACKs the command to the versioned ACK topic `hubs/<client_id>/v1/ack/<action.replace('/', '.')>/<command_id>` (QoS 1) if `command_id` present.
-		- For each requested sensor, attempts to set the state via the Home Assistant REST API (`POST /api/states/<entity_id>`). Requires `ha_api_url` and `ha_api_token` to be configured in add-on options.
-		- After a successful POST, the add-on performs a GET on the same entity (`GET /api/states/<entity_id>`) to read back the authoritative `state` and `attributes`.
-		- Publishes a completion response to the versioned ACK topic `hubs/<client_id>/v1/ack/<action.replace('/', '.')>/<command_id>` with a `result` containing `set` and `failed` lists.
-		- Publishes telemetry to `hubs/<client_id>/telemetry/sensors` using the authoritative readback values and attributes (if available).
+		- ACKs to `hubs/<client_id>/v1/ack/sensors.set/<command_id>`.
+		- Keeps ids that are well-formed (`^[a-z0-9_]+\.[a-z0-9_]+$`) `sensor.*` / `binary_sensor.*` entity ids; others are listed in `result.rejected`.
+		- Stores the list (it survives restarts) and re-subscribes the Home Assistant websocket to exactly these entities.
+		- Completes with `result.selected`, `result.sensors_reported` (those Home Assistant has now) and the current values.
+	- The add-on never writes state to Home Assistant. Any other payload shape (an `{entity_id: state}` map, a list of objects) gets a `failed` completion with reason `invalid_payload`.
 
-	- Notes:
-		- If HA is not configured, the command will report failures for targets and still ACK/complete if `command_id` is present.
-- Telemetry published after `sensors/set` contains both `data` and `attributes` so consumers see authoritative values and metadata (units, device_class, etc.).
+- `hubs/<client_id>/v1/cmd/registry/set` (QoS 1): replace the local SENSOR_REGISTRY. Refused (`registry_updates_disabled`) unless a registry token is configured (`registry_token` option or `REGISTRY_TOKEN`), and the payload must carry the same `token`.
+
+- All commands: retained messages, repeated `command_id`s, `command_id`s outside `^[A-Za-z0-9_.-]{1,64}$` and payloads over 64 KiB are ignored; a command whose `timestamp` is more than 10 minutes old gets a `failed` completion (`stale_command`). The ACK topic uses the action from the command topic.
+
 ### Config update command (Vault-driven)
 
 - `hubs/<client_id>/v1/cmd/config/update` (QoS 1)
@@ -115,8 +98,8 @@ The add-on subscribes to Vault-style command topics and supports the following c
 
 ### Home Assistant integration options
 
-- **ha_api_url**: Base URL of the Home Assistant instance (e.g. `http://homeassistant.local:8123`).
-- **ha_api_token**: Long-Lived Access Token to call the REST API (`POST`/`GET` on `/api/states`).
+- **ha_api_url**: Base URL of the Home Assistant instance, e.g. `http://localhost:8123`. Over plain `http://` the token is only sent to this machine (localhost, `homeassistant`, `supervisor`, or an address of this host); for any other host use `https://`, otherwise the add-on disables its Home Assistant integration and logs why.
+- **ha_api_token**: Long-Lived Access Token used to read states (`GET /api/states`, `GET /api/states/<entity_id>`) and for the websocket.
 - **safe_device_classes**: (Optional) List of device class types that are considered safe for telemetry. Sensors with a `device_class` attribute that is not in this list will be filtered out. Sensors without a `device_class` attribute are allowed through for backward compatibility. Default: `["temperature", "motion", "door", "battery", "occupancy", "presence", "opening", "aqi", "energy"]`.
 
   Example configuration:
