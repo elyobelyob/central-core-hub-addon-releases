@@ -6,6 +6,7 @@ import types
 import pytest
 
 import ha_client
+import ha_safety
 import handlers
 
 
@@ -35,7 +36,7 @@ SAFE_KEYS = {"friendly_name", "device_class", "unit_of_measurement"}
 
 
 def test_sanitize_attributes_strips_secrets_and_location():
-    out = ha_client.sanitize_attributes(SECRET_ATTRS)
+    out = ha_safety.sanitize_attributes(SECRET_ATTRS)
     assert set(out) == SAFE_KEYS
     # the input is not modified
     assert "access_token" in SECRET_ATTRS
@@ -43,7 +44,7 @@ def test_sanitize_attributes_strips_secrets_and_location():
 
 @pytest.mark.parametrize("value", [None, [], "x", 3])
 def test_sanitize_attributes_tolerates_non_dicts(value):
-    assert ha_client.sanitize_attributes(value) == {}
+    assert ha_safety.sanitize_attributes(value) == {}
 
 
 @pytest.mark.parametrize(
@@ -59,7 +60,7 @@ def test_sanitize_attributes_tolerates_non_dicts(value):
     ],
 )
 def test_is_selectable_entity(ent, ok):
-    assert ha_client.is_selectable_entity(ent) is ok
+    assert ha_safety.is_selectable_entity(ent) is ok
 
 
 def _client(tmp_path, monkeypatch):

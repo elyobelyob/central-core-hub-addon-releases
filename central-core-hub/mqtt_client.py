@@ -925,15 +925,15 @@ def get_cpu_percent():  # noqa: F811
 
 
 def _sanitize_attributes(attrs):
-    import ha_client
+    import ha_safety
 
-    return ha_client.sanitize_attributes(attrs)
+    return ha_safety.sanitize_attributes(attrs)
 
 
 def _is_selectable_entity(entity_id):
-    import ha_client
+    import ha_safety
 
-    return ha_client.is_selectable_entity(entity_id)
+    return ha_safety.is_selectable_entity(entity_id)
 
 
 def fetch_sensors(ha_api_url, ha_api_token, _safe_device_classes=None):
@@ -1088,6 +1088,19 @@ class CentralCoreClient:
             _log(f"WARNING: client_id {self.client_id!r} differs from the client certificate CN {cert_cn!r}")
         self.ha_api_url = options.get("ha_api_url") or ""
         self.ha_api_token = options.get("ha_api_token") or ""
+        if self.ha_api_url and self.ha_api_token:
+            import ha_safety
+
+            ok, why = ha_safety.check_token_transport(self.ha_api_url)
+            if not ok:
+                _log(
+                    f"ERROR: not sending the Home Assistant token over unencrypted {self.ha_api_url!r}: {why}. "
+                    "Use http://localhost:8123 (or https://). Home Assistant integration is disabled."
+                )
+                self.ha_api_url = ""
+                self.ha_api_token = ""
+            elif why != "encrypted" and why != "local name" and why != "local address":
+                _log(f"WARNING: Home Assistant URL {self.ha_api_url!r}: {why}")
         if options.get("debug_logging"):
             global _DEBUG_LOGGING
             _DEBUG_LOGGING = True

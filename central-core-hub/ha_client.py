@@ -8,7 +8,6 @@ Responsibilities:
 """
 
 import json
-import re
 import threading
 import time
 import traceback
@@ -16,65 +15,13 @@ import typing
 from datetime import datetime
 from typing import Optional
 
-# Home Assistant entity ids are `<domain>.<object_id>`, lower case letters,
-# digits and underscores only. Anything else (`/`, `..`, `?`, `%`, upper case)
-# is refused before an id is ever placed in a Home Assistant URL.
-_ENTITY_ID_RE = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
-_ENTITY_ID_MAX_LEN = 255
-
-
-def is_valid_entity_id(entity_id) -> bool:
-    """True only for a well-formed Home Assistant entity id."""
-    return (
-        isinstance(entity_id, str)
-        and len(entity_id) <= _ENTITY_ID_MAX_LEN
-        and _ENTITY_ID_RE.fullmatch(entity_id) is not None
-    )
-
-
-# The vault only watches sensors (its kept set is selected sensors plus their
-# battery sensors). Cameras, trackers, locks and the rest are never selectable.
-SELECTABLE_DOMAINS = ("sensor", "binary_sensor")
-
-
-def is_selectable_entity(entity_id) -> bool:
-    return is_valid_entity_id(entity_id) and entity_id.split(".", 1)[0] in SELECTABLE_DOMAINS
-
-
-# Attributes that must not leave the home: credentials (camera access tokens,
-# entity_picture URLs that embed them) and location.
-_SENSITIVE_ATTRIBUTES = frozenset(
-    {
-        "access_token",
-        "entity_picture",
-        "entity_picture_local",
-        "latitude",
-        "longitude",
-        "gps_accuracy",
-        "altitude",
-        "location",
-    }
+from ha_safety import (  # noqa: F401 - re-exported for callers of ha_client
+    SELECTABLE_DOMAINS,
+    check_token_transport,
+    is_selectable_entity,
+    is_valid_entity_id,
+    sanitize_attributes,
 )
-_SENSITIVE_ATTRIBUTE_PARTS = ("token", "password", "secret", "api_key", "apikey")
-
-
-def sanitize_attributes(attrs) -> dict:
-    """A copy of `attrs` without credentials or location."""
-    if not isinstance(attrs, dict):
-        return {}
-    clean = {}
-    for key, value in attrs.items():
-        k = str(key).lower()
-        if k in _SENSITIVE_ATTRIBUTES or any(part in k for part in _SENSITIVE_ATTRIBUTE_PARTS):
-            continue
-        clean[key] = value
-    return clean
-
-# Safe device classes allowed for sensor inclusion.
-# Sensors with device_class values in this set are considered safe for telemetry.
-# Sensors with device_class values NOT in this set are filtered out.
-# Sensors without a device_class attribute are excluded.
-SAFE_DEVICE_CLASSES = {"motion", "door", "battery", "occupancy", "presence", "opening"}
 
 # Path to the add-on options file. Tests can monkeypatch this variable to
 # redirect writes to a temporary location.

@@ -11,6 +11,7 @@ import types
 import pytest
 
 import ha_client
+import ha_safety
 import handlers
 
 
@@ -175,7 +176,7 @@ def test_empty_list_clears_selection(tmp_path, monkeypatch):
     ],
 )
 def test_is_valid_entity_id(ent, ok):
-    assert ha_client.is_valid_entity_id(ent) is ok
+    assert ha_safety.is_valid_entity_id(ent) is ok
 
 
 def test_fetch_by_ids_skips_invalid_ids():
