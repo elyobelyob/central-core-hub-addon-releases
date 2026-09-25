@@ -248,107 +248,57 @@ except Exception:
     requests = None
 
 
-try:
-    import central_core_mqtt_shared as mqtt_shared
-except Exception:
-    mqtt_shared = None
+class _FallbackTopics:
+    """The v1 topic templates of central_core_mqtt_shared.topics, used only if
+    that module cannot be found (a test keeps them equal to the package's)."""
 
-# Attempt to resolve `topics` from the shared package when available.
-topics: typing.Any = None
-if mqtt_shared is not None:
+    TELEMETRY_SYSTEM = "hubs/{hub_id}/v{version}/telemetry/system"
+    TELEMETRY_SENSORS = "hubs/{hub_id}/v{version}/telemetry/sensors"
+    CMD_GENERIC = "hubs/{hub_id}/v{version}/cmd/{domain}/{action}"
+    ACK_GENERIC = "hubs/{hub_id}/v{version}/ack/{command_name}/{command_id}"
+    STATUS_OFFLINE = "hubs/{hub_id}/v{version}/status/offline"
+
+    @staticmethod
+    def build_topic(tpl, **kwargs):
+        return tpl.format(**kwargs)
+
+
+def _load_topics_file(spec):
+    """Load topics.py from the package located by `spec`, without running the
+    package's __init__ (which imports aiohttp and websockets for its `ha`
+    module, ~160 ms and ~14 MB the hub does not need)."""
+    for location in spec.submodule_search_locations or []:
+        path = pathlib.Path(location) / "topics.py"
+        if not path.exists():
+            continue
+        file_spec = importlib.util.spec_from_file_location("_cc_shared_topics", str(path))
+        if file_spec is None or file_spec.loader is None:
+            continue
+        module = importlib.util.module_from_spec(file_spec)
+        file_spec.loader.exec_module(module)
+        return module
+    return None
+
+
+def _load_shared_topics():
+    """central_core_mqtt_shared.topics (already imported, or loaded on its own),
+    else the built-in templates."""
+    loaded = sys.modules.get("central_core_mqtt_shared.topics")
+    if loaded is not None:
+        return loaded
     try:
-        topics = getattr(mqtt_shared, "topics")
+        from importlib.machinery import PathFinder
+
+        spec = PathFinder.find_spec("central_core_mqtt_shared")
+        module = _load_topics_file(spec) if spec is not None else None
+        if module is not None:
+            return module
     except Exception:
-        try:
-            import importlib
+        pass
+    return _FallbackTopics
 
-            topics = importlib.import_module("central_core_mqtt_shared.topics")
-        except Exception:
-            topics = None
 
-# If the shared package (or its topics submodule) isn't available, prefer
-# a local `mqtt_topics.py` shim next to this file (used by tests), and
-# finally fall back to a minimal in-module shim.
-if topics is None:
-    try:
-        import importlib.util as _il
-
-        _local = pathlib.Path(__file__).parent / "mqtt_topics.py"
-        if _local.exists():
-            spec = _il.spec_from_file_location("local_mqtt_topics", str(_local))
-            if not spec or not getattr(spec, "loader", None):
-                raise RuntimeError("Could not load local mqtt_topics spec")
-            lm = _il.module_from_spec(spec)
-            spec.loader.exec_module(lm)  # type: ignore
-
-            class _LocalTopics:
-                TELEMETRY_SYSTEM = getattr(
-                    lm, "TELEMETRY_SYSTEM", getattr(lm, "TELEMETRY_TOPIC_TMPL", "telemetry/{client_id}")
-                )
-                TELEMETRY_SENSORS = getattr(
-                    lm,
-                    "TELEMETRY_SENSORS",
-                    getattr(lm, "PREFERRED_SENSORS_TOPIC_TMPL", "hubs/{hub_id}/telemetry/sensors"),
-                )
-                CMD_GENERIC = getattr(
-                    lm, "CMD_GENERIC", getattr(lm, "CMD_BASE_TMPL", "hubs/{hub_id}/v{version}/cmd/{domain}/{action}")
-                )
-                ACK_GENERIC = getattr(lm, "ACK_GENERIC", "hubs/{hub_id}/v{version}/ack/{command_name}/{command_id}")
-
-                @staticmethod
-                def build_topic(tpl, **kwargs):
-                    try:
-                        if isinstance(tpl, str):
-                            return tpl.format(**kwargs)
-                        return str(tpl)
-                    except Exception:
-                        # Best-effort: fallback to joining parts
-                        return str(tpl)
-
-            topics = _LocalTopics()
-        else:
-            # Final fallback: provide a tiny shim with sensible defaults
-            class _FallbackTopics:
-                TELEMETRY_SYSTEM = "hubs/{hub_id}/v{version}/telemetry/system"
-                TELEMETRY_SENSORS = "hubs/{hub_id}/v{version}/telemetry/sensors"
-                CMD_GENERIC = "hubs/{hub_id}/v{version}/cmd/{domain}/{action}"
-                ACK_GENERIC = "hubs/{hub_id}/v{version}/ack/{command_name}/{command_id}"
-
-                @staticmethod
-                def build_topic(tpl, **kwargs):
-                    try:
-                        if isinstance(tpl, str):
-                            return tpl.format(**kwargs)
-                        return str(tpl)
-                    except Exception:
-                        return str(tpl)
-
-            topics = _FallbackTopics()
-    except Exception:
-        # As a last-resort shim that never fails import.
-        class _EmptyTopics:
-            TELEMETRY_SYSTEM = "telemetry/{client_id}"
-            TELEMETRY_SENSORS = "hubs/{hub_id}/telemetry/sensors"
-            CMD_GENERIC = "hubs/{hub_id}/v{version}/cmd/{domain}/{action}"
-            ACK_GENERIC = "hubs/{hub_id}/v{version}/ack/{command_name}/{command_id}"
-
-            @staticmethod
-            def build_topic(tpl, **kwargs):
-                try:
-                    if isinstance(tpl, str):
-                        return tpl.format(**kwargs)
-                    return str(tpl)
-                except Exception:
-                    return str(tpl)
-
-        topics = _EmptyTopics()
-
-# If the environment requests strict enforcement, fail import when the
-# shared package is not available. This lets CI or production environments
-# opt into a strict policy while leaving development/tests permissive by
-# default. Set `STRICT_SHARED=1` or `REQUIRE_SHARED=1` to enable.
-if topics is None and os.environ.get("STRICT_SHARED", os.environ.get("REQUIRE_SHARED", "")):
-    raise ImportError("`central_core_mqtt_shared` is required in strict mode; install it or unset STRICT_SHARED")
+topics: typing.Any = _load_shared_topics()
 
 try:
     import paho.mqtt.client as mqtt
