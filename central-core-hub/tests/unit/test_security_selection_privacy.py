@@ -7,7 +7,13 @@ import pytest
 
 import ha_client
 import handlers
-import mqtt_client
+
+
+def _mc():
+    """The mqtt_client module handlers will import right now (tests may swap it)."""
+    import importlib
+
+    return importlib.import_module("mqtt_client")
 
 
 SECRET_ATTRS = {
@@ -57,7 +63,7 @@ def test_is_selectable_entity(ent, ok):
 
 
 def _client(tmp_path, monkeypatch):
-    monkeypatch.setattr(mqtt_client, "SELECTED_SENSORS_FILE", tmp_path / "sel.json")
+    monkeypatch.setattr(_mc(), "SELECTED_SENSORS_FILE", tmp_path / "sel.json")
     published = []
     c = types.SimpleNamespace(client_id="hub1", ha_api_url="http://ha", ha_api_token="tok", selected_sensors=[])
     c.build_ack_topic = lambda action, cid: f"hubs/hub1/v1/ack/{action.replace('/', '.')}/{cid}"
@@ -116,8 +122,8 @@ def test_sensors_poll_publishes_no_secret_attributes():
 
 
 def _real_client(monkeypatch, tmp_path):
-    monkeypatch.setattr(mqtt_client, "SELECTED_SENSORS_FILE", tmp_path / "sel.json")
-    c = mqtt_client.CentralCoreClient({"client_id": "hub1", "mqtt_host": "localhost"})
+    monkeypatch.setattr(_mc(), "SELECTED_SENSORS_FILE", tmp_path / "sel.json")
+    c = _mc().CentralCoreClient({"client_id": "hub1", "mqtt_host": "localhost"})
     sent = []
     monkeypatch.setattr(c, "_publish", lambda topic, payload, qos=0: sent.append((topic, json.loads(payload))))
     return c, sent
@@ -150,8 +156,8 @@ def test_fetch_sensors_sanitizes_attributes(monkeypatch):
                 {"entity_id": "camera.front", "state": "idle", "attributes": dict(SECRET_ATTRS)},
             ]
 
-    monkeypatch.setattr(mqtt_client, "requests", types.SimpleNamespace(get=lambda *a, **k: _R()))
-    out = mqtt_client.fetch_sensors("http://ha", "tok")
+    monkeypatch.setattr(_mc(), "requests", types.SimpleNamespace(get=lambda *a, **k: _R()))
+    out = _mc().fetch_sensors("http://ha", "tok")
     assert [s["entity_id"] for s in out] == ["sensor.a"]
     assert set(out[0]["attributes"]) == SAFE_KEYS
 

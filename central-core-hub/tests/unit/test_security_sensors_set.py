@@ -14,6 +14,13 @@ import ha_client
 import handlers
 
 
+def _mc():
+    """The mqtt_client module handlers will import right now (tests may swap it)."""
+    import importlib
+
+    return importlib.import_module("mqtt_client")
+
+
 class _Resp:
     def __init__(self, data, status=200):
         self._data = data
@@ -47,9 +54,7 @@ class _RecordingRequests:
 
 
 def _client(tmp_path, monkeypatch):
-    import mqtt_client
-
-    monkeypatch.setattr(mqtt_client, "SELECTED_SENSORS_FILE", tmp_path / "sel.json")
+    monkeypatch.setattr(_mc(), "SELECTED_SENSORS_FILE", tmp_path / "sel.json")
     published = []
 
     c = types.SimpleNamespace(
