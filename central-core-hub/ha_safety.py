@@ -33,7 +33,7 @@ _LOCAL_HA_HOSTNAMES = {"localhost", "homeassistant", "supervisor", "hassio"}
 def _resolve_host(host):
     import socket
 
-    return sorted({info[4][0] for info in socket.getaddrinfo(host, None)})
+    return sorted({str(info[4][0]) for info in socket.getaddrinfo(host, None)})
 
 
 def _is_local_address(ip):
