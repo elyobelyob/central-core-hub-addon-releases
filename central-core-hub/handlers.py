@@ -4,9 +4,11 @@ Message dispatch handlers extracted from `mqtt_client` to make the
 command lifecycles testable independently.
 """
 
+import collections
 import json
-import threading
 import os
+import re
+import threading
 import traceback
 from datetime import datetime, timezone
 
@@ -358,6 +360,95 @@ def _handle_registry_set(client, cmd):
     return finish({"success": True, "entries": len(doc.get("entries", []))})
 
 
+# Inbound command screening (see _accept_command).
+MAX_COMMAND_BYTES = 64 * 1024
+MAX_COMMAND_AGE_SECONDS = 600
+SEEN_COMMAND_IDS_MAX = 256
+_COMMAND_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+
+
+def _log(message):
+    try:
+        import mqtt_client as _mc
+
+        _mc._log(message)
+    except Exception:
+        print(message, flush=True)
+
+
+def _command_age_seconds(ts):
+    """Seconds since the command's `timestamp`, or None when absent/unreadable."""
+    try:
+        if isinstance(ts, bool):
+            return None
+        if isinstance(ts, (int, float)):
+            sent = datetime.fromtimestamp(float(ts), timezone.utc)
+        elif isinstance(ts, str) and ts:
+            sent = datetime.fromisoformat(ts.strip().replace("Z", "+00:00"))
+            if sent.tzinfo is None:
+                sent = sent.replace(tzinfo=timezone.utc)
+        else:
+            return None
+    except (ValueError, OverflowError, OSError):
+        return None
+    return (datetime.now(timezone.utc) - sent).total_seconds()
+
+
+def _accept_command(client, msg, payload_str):
+    """Decide whether an inbound command message is acted on at all.
+
+    Commands are not signed, so these checks only limit what a retained or
+    replayed message can do: retained messages, repeated command ids, commands
+    older than MAX_COMMAND_AGE_SECONDS (refused with a failed ACK), malformed
+    command ids and oversized payloads are dropped. A command without a
+    readable timestamp is accepted, and one from the "future" too, since a
+    hub clock can run behind.
+    """
+    topic = getattr(msg, "topic", "") or ""
+    prefix = f"hubs/{client.client_id}/v1/cmd/"
+    if not topic.startswith(prefix):
+        return False
+    action = topic[len(prefix):]
+    if getattr(msg, "retain", False) is True:
+        _log(f"Ignoring retained command on {topic}")
+        return False
+    size = len(payload_str.encode("utf-8", errors="replace")) if isinstance(payload_str, str) else 0
+    if size > MAX_COMMAND_BYTES:
+        _log(f"Ignoring command on {topic}: payload of {size} bytes is over {MAX_COMMAND_BYTES}")
+        return False
+    try:
+        cmd = json.loads(payload_str) if payload_str and payload_str != "<binary>" else {}
+    except Exception:
+        cmd = {}
+    if not isinstance(cmd, dict):
+        cmd = {}
+    command_id = cmd.get("command_id")
+    if command_id is not None and (not isinstance(command_id, str) or not _COMMAND_ID_RE.fullmatch(command_id)):
+        _log(f"Ignoring command on {topic}: malformed command_id")
+        return False
+    if command_id:
+        seen = getattr(client, "_seen_command_ids", None)
+        if seen is None:
+            seen = collections.OrderedDict()
+            try:
+                client._seen_command_ids = seen
+            except Exception:
+                pass
+        if command_id in seen:
+            _log(f"Ignoring repeated command {command_id} on {topic}")
+            return False
+        seen[command_id] = True
+        while len(seen) > SEEN_COMMAND_IDS_MAX:
+            seen.popitem(last=False)
+    age = _command_age_seconds(cmd.get("timestamp"))
+    if age is not None and age > MAX_COMMAND_AGE_SECONDS:
+        _log(f"Refusing stale command {command_id or ''} on {topic} ({int(age)}s old)")
+        _send_ack(client, action, command_id, {"status": "failed", "result": {"reason": "stale_command"},
+                                               "timestamp": _utc_now_iso()})
+        return False
+    return True
+
+
 def handle_message(
     client,
     msg,
@@ -385,6 +476,8 @@ def handle_message(
             requests = None
     try:
         topic = msg.topic
+        if not _accept_command(client, msg, payload_str):
+            return
         # Accept recent versioned command topics (v1)
         expected_config_topic = f"hubs/{client.client_id}/v1/cmd/config/update"
         if topic == expected_config_topic:
@@ -393,7 +486,7 @@ def handle_message(
             except Exception:
                 cmd = {}
             command_id = cmd.get("command_id")
-            action = cmd.get("action") or "config/update"
+            action = "config/update"
             if command_id:
                 try:
                     v1_ack = client.build_ack_topic(action, command_id)
@@ -424,7 +517,7 @@ def handle_message(
             except Exception:
                 cmd = {}
             command_id = cmd.get("command_id")
-            action = cmd.get("action") or "config/check_update"
+            action = "config/check_update"
             if command_id:
                 try:
                     client._publish(client.build_ack_topic(action, command_id),
@@ -442,7 +535,7 @@ def handle_message(
                 cmd = {}
 
             command_id = cmd.get("command_id")
-            action = cmd.get("action") or "sensors/poll"
+            action = "sensors/poll"
             if command_id:
                 # ACK topic: publish versioned ack only (remove legacy response)
                 try:
