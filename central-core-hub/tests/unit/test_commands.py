@@ -117,48 +117,16 @@ def test_handle_sensors_poll_command_ack_and_completion(monkeypatch):
     assert "enabled" in tele_payload and isinstance(tele_payload["enabled"].get("sensor.temp"), bool)
 
 
-def test_handle_sensors_set_command_calls_ha_and_responds(monkeypatch):
+def test_handle_sensors_set_list_of_dicts_is_refused_without_calling_ha(monkeypatch):
     mod = _load_client_module()
     CentralCoreClient = mod.CentralCoreClient
-    # capture posts
-    posts = []
+    req = _RecordingRequests()
+    monkeypatch.setattr(mod, "requests", req)
 
-    class FakeResp:
-        def __init__(self, data=None):
-            self._data = data or {}
-
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return self._data
-
-    def fake_post(url, headers=None, json=None, timeout=10):
-        posts.append({"url": url, "headers": headers, "json": json})
-        return FakeResp()
-
-    def fake_get(url, headers=None, timeout=10):
-        # return readback state matching the posted value in tests
-        if url.endswith("/api/states/sensor.temp"):
-            return FakeResp({"state": "22.0", "attributes": {"unit_of_measurement": "°C"}})
-        if url.endswith("/api/states/sensor.hum"):
-            return FakeResp({"state": "43", "attributes": {"unit_of_measurement": "%"}})
-        return FakeResp({"state": "unknown", "attributes": {}})
-
-    monkeypatch.setattr(
-        mod,
-        "requests",
-        type("R", (), {"post": staticmethod(fake_post), "get": staticmethod(fake_get)}),
-    )
-
-    options = {
-        "client_id": "unit-hub",
-        "ha_api_url": "http://ha",
-        "ha_api_token": "tok",
-    }
-    c = CentralCoreClient(options)
+    c = CentralCoreClient({"client_id": "unit-hub", "ha_api_url": "http://ha", "ha_api_token": "tok"})
     dummy = DummyClient()
     c._client = dummy
+    before = c.selected_sensors
 
     command = {
         "command_id": "set123",
@@ -171,91 +139,103 @@ def test_handle_sensors_set_command_calls_ha_and_responds(monkeypatch):
         },
     }
     topic = f"hubs/{c.client_id}/v1/cmd/sensors/set"
-    msg = DummyMsg(topic, json.dumps(command).encode("utf-8"))
+    c.on_message(None, None, DummyMsg(topic, json.dumps(command).encode("utf-8")))
 
-    c.on_message(None, None, msg)
-
-    # requests.post should be called for each sensor
-    assert len(posts) == 2
-    assert posts[0]["url"].endswith("/api/states/sensor.temp")
-    assert posts[1]["url"].endswith("/api/states/sensor.hum")
-
-    # ACK should be published to versioned ack topic
+    # no request of any kind reaches Home Assistant
+    assert req.calls == []
+    # ACK then a failed completion on the versioned ACK topic
     ack_topic = f"hubs/{c.client_id}/v1/ack/sensors.set/{command['command_id']}"
-    topics = [p["topic"] for p in dummy.published]
-    assert ack_topic in topics
-    # telemetry should be published to preferred sensors topic with data map
-    assert c.preferred_sensors_topic in topics
-    tele = json.loads(next(p["payload"] for p in dummy.published if p["topic"] == c.preferred_sensors_topic))
-    assert "data" in tele and "sensor.temp" in tele["data"] and "sensor.hum" in tele["data"]
-    # include name and enabled maps
-    assert "names" in tele and "sensor.temp" in tele["names"] and "sensor.hum" in tele["names"]
-    assert "enabled" in tele and isinstance(tele["enabled"].get("sensor.temp"), bool)
+    acks = [json.loads(p["payload"]) for p in dummy.published if p["topic"] == ack_topic]
+    assert [a["status"] for a in acks] == ["acknowledged", "failed"]
+    assert acks[-1]["result"]["reason"] == "invalid_payload"
+    # no telemetry is published and the selection is unchanged
+    assert c.preferred_sensors_topic not in [p["topic"] for p in dummy.published]
+    assert c.selected_sensors == before
 
 
-def test_handle_sensors_set_without_readback(monkeypatch):
-    """When `ha_readback_after_set` is false, the client should not GET readback values
-    and should publish telemetry using the requested state values."""
+def test_handle_sensors_set_string_list_reports_names_and_enabled(monkeypatch):
     mod = _load_client_module()
     CentralCoreClient = mod.CentralCoreClient
-    posts = []
-    get_called = {"count": 0}
-
-    class FakeResp:
-        def __init__(self, data=None):
-            self._data = data or {}
-
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return self._data
-
-    def fake_post(url, headers=None, json=None, timeout=10):
-        posts.append({"url": url, "headers": headers, "json": json})
-        return FakeResp()
-
-    def fake_get(url, headers=None, timeout=10):
-        get_called["count"] += 1
-        return FakeResp({"state": "unexpected", "attributes": {}})
-
+    req = _RecordingRequests()
+    monkeypatch.setattr(mod, "requests", req)
     monkeypatch.setattr(
         mod,
-        "requests",
-        type("R", (), {"post": staticmethod(fake_post), "get": staticmethod(fake_get)}),
+        "fetch_sensors",
+        lambda url, token, safe_classes=None: [
+            {"entity_id": "sensor.temp", "state": "22.0", "attributes": {"unit_of_measurement": "°C"}},
+            {"entity_id": "sensor.hum", "state": "43", "attributes": {"friendly_name": "Humidity"}},
+        ],
     )
-
-    options = {
-        "client_id": "unit-hub",
-        "ha_api_url": "http://ha",
-        "ha_api_token": "tok",
-        "ha_readback_after_set": False,
-    }
-    c = CentralCoreClient(options)
+    c = CentralCoreClient({"client_id": "unit-hub", "ha_api_url": "http://ha", "ha_api_token": "tok"})
     dummy = DummyClient()
     c._client = dummy
 
+    command = {"command_id": "set124", "action": "sensors/set", "payload": {"sensors": ["sensor.temp", "sensor.hum"]}}
+    c.on_message(None, None, DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(command).encode("utf-8")))
+
+    assert req.calls == []
+    assert c.selected_sensors == ["sensor.temp", "sensor.hum"]
+    comp = _secure_final_ack(dummy.published)
+    assert comp["status"] == "completed"
+    res = comp["result"]
+    assert res["data"] == {"sensor.temp": "22.0", "sensor.hum": "43"}
+    assert res["names"] == {"sensor.temp": "sensor.temp", "sensor.hum": "Humidity"}
+    assert isinstance(res["enabled"].get("sensor.temp"), bool)
+    assert res["attributes"]["sensor.temp"] == {"unit_of_measurement": "°C"}
+
+
+def test_handle_sensors_set_single_write_refused_even_without_readback(monkeypatch):
+    """ha_readback_after_set no longer matters: a write form is refused outright."""
+    mod = _load_client_module()
+    CentralCoreClient = mod.CentralCoreClient
+    req = _RecordingRequests()
+    monkeypatch.setattr(mod, "requests", req)
+
+    c = CentralCoreClient(
+        {"client_id": "unit-hub", "ha_api_url": "http://ha", "ha_api_token": "tok", "ha_readback_after_set": False}
+    )
+    dummy = DummyClient()
+    c._client = dummy
     command = {
         "command_id": "setno",
         "action": "sensors/set",
         "payload": {"sensors": [{"entity_id": "sensor.temp", "state": "22.5"}]},
     }
-    topic = f"hubs/{c.client_id}/v1/cmd/sensors/set"
-    msg = DummyMsg(topic, json.dumps(command).encode("utf-8"))
+    c.on_message(None, None, DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(command).encode("utf-8")))
 
-    c.on_message(None, None, msg)
+    assert req.calls == []
+    comp = _secure_final_ack(dummy.published)
+    assert comp["status"] == "failed" and comp["result"]["reason"] == "invalid_payload"
+    # the requested state never appears anywhere the hub publishes
+    assert not any("22.5" in str(p["payload"]) for p in dummy.published)
 
-    # POST should have been called
-    assert len(posts) == 1
-    # GET should NOT have been called because readback is disabled
-    assert get_called["count"] == 0
 
-    # Telemetry should be published using the requested state (preserve raw string)
-    assert c.preferred_sensors_topic in [p["topic"] for p in dummy.published]
-    tele = json.loads(next(p["payload"] for p in dummy.published if p["topic"] == c.preferred_sensors_topic))
-    assert "data" in tele
-    # value should preserve raw string from the request
-    assert tele["data"].get("sensor.temp") == "22.5"
-    # names and enabled should also be present
-    assert "names" in tele and "sensor.temp" in tele["names"]
-    assert "enabled" in tele and isinstance(tele["enabled"].get("sensor.temp"), bool)
+# --- helpers for the secure sensors/set and registry/set behaviour ---------
+
+
+def _secure_final_ack(records):
+    """Last non-"acknowledged" ACK body among recorded publishes (any record shape)."""
+    last = None
+    for r in records:
+        topic, payload = (r["topic"], r["payload"]) if isinstance(r, dict) else (r[0], r[1])
+        if "/ack/" not in topic:
+            continue
+        body = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+        if isinstance(body, dict) and body.get("status") != "acknowledged":
+            last = body
+    return last
+
+
+class _RecordingRequests:
+    """A `requests` stand-in that records calls and refuses every one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, *a, **k):
+        self.calls.append(("POST", url))
+        raise AssertionError(f"hub must not POST to Home Assistant: {url}")
+
+    def get(self, url, *a, **k):
+        self.calls.append(("GET", url))
+        raise AssertionError(f"sensors/set must not call Home Assistant per entity: {url}")

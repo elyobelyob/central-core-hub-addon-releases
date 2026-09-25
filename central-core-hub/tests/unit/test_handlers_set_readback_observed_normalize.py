@@ -1,6 +1,7 @@
 import importlib.util
 import pathlib
 import json
+from datetime import datetime, timezone
 
 
 def _load_handlers():
@@ -48,43 +49,50 @@ class _FakeResp:
         return self._data
 
 
-def test_readback_observed_timestamp_normalizes_plus00_to_Z():
+def test_list_observed_timestamp_is_normalized():
     client = DummyClient()
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
-    payload = json.dumps({"command_id": "c-time", "payload": {"sensors": [{"entity_id": "sensor.t", "state": "on"}]}})
+    req = _RecordingRequests()
 
-    class FakeReq:
-        @staticmethod
-        def post(url, headers=None, json=None, timeout=None):
-            return _FakeResp({})
+    def fetch(url, token):
+        return [{"entity_id": "sensor.t", "state": "on", "attributes": {}, "last_changed": "2025-12-17T10:00:00+00:00"}]
 
-        @staticmethod
-        def get(url, headers=None, timeout=None):
-            # HA returns last_changed with +00:00 timezone
-            return _FakeResp(
-                {
-                    "state": "on",
-                    "attributes": {},
-                    "last_changed": "2025-12-17T10:00:00+00:00",
-                }
-            )
+    payload = json.dumps({"command_id": "c-time", "payload": {"sensors": ["sensor.t"]}})
+    handlers.handle_message(client, Msg(topic), payload, fetch, None, None, requests=req)
+    assert req.calls == []
+    comp = _secure_final_ack(client.published)
+    observed = comp["result"]["observed"]["sensor.t"]
+    parsed = datetime.fromisoformat(observed.replace("Z", "+00:00"))
+    assert parsed.tzinfo is not None
+    assert parsed == datetime(2025, 12, 17, 10, 0, tzinfo=timezone.utc)
 
-    handlers.handle_message(client, Msg(topic), payload, None, None, None, requests=FakeReq)
 
-    # find completion ack and inspect observed timestamp
-    comp = None
-    for t, payload_str, qos in client.published:
-        try:
-            p = json.loads(payload_str)
-        except Exception:
+# --- helpers for the secure sensors/set and registry/set behaviour ---------
+
+
+def _secure_final_ack(records):
+    """Last non-"acknowledged" ACK body among recorded publishes (any record shape)."""
+    last = None
+    for r in records:
+        topic, payload = (r["topic"], r["payload"]) if isinstance(r, dict) else (r[0], r[1])
+        if "/ack/" not in topic:
             continue
-        if p.get("status") == "completed":
-            comp = p
-            break
-    assert comp is not None
-    observed = (comp.get("result", {}).get("observed") or {}).get("sensor.t")
-    if observed is not None:
-        assert observed.endswith("Z")
-    else:
-        # observed may be omitted in some fallback paths; at minimum ensure completion occurred
-        assert comp.get("status") == "completed"
+        body = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+        if isinstance(body, dict) and body.get("status") != "acknowledged":
+            last = body
+    return last
+
+
+class _RecordingRequests:
+    """A `requests` stand-in that records calls and refuses every one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, *a, **k):
+        self.calls.append(("POST", url))
+        raise AssertionError(f"hub must not POST to Home Assistant: {url}")
+
+    def get(self, url, *a, **k):
+        self.calls.append(("GET", url))
+        raise AssertionError(f"sensors/set must not call Home Assistant per entity: {url}")

@@ -75,44 +75,65 @@ def test__load_client_module_importerror(monkeypatch):
         _load_client_module()
 
 
-def test_on_message_binary_payload_and_set_no_ha_config(monkeypatch):
+def test_on_message_binary_payload_and_set_write_form_refused(monkeypatch):
     mc = _load_client_module()
     CentralCoreClient = mc.CentralCoreClient
-
-    # fetch_sensors returns one
     monkeypatch.setattr(
         mc,
         "fetch_sensors",
         lambda url, token, safe_classes=None: [{"entity_id": "sensor.x", "state": "1", "attributes": {}}],
     )
+    req = _RecordingRequests()
+    monkeypatch.setattr(mc, "requests", req)
 
-    options = {"client_id": "unit-hub"}  # no HA config
-    c = CentralCoreClient(options)
+    c = CentralCoreClient({"client_id": "unit-hub"})  # no HA config
     dummy = DummyClient()
     c._client = dummy
 
-    # Create a message whose payload.decode will raise to force '<binary>' branch
     class BadPayload:
         def decode(self, *a, **k):
             raise RuntimeError("bad")
 
-    msg = DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/poll", BadPayload())
-    # Should not raise
-    c.on_message(None, None, msg)
+    # a payload that cannot be decoded is handled without raising
+    c.on_message(None, None, DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/poll", BadPayload()))
 
-    # Now test sensors/set with no HA config -> results.failed should be reported
-    cmd = {
-        "command_id": "cid2",
-        "action": "sensors/set",
-        "payload": {"sensors": [{"entity_id": "sensor.x", "state": "2"}]},
-    }
-    msg2 = DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(cmd).encode("utf-8"))
-    c.on_message(None, None, msg2)
+    cmd = {"command_id": "cid2", "action": "sensors/set", "payload": {"sensors": [{"entity_id": "sensor.x", "state": "2"}]}}
+    c.on_message(None, None, DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(cmd).encode("utf-8")))
 
-    # find completion response using client's build_ack_topic
     resp_topic = c.build_ack_topic(cmd["action"], cmd["command_id"])
-    comps = [p for p in dummy.published if p["topic"] == resp_topic]
+    comps = [json.loads(p["payload"]) for p in dummy.published if p["topic"] == resp_topic]
     assert comps, "completion response not published"
-    comp_payload = json.loads(comps[-1]["payload"])
-    assert "result" in comp_payload
-    assert comp_payload["result"]["failed"]
+    assert comps[-1]["status"] == "failed"
+    assert comps[-1]["result"] == {"reason": "invalid_payload"}
+    assert req.calls == []
+
+
+# --- helpers for the secure sensors/set and registry/set behaviour ---------
+
+
+def _secure_final_ack(records):
+    """Last non-"acknowledged" ACK body among recorded publishes (any record shape)."""
+    last = None
+    for r in records:
+        topic, payload = (r["topic"], r["payload"]) if isinstance(r, dict) else (r[0], r[1])
+        if "/ack/" not in topic:
+            continue
+        body = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+        if isinstance(body, dict) and body.get("status") != "acknowledged":
+            last = body
+    return last
+
+
+class _RecordingRequests:
+    """A `requests` stand-in that records calls and refuses every one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, *a, **k):
+        self.calls.append(("POST", url))
+        raise AssertionError(f"hub must not POST to Home Assistant: {url}")
+
+    def get(self, url, *a, **k):
+        self.calls.append(("GET", url))
+        raise AssertionError(f"sensors/set must not call Home Assistant per entity: {url}")

@@ -51,6 +51,7 @@ def test_registry_auth_failure(monkeypatch):
 
 
 def test_registry_atomic_write_failure(monkeypatch, tmp_path):
+    """With a valid token, a failed atomic write is reported (and nothing else)."""
     handlers = load_handlers()
 
     published = []
@@ -62,8 +63,8 @@ def test_registry_atomic_write_failure(monkeypatch, tmp_path):
             return None
 
     monkeypatch.setitem(sys.modules, "mqtt_client", FakeMC)
+    monkeypatch.setenv("REGISTRY_TOKEN", "reg-token")
 
-    # make pathlib.Path.replace raise
     def _bad_replace(self, target):
         raise RuntimeError("atomic fail")
 
@@ -83,17 +84,40 @@ def test_registry_atomic_write_failure(monkeypatch, tmp_path):
                 published.append(payload)
 
     client = FakeClient()
-
     msg = SimpleNamespace()
     msg.topic = f"hubs/{client.client_id}/v1/cmd/registry/set"
-    payload = {"command_id": "c2", "payload": {"entries": []}}
+    payload = {"command_id": "c2", "payload": {"token": "reg-token", "entries": []}}
 
     handlers.handle_message(client, msg, json.dumps(payload), None, None, None)
 
-    # Expect a completed ack with result.success == False and reason mentioning 'atomic'
-    found = False
-    for obj in published:
-        res = obj.get("result", {})
-        if isinstance(res, dict) and not res.get("success") and "atomic" in (res.get("reason", "") or ""):
-            found = True
-    assert found
+    final = [o for o in published if isinstance(o, dict) and o.get("status") != "acknowledged"][-1]
+    assert final["status"] == "failed"
+    assert final["result"]["success"] is False
+    assert "atomic" in final["result"]["reason"]
+
+
+def test_registry_without_configured_token_is_refused(monkeypatch, tmp_path):
+    handlers = load_handlers()
+    published = []
+    target = tmp_path / "registry.json"
+
+    class FakeMC:
+        SENSOR_REGISTRY = str(target)
+
+    monkeypatch.setitem(sys.modules, "mqtt_client", FakeMC)
+    monkeypatch.delenv("REGISTRY_TOKEN", raising=False)
+
+    class FakeClient:
+        client_id = "test-client"
+
+        def build_ack_topic(self, action, cid):
+            return f"hubs/{self.client_id}/v1/ack/{action.replace('/', '.')}/{cid}"
+
+        def _publish(self, topic, payload, qos=0):
+            published.append(json.loads(payload))
+
+    msg = SimpleNamespace(topic="hubs/test-client/v1/cmd/registry/set")
+    handlers.handle_message(FakeClient(), msg, json.dumps({"command_id": "c3", "payload": {"entries": []}}), None, None, None)
+    final = [o for o in published if o.get("status") != "acknowledged"][-1]
+    assert final == {"status": "failed", "result": {"success": False, "reason": "registry_updates_disabled"}}
+    assert not target.exists()

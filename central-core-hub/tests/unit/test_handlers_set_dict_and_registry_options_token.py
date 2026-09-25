@@ -52,36 +52,17 @@ class _FakeResp:
         return self._data
 
 
-def test_sensors_set_accepts_dict_mapping_and_publishes_completion():
+def test_sensors_set_refuses_dict_mapping():
     client = DummyClient("unit-dict")
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
     payload = json.dumps({"command_id": "d1", "payload": {"sensors": {"sensor.a": "on"}}})
-
-    class FakeReq:
-        @staticmethod
-        def post(url, headers=None, json=None, timeout=None):
-            return _FakeResp({})
-
-    handlers.handle_message(client, Msg(topic), payload, None, None, None, requests=FakeReq)
-
-    comp = None
-    for t, p, qos in client.published:
-        try:
-            o = json.loads(p)
-        except Exception:
-            continue
-        if o.get("status") == "completed":
-            comp = o
-            break
-    assert comp is not None
-    res = comp.get("result") or {}
-    # results may be in result['set'] or detailed data_map - accept presence of entity
-    found = False
-    if isinstance(res.get("set"), list):
-        found = "sensor.a" in res.get("set")
-    if not found and isinstance(res.get("data"), dict):
-        found = "sensor.a" in res.get("data")
-    assert found
+    req = _RecordingRequests()
+    handlers.handle_message(client, Msg(topic), payload, None, None, None, requests=req)
+    assert req.calls == []
+    comp = _secure_final_ack(client.published)
+    assert comp["status"] == "failed"
+    assert comp["result"] == {"reason": "invalid_payload"}
+    assert "set" not in comp["result"] and "data" not in comp["result"]
 
 
 def test_registry_set_with_options_registryToken_writes_file_and_reloads(tmp_path):
@@ -128,3 +109,34 @@ def test_registry_set_with_options_registryToken_writes_file_and_reloads(tmp_pat
             sys.modules.pop("mqtt_client", None)
         else:
             sys.modules["mqtt_client"] = orig
+
+
+# --- helpers for the secure sensors/set and registry/set behaviour ---------
+
+
+def _secure_final_ack(records):
+    """Last non-"acknowledged" ACK body among recorded publishes (any record shape)."""
+    last = None
+    for r in records:
+        topic, payload = (r["topic"], r["payload"]) if isinstance(r, dict) else (r[0], r[1])
+        if "/ack/" not in topic:
+            continue
+        body = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+        if isinstance(body, dict) and body.get("status") != "acknowledged":
+            last = body
+    return last
+
+
+class _RecordingRequests:
+    """A `requests` stand-in that records calls and refuses every one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, *a, **k):
+        self.calls.append(("POST", url))
+        raise AssertionError(f"hub must not POST to Home Assistant: {url}")
+
+    def get(self, url, *a, **k):
+        self.calls.append(("GET", url))
+        raise AssertionError(f"sensors/set must not call Home Assistant per entity: {url}")
