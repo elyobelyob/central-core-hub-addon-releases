@@ -1998,7 +1998,12 @@ class CentralCoreClient:
             version = self._read_ha_version_from_options(opts_path)
 
         if not version:
-            version = self._fetch_ha_version_from_api()
+            # At most every 10 minutes: the websocket normally supplies it.
+            now = time.monotonic()
+            last = getattr(self, "_last_ha_version_fetch", None)
+            if last is None or now - last >= 600:
+                self._last_ha_version_fetch = now
+                version = self._fetch_ha_version_from_api()
 
         if version:
             try:
@@ -2058,30 +2063,18 @@ class CentralCoreClient:
         return None
 
     def publish_telemetry(self):
-        # Reload telemetry_interval from HA options if it changed so the
-        # published payload reflects the user-defined cadence.
-        try:
-            self._refresh_telemetry_interval_from_options()
-        except Exception:
-            pass
-        # Attempt to include Home Assistant core version learned via the
-        # websocket listener. The websocket writes `ha_version` into the
-        # add-on options file (path configurable via `ha_client.OPTIONS_PATH`).
+        # (run_iteration refreshes telemetry_interval from the options file.)
+        # Include the Home Assistant core version learned via the websocket
+        # listener (memory, then the options file, then a throttled REST call).
         ha_version = self._resolve_ha_version()
-        # Defensive fallback: always try a direct read of the add-on
-        # options file so telemetry includes `ha_version` even if the
-        # in-memory cache isn't yet populated (cheap and reliable).
-        if not ha_version:
-            try:
-                ha_version = self._read_ha_version_from_options(None)
-            except Exception:
-                ha_version = None
         ha_info = {"core": ha_version} if ha_version else None
+        if getattr(self, "_addon_version", None) is None:
+            self._addon_version = get_addon_version()
 
         payload = build_telemetry(
             self.client_id,
             **{
-                "version": get_addon_version(),
+                "version": self._addon_version,
                 "telemetry_interval": self.telemetry_interval,
                 "home_assistant": ha_info,
             },

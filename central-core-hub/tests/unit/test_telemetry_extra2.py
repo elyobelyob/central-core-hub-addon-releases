@@ -47,7 +47,7 @@ def test_build_telemetry_home_assistant_string():
     assert data.get("ha_version") == "2026.9.0"
 
 
-def test_build_telemetry_prefers_shared_schema_module(monkeypatch):
+def test_build_telemetry_does_not_use_shared_schema_module(monkeypatch):
     repo_root = Path(__file__).resolve().parents[3]
     tele_path = repo_root / "central-core-hub" / "telemetry.py"
 
@@ -66,8 +66,10 @@ def test_build_telemetry_prefers_shared_schema_module(monkeypatch):
 
     tele = _load_module(tele_path, "tele_test3")
     out = tele.build_telemetry("cid", get_cpu_percent=lambda: 1.0)
-    # Because fake model.json returns a JSON string with schema key
-    assert "schema" in out
+    # the hub's own payload is sent, not the schema model's rendering
+    data = json.loads(out)
+    assert "schema" not in data
+    assert data["cpu_percent"] == 1.0
 
 
 def test_build_vault_payload_and_invalid():
