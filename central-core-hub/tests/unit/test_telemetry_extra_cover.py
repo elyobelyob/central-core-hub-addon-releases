@@ -42,7 +42,9 @@ def test_build_telemetry_with_home_assistant_dict_and_string():
     assert data2.get("ha_version") == "2025.12.1"
 
 
-def test_build_telemetry_uses_shared_schema_when_available():
+def test_build_telemetry_ignores_shared_schema_model():
+    # The shared SystemTelemetry model (cpu/ram/uptime) does not describe the
+    # hub's payload; serialising through it would drop fields the vault reads.
     class FakeModel:
         def __init__(self, **kwargs):
             self._payload = kwargs
@@ -58,11 +60,14 @@ def test_build_telemetry_uses_shared_schema_when_available():
     sys.modules["central_core_mqtt_shared.schemas"] = fake_schemas
     try:
         t = load_telemetry()
-        out = t.build_telemetry("cid-schema")
+        out = t.build_telemetry("cid-schema", version="9.9.9", telemetry_interval=30)
         assert isinstance(out, str)
         j = json.loads(out)
-        assert j.get("from") == "fake-model"
-        assert j.get("id") == "cid-schema"
+        assert "from" not in j
+        assert j.get("client_id") == "cid-schema"
+        assert j.get("addon_version") == "9.9.9"
+        assert j.get("telemetry_interval") == 30
+        assert "cpu_percent" in j
     finally:
         sys.modules.pop("central_core_mqtt_shared.schemas", None)
         sys.modules.pop("central_core_mqtt_shared", None)
