@@ -570,17 +570,15 @@ def handle_message(
             # Always apply SENSOR_REGISTRY filtering at minimum
             sensors = [s for s in sensors if _is_entity_allowed(s.get("entity_id"))]
 
-            # Store the selected sensors (vault-requested device classes) for reminder messages
-            try:
-                client.selected_sensors = list(sensors_requested)
-            except Exception:
-                # don't let selection storage failure stop command handling
-                pass
-
-            # Filter sensors by device_class (vault sends device class names, not entity IDs)
-            requested_classes = {str(cls).lower().strip() for cls in sensors_requested if cls}
+            # Report the sensors whose device class or entity id was asked
+            # for. This is a one-off report: the watch list (selected_sensors)
+            # is only ever changed by sensors/set.
+            requested = {str(x).lower().strip() for x in sensors_requested if x}
             sensors = [
-                s for s in sensors if s.get("attributes", {}).get("device_class", "").lower() in requested_classes
+                s
+                for s in sensors
+                if s.get("entity_id") in requested
+                or str((s.get("attributes") or {}).get("device_class") or "").lower() in requested
             ]
 
             data_map = {}
