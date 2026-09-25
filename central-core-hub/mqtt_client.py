@@ -335,6 +335,11 @@ except Exception:
     mqtt = None
 
 OPTIONS_PATH = "/data/options.json"
+# Where a generated client id is kept when none is configured (see _derive_client_id).
+CLIENT_ID_FILE = pathlib.Path(os.environ.get("CLIENT_ID_FILE") or "/data/client_id")
+# Shipped as the default in earlier versions, so many hubs may share it.
+SHARED_DEFAULT_CLIENT_ID = "home-assistant"
+_GENERIC_HOSTNAMES = {"", "localhost", "homeassistant", "home-assistant", "hassio", "supervisor"}
 MQTT_OPTIONS_ENV = "MQTT_OPTIONS_PATH"
 SENSOR_REGISTRY = pathlib.Path(__file__).parent / "SENSOR_REGISTRY.yaml"
 
@@ -565,6 +570,54 @@ def is_entity_allowed(entity_id: str) -> bool:
         return True
     except Exception:
         return True
+
+
+def _certificate_common_name(cert_path):
+    """The subject CN of a PEM certificate file, or None."""
+    if not cert_path:
+        return None
+    try:
+        import ssl
+
+        decoded = ssl._ssl._test_decode_cert(str(cert_path))  # type: ignore[attr-defined]
+    except Exception:
+        return None
+    for rdn in decoded.get("subject", ()):
+        for key, value in rdn:
+            if key == "commonName" and value:
+                return str(value)
+    return None
+
+
+def _derive_client_id(cert_path=None):
+    """A client id for a hub whose client_id option is unset.
+
+    The vault issues each hub a certificate with CN = hub id, so that comes
+    first. Otherwise a specific hostname, and for generic ones (an HA OS host
+    is usually "homeassistant") a random id kept in CLIENT_ID_FILE so it
+    survives restarts and upgrades.
+    """
+    cn = _certificate_common_name(cert_path)
+    if cn:
+        return cn
+    host = (socket.gethostname() or "").strip().lower().replace(" ", "-")
+    if host not in _GENERIC_HOSTNAMES:
+        return host
+    try:
+        saved = CLIENT_ID_FILE.read_text().strip()
+        if saved:
+            return saved
+    except Exception:
+        pass
+    import secrets
+
+    generated = f"hub-{secrets.token_hex(6)}"
+    try:
+        CLIENT_ID_FILE.parent.mkdir(parents=True, exist_ok=True)
+        CLIENT_ID_FILE.write_text(generated + "\n")
+    except Exception:
+        _log(f"WARNING: could not save generated client_id to {CLIENT_ID_FILE}; it will change on restart")
+    return generated
 
 
 def get_addon_version():
@@ -1019,7 +1072,20 @@ class CentralCoreClient:
         self._temp_cert_files = []
         # Handle certificate content vs paths
         self._setup_cert_files()
-        self.client_id = options.get("client_id") or socket.gethostname().lower().replace(" ", "-")
+        configured_id = str(options.get("client_id") or "").strip()
+        if configured_id:
+            self.client_id = configured_id
+            if configured_id == SHARED_DEFAULT_CLIENT_ID:
+                _log(
+                    f"WARNING: client_id is the shared default {configured_id!r}; hubs using it receive "
+                    "each other's commands. Set a unique client_id (the vault's hub id)."
+                )
+        else:
+            self.client_id = _derive_client_id(self.mqtt_cert)
+            _log(f"client_id not set; using {self.client_id!r}")
+        cert_cn = _certificate_common_name(self.mqtt_cert)
+        if cert_cn and cert_cn != self.client_id:
+            _log(f"WARNING: client_id {self.client_id!r} differs from the client certificate CN {cert_cn!r}")
         self.ha_api_url = options.get("ha_api_url") or ""
         self.ha_api_token = options.get("ha_api_token") or ""
         if options.get("debug_logging"):

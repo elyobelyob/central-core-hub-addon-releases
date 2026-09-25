@@ -19,7 +19,7 @@ options:
   mqtt_password: ""
   mqtt_tls: false
   mqtt_cert_bundle: ""
-  client_id: "home-assistant"
+  client_id: ""
   ha_api_url: ""
   ha_api_token: ""
   telemetry_interval: 30
