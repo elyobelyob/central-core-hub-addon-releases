@@ -130,9 +130,3 @@ def sanitize_attributes(attrs) -> dict:
             continue
         clean[key] = value
     return clean
-
-# Safe device classes allowed for sensor inclusion.
-# Sensors with device_class values in this set are considered safe for telemetry.
-# Sensors with device_class values NOT in this set are filtered out.
-# Sensors without a device_class attribute are excluded.
-SAFE_DEVICE_CLASSES = {"motion", "door", "battery", "occupancy", "presence", "opening"}

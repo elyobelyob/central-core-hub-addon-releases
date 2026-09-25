@@ -1123,8 +1123,6 @@ class CentralCoreClient:
                 hub_id=self.client_id,
                 version=ver,
             )
-            # Commands topic (logical base) - alias for subscription pattern
-            self.commands_topic = self.cmd_sub_topic
             # expose sensors_topic for compatibility; prefer preferred_sensors_topic
             self.sensors_topic = self.preferred_sensors_topic
         except Exception as e:
@@ -1234,7 +1232,6 @@ class CentralCoreClient:
             self.selected_sensors = []
         # HA websocket listener instance (populated when HA integration configured)
         self._ha_ws_listener = None
-        self._addon_slug = None
         # Try to start HA websocket listener if HA API config present
         try:
             _log("Evaluating HA websocket startup conditions")
@@ -1638,29 +1635,6 @@ class CentralCoreClient:
         except Exception:
             _log("Failed to publish selected sensor change via HA WS", sys.stderr)
         return
-
-    def _call_ha_service(
-        self,
-        domain,
-        service,
-        service_data=None,
-        timeout=15.0,
-    ):
-        listener = getattr(self, "_ha_ws_listener", None)
-        if listener is None:
-            return None
-        call_srv = getattr(listener, "call_service", None)
-        if not callable(call_srv):
-            return None
-        try:
-            return call_srv(
-                domain,
-                service,
-                service_data=service_data,
-                timeout=timeout,
-            )
-        except Exception:
-            return None
 
     def _on_ha_version(self, version):
         """Callback invoked when the HA websocket listener discovers a HA version.
