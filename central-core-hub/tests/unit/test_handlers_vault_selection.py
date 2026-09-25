@@ -41,7 +41,7 @@ class DummyMsg:
         self.payload = payload_bytes
 
 
-def test_poll_updates_selected_and_publishes_reminder(monkeypatch):
+def test_poll_keeps_selection_and_publishes_reminder(monkeypatch):
     mc, handlers = _load_modules()
     CentralCoreClient = mc.CentralCoreClient
 
@@ -79,13 +79,16 @@ def test_poll_updates_selected_and_publishes_reminder(monkeypatch):
     }
     msg = DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/poll", json.dumps(cmd).encode("utf-8"))
 
+    c.selected_sensors = []
+
     # call through the client's on_message handler which loads handlers
     c.on_message(None, None, msg)
 
-    # selected_sensors should have been stored on the client
-    assert getattr(c, "selected_sensors", None) == ["sensor.temp", "sensor.hum"]
+    # a poll reports sensors; only sensors/set changes the watch list
+    assert c.selected_sensors == []
 
-    # ensure a reminder was published to the vault topic
+    # ensure a reminder was published to the vault topic (falls back to the
+    # reported sensors when nothing is selected)
     vault_msgs = [p for p in dummy.published if p["topic"] == c.vault_topic]
     assert vault_msgs, "no reminder published to vault topic"
     payload = json.loads(vault_msgs[-1]["payload"])
