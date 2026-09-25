@@ -3,9 +3,8 @@ import os
 import platform
 import socket
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
-_LOCAL_TZ = datetime.now().astimezone().tzinfo
 
 
 def _get_cpu_percent():
@@ -124,7 +123,7 @@ def build_telemetry(
         "schema_version": 1,
         "client_id": client_id,
         "status": "online",
-        "timestamp": datetime.now(_LOCAL_TZ).isoformat().replace("+00:00", "Z"),
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "hostname": hostname,
         "ip": ip,
         "uptime": up,
