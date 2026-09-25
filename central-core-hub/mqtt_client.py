@@ -743,6 +743,7 @@ try:
         disk_info_fn=None,
         version=None,
         telemetry_interval=None,
+        home_assistant=None,
     ):
         return _tele_mod.build_telemetry(
             client_id,
@@ -753,6 +754,7 @@ try:
             disk_info_fn=disk_info_fn,
             version=version or get_addon_version(),
             telemetry_interval=telemetry_interval if telemetry_interval is not None else 30,
+            home_assistant=home_assistant,
         )
 
     build_vault_payload = _tele_mod.build_vault_payload
@@ -833,6 +835,7 @@ except Exception:
             disk_info_fn=None,
             version=None,
             telemetry_interval=None,
+            home_assistant=None,
         ):
             return _tele.build_telemetry(
                 client_id,
@@ -843,6 +846,7 @@ except Exception:
                 disk_info_fn=disk_info_fn,
                 version=version or get_addon_version(),
                 telemetry_interval=telemetry_interval or 30,
+                home_assistant=home_assistant,
             )
 
         build_vault_payload = _tele.build_vault_payload
