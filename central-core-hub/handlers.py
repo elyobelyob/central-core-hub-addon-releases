@@ -128,6 +128,12 @@ def _run_update_command(client, action, command_id, run):
     _update_thread.start()
 
 
+def _sanitize(attrs):
+    import ha_client
+
+    return ha_client.sanitize_attributes(attrs)
+
+
 def _utc_now_iso():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -184,7 +190,7 @@ def _states_report(states):
         ent = s.get("entity_id")
         if not ent:
             continue
-        attrs = s.get("attributes") or {}
+        attrs = _sanitize(s.get("attributes"))
         report["data"][ent] = s.get("state")
         report["raw"][ent] = s.get("state")
         report["names"][ent] = attrs.get("friendly_name") or s.get("name") or ent
@@ -223,7 +229,7 @@ def _handle_sensors_set(client, cmd, fetch_sensors):
 
     accepted, rejected = [], []
     for ent in requested:
-        if ha_client.is_valid_entity_id(ent):
+        if ha_client.is_selectable_entity(ent):
             if ent not in accepted:
                 accepted.append(ent)
         else:
@@ -425,7 +431,7 @@ def handle_message(
                 ent = s.get("entity_id")
                 if not ent:
                     continue
-                attrs = s.get("attributes", {}) or {}
+                attrs = _sanitize(s.get("attributes"))
                 names_map[ent] = attrs.get("friendly_name") or s.get("name") or ent
                 # consider entity disabled if 'disabled_by' attribute is set
                 enabled_map[ent] = not bool(attrs.get("disabled_by"))

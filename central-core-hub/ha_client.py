@@ -31,6 +31,45 @@ def is_valid_entity_id(entity_id) -> bool:
         and _ENTITY_ID_RE.fullmatch(entity_id) is not None
     )
 
+
+# The vault only watches sensors (its kept set is selected sensors plus their
+# battery sensors). Cameras, trackers, locks and the rest are never selectable.
+SELECTABLE_DOMAINS = ("sensor", "binary_sensor")
+
+
+def is_selectable_entity(entity_id) -> bool:
+    return is_valid_entity_id(entity_id) and entity_id.split(".", 1)[0] in SELECTABLE_DOMAINS
+
+
+# Attributes that must not leave the home: credentials (camera access tokens,
+# entity_picture URLs that embed them) and location.
+_SENSITIVE_ATTRIBUTES = frozenset(
+    {
+        "access_token",
+        "entity_picture",
+        "entity_picture_local",
+        "latitude",
+        "longitude",
+        "gps_accuracy",
+        "altitude",
+        "location",
+    }
+)
+_SENSITIVE_ATTRIBUTE_PARTS = ("token", "password", "secret", "api_key", "apikey")
+
+
+def sanitize_attributes(attrs) -> dict:
+    """A copy of `attrs` without credentials or location."""
+    if not isinstance(attrs, dict):
+        return {}
+    clean = {}
+    for key, value in attrs.items():
+        k = str(key).lower()
+        if k in _SENSITIVE_ATTRIBUTES or any(part in k for part in _SENSITIVE_ATTRIBUTE_PARTS):
+            continue
+        clean[key] = value
+    return clean
+
 # Safe device classes allowed for sensor inclusion.
 # Sensors with device_class values in this set are considered safe for telemetry.
 # Sensors with device_class values NOT in this set are filtered out.
@@ -151,7 +190,7 @@ def fetch_sensors(ha_api_url, ha_api_token, requests_mod=None):
             # Include both sensor.* and binary_sensor.* entities
             if ent_id and (ent_id.startswith("sensor.") or ent_id.startswith("binary_sensor.")):
                 # Return all sensors. Device class filtering is handled by vault/MQTT layer.
-                attrs = ent.get("attributes", {})
+                attrs = sanitize_attributes(ent.get("attributes"))
                 sensors.append(
                     {
                         "entity_id": ent_id,
@@ -188,12 +227,13 @@ def fetch_sensors_by_ids(ha_api_url, ha_api_token, entity_ids, requests_mod=None
             r.raise_for_status()
             data = r.json()
             if data.get("entity_id"):
+                attrs = sanitize_attributes(data.get("attributes"))
                 results.append(
                     {
                         "entity_id": data.get("entity_id"),
                         "state": data.get("state"),
-                        "name": data.get("attributes", {}).get("friendly_name") or data.get("entity_id"),
-                        "attributes": data.get("attributes", {}) or {},
+                        "name": attrs.get("friendly_name") or data.get("entity_id"),
+                        "attributes": attrs,
                         "last_changed": _normalize_timestamp(data.get("last_changed")),
                         "last_updated": _normalize_timestamp(data.get("last_updated")),
                     }
