@@ -50,38 +50,44 @@ class Resp:
         return self._data
 
 
-def test_set_with_ha_readback():
+def test_set_dict_refused_and_list_selects():
     mqtt_mod, handlers = _load_modules()
     c = DummyClient()
     topic = f"hubs/{c.client_id}/v1/cmd/sensors/set"
+    req = _RecordingRequests()
+
     cmd = {"command_id": "cmd1", "payload": {"sensors": {"sensor.x": "42"}}}
-    msg_payload = json.dumps(cmd)
-
-    # requests stub that returns expected responses
-    def post(url, headers=None, json_body=None, timeout=10):
-        payload = json_body or {}
-        return Resp({"state": payload.get("state")})
-
-    def get(url, headers=None, timeout=10):
-        return Resp({"state": "42", "attributes": {"friendly_name": "X"}})
-
-    requests_stub = types.SimpleNamespace(post=post, get=get)
-
-    msg = types.SimpleNamespace(topic=topic, payload=msg_payload.encode("utf-8"))
+    msg = types.SimpleNamespace(topic=topic, payload=json.dumps(cmd).encode("utf-8"))
     handlers.handle_message(
         c,
         msg,
-        msg_payload,
+        json.dumps(cmd),
         fetch_sensors=lambda a, b: [],
         build_telemetry=mqtt_mod.build_telemetry,
         build_vault_payload=mqtt_mod.build_vault_payload,
-        requests=requests_stub,
+        requests=req,
     )
-
-    # Expect completion response and telemetry publish
+    assert req.calls == []
     ack_topic = f"hubs/{c.client_id}/v1/ack/sensors.set/cmd1"
-    assert any(p["topic"] == ack_topic for p in c.published)
-    assert any(p["topic"] == c.preferred_sensors_topic for p in c.published)
+    acks = [json.loads(p["payload"]) for p in c.published if p["topic"] == ack_topic]
+    assert acks[-1]["status"] == "failed" and acks[-1]["result"]["reason"] == "invalid_payload"
+    assert not any(p["topic"] == c.preferred_sensors_topic for p in c.published)
+
+    cmd2 = {"command_id": "cmd2", "payload": {"sensors": ["sensor.x"]}}
+    handlers.handle_message(
+        c,
+        types.SimpleNamespace(topic=topic),
+        json.dumps(cmd2),
+        fetch_sensors=lambda a, b: [{"entity_id": "sensor.x", "state": "42", "attributes": {"friendly_name": "X"}}],
+        build_telemetry=mqtt_mod.build_telemetry,
+        build_vault_payload=mqtt_mod.build_vault_payload,
+        requests=req,
+    )
+    assert req.calls == []
+    comp = _secure_final_ack(c.published)
+    assert comp["status"] == "completed"
+    assert comp["result"]["data"] == {"sensor.x": "42"}
+    assert comp["result"]["names"] == {"sensor.x": "X"}
 
 
 def test_set_with_readback_disabled():
@@ -114,3 +120,34 @@ def test_set_with_readback_disabled():
 
     ack_topic = f"hubs/{c.client_id}/v1/ack/sensors.set/cmd2"
     assert any(p["topic"] == ack_topic for p in c.published)
+
+
+# --- helpers for the secure sensors/set and registry/set behaviour ---------
+
+
+def _secure_final_ack(records):
+    """Last non-"acknowledged" ACK body among recorded publishes (any record shape)."""
+    last = None
+    for r in records:
+        topic, payload = (r["topic"], r["payload"]) if isinstance(r, dict) else (r[0], r[1])
+        if "/ack/" not in topic:
+            continue
+        body = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+        if isinstance(body, dict) and body.get("status") != "acknowledged":
+            last = body
+    return last
+
+
+class _RecordingRequests:
+    """A `requests` stand-in that records calls and refuses every one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, *a, **k):
+        self.calls.append(("POST", url))
+        raise AssertionError(f"hub must not POST to Home Assistant: {url}")
+
+    def get(self, url, *a, **k):
+        self.calls.append(("GET", url))
+        raise AssertionError(f"sensors/set must not call Home Assistant per entity: {url}")

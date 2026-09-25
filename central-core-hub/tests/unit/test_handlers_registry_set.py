@@ -57,51 +57,74 @@ def test_registry_set_auth_failed():
 
 def test_registry_set_success_writes_file(tmp_path, monkeypatch):
     client = FakeClient()
-
-    # create a temp target file location
+    client.registry_token = "file-token"
     target = tmp_path / "SENSOR_REGISTRY.json"
-
     called = {"v": False}
 
     def reload_sensor_registry():
         called["v"] = True
 
-    # install a fake mqtt_client module into sys.modules (replace any existing)
     mc = types.SimpleNamespace()
     mc.SENSOR_REGISTRY = str(target)
     mc.reload_sensor_registry = reload_sensor_registry
-    orig = sys.modules.get("mqtt_client")
-    sys.modules["mqtt_client"] = mc
+    monkeypatch.setitem(sys.modules, "mqtt_client", mc)
 
-    try:
-        msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/registry/set"})
-        payload_obj = {"entries": [{"foo": "bar"}]}
-        payload = {"command_id": "r2", "payload": payload_obj}
+    msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/registry/set"})
+    entries = [{"entity_id": "sensor.foo", "provide": True}]
+    payload = {"command_id": "r2", "payload": {"token": "file-token", "entries": entries}}
+    handlers.handle_message(client, msg, json.dumps(payload), None, None, None)
 
-        handlers.handle_message(client, msg, json.dumps(payload), None, None, None)
+    assert target.exists()
+    data = json.loads(target.read_text())
+    assert data == {"entries": entries}
+    assert called["v"] is True
+    comp = _secure_final_ack(client.publishes)
+    assert comp["status"] == "completed" and comp["result"] == {"success": True, "entries": 1}
 
-        # ensure file written and reload called
-        assert target.exists()
-        data = json.loads(target.read_text())
-        assert data.get("entries") == payload_obj.get("entries")
 
-        # completion ack should include success
-        ok = False
-        for _, p, _ in client.publishes:
-            try:
-                obj = json.loads(p)
-            except Exception:
-                continue
-            if obj.get("status") == "completed" and obj.get("result", {}).get("success"):
-                ok = True
-                break
-        assert ok
-    finally:
-        # restore original mqtt_client if present
-        try:
-            if orig is None:
-                sys.modules.pop("mqtt_client", None)
-            else:
-                sys.modules["mqtt_client"] = orig
-        except Exception:
-            pass
+def test_registry_set_refused_when_no_token_configured(tmp_path, monkeypatch):
+    client = FakeClient()
+    target = tmp_path / "SENSOR_REGISTRY.json"
+    mc = types.SimpleNamespace(SENSOR_REGISTRY=str(target))
+    monkeypatch.setitem(sys.modules, "mqtt_client", mc)
+    monkeypatch.delenv("REGISTRY_TOKEN", raising=False)
+
+    msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/registry/set"})
+    payload = {"command_id": "r3", "payload": {"entries": [{"entity_id": "sensor.foo", "provide": True}]}}
+    handlers.handle_message(client, msg, json.dumps(payload), None, None, None)
+
+    assert not target.exists()
+    comp = _secure_final_ack(client.publishes)
+    assert comp["status"] == "failed"
+    assert comp["result"]["reason"] == "registry_updates_disabled"
+
+
+# --- helpers for the secure sensors/set and registry/set behaviour ---------
+
+
+def _secure_final_ack(records):
+    """Last non-"acknowledged" ACK body among recorded publishes (any record shape)."""
+    last = None
+    for r in records:
+        topic, payload = (r["topic"], r["payload"]) if isinstance(r, dict) else (r[0], r[1])
+        if "/ack/" not in topic:
+            continue
+        body = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+        if isinstance(body, dict) and body.get("status") != "acknowledged":
+            last = body
+    return last
+
+
+class _RecordingRequests:
+    """A `requests` stand-in that records calls and refuses every one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, *a, **k):
+        self.calls.append(("POST", url))
+        raise AssertionError(f"hub must not POST to Home Assistant: {url}")
+
+    def get(self, url, *a, **k):
+        self.calls.append(("GET", url))
+        raise AssertionError(f"sensors/set must not call Home Assistant per entity: {url}")

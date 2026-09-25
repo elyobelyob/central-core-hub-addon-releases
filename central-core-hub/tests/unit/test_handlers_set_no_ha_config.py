@@ -39,24 +39,42 @@ class Msg:
         self.topic = topic
 
 
-def test_sensors_set_no_ha_config_reports_failure():
+def test_sensors_set_write_form_refused_without_ha_config():
     client = DummyClient()
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
     payload = json.dumps({"command_id": "c-noha", "payload": {"sensors": [{"entity_id": "sensor.x", "state": "on"}]}})
-
-    # Provide a dummy requests object so the code path checks HA config
     handlers.handle_message(client, Msg(topic), payload, None, None, None, requests=object())
+    comp = _secure_final_ack(client.published)
+    assert comp["status"] == "failed"
+    assert comp["result"] == {"reason": "invalid_payload"}
 
-    comp = None
-    for t, payload_str, qos in client.published:
-        try:
-            p = json.loads(payload_str)
-        except Exception:
+
+# --- helpers for the secure sensors/set and registry/set behaviour ---------
+
+
+def _secure_final_ack(records):
+    """Last non-"acknowledged" ACK body among recorded publishes (any record shape)."""
+    last = None
+    for r in records:
+        topic, payload = (r["topic"], r["payload"]) if isinstance(r, dict) else (r[0], r[1])
+        if "/ack/" not in topic:
             continue
-        if p.get("status") == "completed":
-            comp = p
-            break
-    assert comp is not None
-    res = comp.get("result") or {}
-    failed = res.get("failed") or []
-    assert any(f.get("entity_id") == "sensor.x" and f.get("reason") == "no_ha_config" for f in failed)
+        body = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+        if isinstance(body, dict) and body.get("status") != "acknowledged":
+            last = body
+    return last
+
+
+class _RecordingRequests:
+    """A `requests` stand-in that records calls and refuses every one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, *a, **k):
+        self.calls.append(("POST", url))
+        raise AssertionError(f"hub must not POST to Home Assistant: {url}")
+
+    def get(self, url, *a, **k):
+        self.calls.append(("GET", url))
+        raise AssertionError(f"sensors/set must not call Home Assistant per entity: {url}")

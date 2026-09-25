@@ -54,59 +54,111 @@ class MockHAHandler(BaseHTTPRequestHandler):
         return
 
 
-def test_set_and_readback_with_mock_ha():
-    """Integration-style test: start a mock HA HTTP server and exercise sensors/set flow."""
+def test_set_with_mock_ha_never_writes_and_list_selects():
+    """Integration-style: a mock HA HTTP server sees no request for a write-form
+    sensors/set; the list form selects and reports current values."""
     mod = _load_client_module()
     CentralCoreClient = mod.CentralCoreClient
 
-    # start server
-    server = HTTPServer(("localhost", 0), MockHAHandler)
+    MockHAHandler.store = {}
+    requests_seen = []
+
+    class _Recording(MockHAHandler):
+        def do_POST(self):
+            requests_seen.append(("POST", self.path))
+            super().do_POST()
+
+        def do_GET(self):
+            requests_seen.append(("GET", self.path))
+            super().do_GET()
+
+    server = HTTPServer(("localhost", 0), _Recording)
     port = server.server_port
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
+    try:
+        options = {
+            "client_id": "int-hub",
+            "ha_api_url": f"http://localhost:{port}",
+            "ha_api_token": "tok",
+        }
+        c = CentralCoreClient(options)
 
-    options = {
-        "client_id": "int-hub",
-        "ha_api_url": f"http://localhost:{port}",
-        "ha_api_token": "tok",
-    }
-    c = CentralCoreClient(options)
+        class DummyClient:
+            def __init__(self):
+                self.published = []
 
-    # capture publishes
-    class DummyClient:
-        def __init__(self):
-            self.published = []
+            def publish(self, topic, payload, qos=0):
+                self.published.append({"topic": topic, "payload": payload, "qos": qos})
 
-        def publish(self, topic, payload, qos=0):
-            self.published.append({"topic": topic, "payload": payload, "qos": qos})
+                class R:
+                    rc = 0
 
-            class R:
-                rc = 0
+                return R()
 
-            return R()
+        c._client = DummyClient()
 
-    c._client = DummyClient()
+        def send(cid, payload):
+            command = {"command_id": cid, "action": "sensors/set", "payload": payload}
+            msg = type(
+                "M",
+                (),
+                {
+                    "topic": f"hubs/{c.client_id}/v1/cmd/sensors/set",
+                    "payload": json.dumps(command).encode("utf-8"),
+                },
+            )
+            c.on_message(None, None, msg)
 
-    command = {
-        "command_id": "int123",
-        "action": "sensors/set",
-        "payload": {"sensors": [{"entity_id": "sensor.temp", "state": "21.0"}]},
-    }
-    msg = type(
-        "M",
-        (),
-        {
-            "topic": f"hubs/{c.client_id}/v1/cmd/sensors/set",
-            "payload": json.dumps(command).encode("utf-8"),
-        },
-    )
+        # write form: refused, and nothing reaches Home Assistant
+        send("int123", {"sensors": [{"entity_id": "sensor.temp", "state": "21.0"}]})
+        assert requests_seen == []
+        assert MockHAHandler.store == {}
+        final = _secure_final_ack(c._client.published)
+        assert final["status"] == "failed"
+        assert final["result"]["reason"] == "invalid_payload"
 
-    # run handler
-    c.on_message(None, None, msg)
+        # list form: selection stored; current values come from GET /api/states
+        MockHAHandler.store["/api/states"] = [
+            {"entity_id": "sensor.temp", "state": "21.0", "attributes": {"friendly_name": "Temp"}}
+        ]
+        send("int124", {"sensors": ["sensor.temp"]})
+        assert c.selected_sensors == ["sensor.temp"]
+        assert not any(method == "POST" for method, _ in requests_seen)
+        final = _secure_final_ack(c._client.published)
+        assert final["status"] == "completed"
+        assert final["result"]["sensors_reported"] == ["sensor.temp"]
+        assert final["result"]["data"] == {"sensor.temp": "21.0"}
+    finally:
+        server.shutdown()
 
-    # ensure that server received POST and GET
-    assert "/api/states/sensor.temp" in MockHAHandler.store
-    # ensure telemetry published
-    assert any(p["topic"] == c.preferred_sensors_topic for p in c._client.published)
 
-    server.shutdown()
+# --- helpers for the secure sensors/set and registry/set behaviour ---------
+
+
+def _secure_final_ack(records):
+    """Last non-"acknowledged" ACK body among recorded publishes (any record shape)."""
+    last = None
+    for r in records:
+        topic, payload = (r["topic"], r["payload"]) if isinstance(r, dict) else (r[0], r[1])
+        if "/ack/" not in topic:
+            continue
+        body = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+        if isinstance(body, dict) and body.get("status") != "acknowledged":
+            last = body
+    return last
+
+
+class _RecordingRequests:
+    """A `requests` stand-in that records calls and refuses every one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, *a, **k):
+        self.calls.append(("POST", url))
+        raise AssertionError(f"hub must not POST to Home Assistant: {url}")
+
+    def get(self, url, *a, **k):
+        self.calls.append(("GET", url))
+        raise AssertionError(f"sensors/set must not call Home Assistant per entity: {url}")

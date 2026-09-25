@@ -1,6 +1,7 @@
 import importlib.util
 from pathlib import Path
 import json
+import sys
 
 
 def _load_modules():
@@ -54,49 +55,49 @@ class Msg:
 
 def test_registry_set_writes_file_and_reload(tmp_path, monkeypatch):
     mqtt_mod, handlers, _orig_mc = _load_modules()
+    try:
+        reg_path = tmp_path / "SENSOR_REGISTRY.json"
+        monkeypatch.setattr(mqtt_mod, "SENSOR_REGISTRY", reg_path)
+        monkeypatch.delenv("REGISTRY_TOKEN", raising=False)
 
-    # Ensure SENSOR_REGISTRY points to our temp file
-    reg_path = tmp_path / "SENSOR_REGISTRY.json"
-    monkeypatch.setattr(mqtt_mod, "SENSOR_REGISTRY", reg_path)
+        c = DummyClient(tmp_path)
+        topic = f"hubs/{c.client_id}/v1/cmd/registry/set"
+        doc = {
+            "apply_registry": True,
+            "registry_mode": "deny",
+            "entries": [{"entity_id": "sensor.forbidden*", "provide": False}],
+        }
 
-    c = DummyClient(tmp_path)
-    topic = f"hubs/{c.client_id}/v1/cmd/registry/set"
-    payload = {
-        "apply_registry": True,
-        "registry_mode": "deny",
-        "entries": [{"entity_id": "sensor.forbidden*", "provide": False}],
-    }
-    cmd = {"command_id": "cmd-reg-1", "payload": payload}
-    msg_payload = json.dumps(cmd)
-    msg = Msg(topic, msg_payload)
+        def send(cid, payload):
+            msg_payload = json.dumps({"command_id": cid, "payload": payload})
+            handlers.handle_message(
+                c,
+                Msg(topic, msg_payload),
+                msg_payload,
+                fetch_sensors=lambda a, b: [],
+                build_telemetry=mqtt_mod.build_telemetry,
+                build_vault_payload=mqtt_mod.build_vault_payload,
+                requests=None,
+            )
 
-    handlers.handle_message(
-        c,
-        msg,
-        msg_payload,
-        fetch_sensors=lambda a, b: [],
-        build_telemetry=mqtt_mod.build_telemetry,
-        build_vault_payload=mqtt_mod.build_vault_payload,
-        requests=None,
-    )
+        # no token configured: refused, registry untouched
+        send("cmd-reg-0", doc)
+        assert not reg_path.exists()
+        assert mqtt_mod.is_entity_allowed("sensor.forbidden123") is True
 
-    # File should exist and contain the payload
-    assert reg_path.exists()
-    data = json.loads(reg_path.read_text())
-    assert data.get("registry_mode") == "deny"
-    assert isinstance(data.get("entries"), list)
-
-    # reload_sensor_registry should make the registry visible to is_entity_allowed
-    # (the handler already calls reload; assert behavior)
-    assert mqtt_mod.is_entity_allowed("sensor.forbidden123") is False
-    assert mqtt_mod.is_entity_allowed("sensor.allowed") is True
-    # restore original sys.modules entry
-    import sys
-
-    if _orig_mc is None:
-        try:
-            del sys.modules["mqtt_client"]
-        except KeyError:
-            pass
-    else:
-        sys.modules["mqtt_client"] = _orig_mc
+        # token configured and supplied: written and live
+        c.registry_token = "via-mqtt-token"
+        send("cmd-reg-1", dict(doc, token="via-mqtt-token"))
+        assert reg_path.exists()
+        data = json.loads(reg_path.read_text())
+        assert data.get("registry_mode") == "deny"
+        assert "token" not in data
+        assert isinstance(data.get("entries"), list)
+        assert mqtt_mod.is_entity_allowed("sensor.forbidden123") is False
+        assert mqtt_mod.is_entity_allowed("sensor.allowed") is True
+    finally:
+        mqtt_mod.reload_sensor_registry()
+        if _orig_mc is None:
+            sys.modules.pop("mqtt_client", None)
+        else:
+            sys.modules["mqtt_client"] = _orig_mc

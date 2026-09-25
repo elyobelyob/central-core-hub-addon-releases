@@ -155,3 +155,21 @@ def _patch_ha_ws(monkeypatch):
             devnull.close()
         except Exception:
             pass
+
+
+@_pytest.fixture(autouse=True)
+def _restore_swapped_modules():
+    """Undo sys.modules swaps of the add-on modules a test leaves behind.
+
+    Several tests replace sys.modules["mqtt_client"] (or "handlers") with a
+    fake and do not always put the original back; the next test would then
+    import the fake.
+    """
+    names = ("mqtt_client", "handlers")
+    saved = {name: sys.modules.get(name) for name in names}
+    yield
+    for name, module in saved.items():
+        if module is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = module

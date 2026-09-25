@@ -52,68 +52,79 @@ class _FakeResp:
         return self._data
 
 
-def test_sensors_set_readback_success():
+def test_sensors_set_list_reports_attributes_and_timestamps():
     client = DummyClient()
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
-    payload = json.dumps({"command_id": "c1", "payload": {"sensors": [{"entity_id": "sensor.a", "state": "42"}]}})
+    req = _RecordingRequests()
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
-    # fake requests: post succeeds, get returns readback with attributes and timestamps
-    class FakeReq:
-        @staticmethod
-        def post(url, headers=None, json=None, timeout=None):
-            return _FakeResp({})
+    def fetch(url, token):
+        return [
+            {
+                "entity_id": "sensor.a",
+                "state": "42",
+                "attributes": {"friendly_name": "A", "device_class": "opening"},
+                "last_changed": now,
+            }
+        ]
 
-        @staticmethod
-        def get(url, headers=None, timeout=None):
-            return _FakeResp(
-                {
-                    "entity_id": "sensor.a",
-                    "state": "42",
-                    "attributes": {"friendly_name": "A", "device_class": "opening"},
-                    "last_changed": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                }
-            )
+    payload = json.dumps({"command_id": "c1", "payload": {"sensors": ["sensor.a"]}})
+    handlers.handle_message(client, Msg(topic), payload, fetch, None, None, requests=req)
 
-    handlers.handle_message(client, Msg(topic), payload, None, None, None, requests=FakeReq)
+    assert req.calls == []
+    comp = _secure_final_ack(client.published)
+    assert comp["status"] == "completed"
+    res = comp["result"]
+    assert res["sensors_reported"] == ["sensor.a"]
+    assert res["device_classes"] == {"sensor.a": "opening"}
+    assert res["names"] == {"sensor.a": "A"}
+    assert res["observed"]["sensor.a"]
 
-    # Expect a completion ack published
-    assert any("/v1/ack/" in t for t, _, _ in client.published)
-    # completion payload should include 'result' with set list
-    comp = None
-    for t, payload_str, qos in client.published:
-        try:
-            p = json.loads(payload_str)
-        except Exception:
-            continue
-        if p.get("status") == "completed":
-            comp = p
-            break
-    assert comp is not None
-    assert comp.get("status") == "completed"
-    assert "result" in comp
+    # the old readback form is refused
+    payload = json.dumps({"command_id": "c1b", "payload": {"sensors": [{"entity_id": "sensor.a", "state": "42"}]}})
+    handlers.handle_message(client, Msg(topic), payload, fetch, None, None, requests=req)
+    assert req.calls == []
+    assert _secure_final_ack(client.published)["result"]["reason"] == "invalid_payload"
 
 
-def test_sensors_set_no_ha_config_publishes_failed():
+def test_sensors_set_no_ha_config_write_form_publishes_failed():
     client = DummyClient()
     client.ha_api_url = None
     client.ha_api_token = None
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
     payload = json.dumps({"command_id": "c2", "payload": {"sensors": [{"entity_id": "sensor.b", "state": "on"}]}})
-
     handlers.handle_message(client, Msg(topic), payload, None, None, None, requests=None)
+    comp = _secure_final_ack(client.published)
+    assert comp["status"] == "failed"
+    assert comp["result"]["reason"] == "invalid_payload"
 
-    # Should publish completion ack with failed entry
-    comp = None
-    for t, payload_str, qos in client.published:
-        try:
-            p = json.loads(payload_str)
-        except Exception:
+
+# --- helpers for the secure sensors/set and registry/set behaviour ---------
+
+
+def _secure_final_ack(records):
+    """Last non-"acknowledged" ACK body among recorded publishes (any record shape)."""
+    last = None
+    for r in records:
+        topic, payload = (r["topic"], r["payload"]) if isinstance(r, dict) else (r[0], r[1])
+        if "/ack/" not in topic:
             continue
-        if p.get("status") == "completed":
-            comp = p
-            break
-    assert comp is not None
-    # result.failed should contain reason no_ha_config
-    res = comp.get("result")
-    assert res is not None
-    assert any((f.get("reason") == "no_ha_config") for f in res.get("failed", []))
+        body = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+        if isinstance(body, dict) and body.get("status") != "acknowledged":
+            last = body
+    return last
+
+
+class _RecordingRequests:
+    """A `requests` stand-in that records calls and refuses every one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, *a, **k):
+        self.calls.append(("POST", url))
+        raise AssertionError(f"hub must not POST to Home Assistant: {url}")
+
+    def get(self, url, *a, **k):
+        self.calls.append(("GET", url))
+        raise AssertionError(f"sensors/set must not call Home Assistant per entity: {url}")

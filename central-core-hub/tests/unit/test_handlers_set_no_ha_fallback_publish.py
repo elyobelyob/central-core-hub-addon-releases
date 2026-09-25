@@ -43,51 +43,61 @@ class Msg:
         self.payload = b""
 
 
-def test_sensors_set_no_ha_publishes_empty_telemetry_and_completion_ack():
+def test_sensors_set_no_ha_write_form_publishes_only_acks():
     mqtt_mod, handlers = _load_modules()
     c = DummyClient()
     topic = f"hubs/{c.client_id}/v1/cmd/sensors/set"
-    # Provide a single set item; without HA config the handler should mark it failed
     cmd = {"command_id": "noha1", "payload": {"sensors": [{"entity_id": "sensor.x", "state": "on"}]}}
-    payload = json.dumps(cmd)
-    msg = Msg(topic)
+    handlers.handle_message(c, Msg(topic), json.dumps(cmd), None, None, None)
 
-    # No requests and no HA config => results['set'] should remain empty
-    handlers.handle_message(c, msg, payload, None, None, None)
-
-    # Expect fallback telemetry publish to preferred_sensors_topic (may be empty)
-    pref = None
-    for p in c.published:
-        if p["topic"] == c.preferred_sensors_topic:
-            pref = json.loads(p["payload"]) if p["payload"] else None
-            break
-    assert pref is not None, f"expected fallback telemetry publish to {c.preferred_sensors_topic}, got: {c.published}"
-    assert pref.get("data") == {}, "expected empty data map in fallback telemetry"
-
-    # Expect vault reminder publish with selected_sensors empty or absent
-    rem = None
-    for p in c.published:
-        if p["topic"] == c.vault_topic:
-            rem = json.loads(p["payload"]) if p["payload"] else None
-            break
-    assert rem is not None, f"expected vault reminder publish to {c.vault_topic}, got: {c.published}"
-    assert isinstance(rem.get("selected_sensors"), list)
-
-    # Expect completion ACK with failed entry
     ack_topic = f"hubs/{c.client_id}/v1/ack/sensors.set/noha1"
-    found = None
-    for p in c.published:
-        if p["topic"] == ack_topic:
-            try:
-                found = json.loads(p["payload"]) if p.get("payload") else None
-            except Exception:
-                found = None
-            break
-    assert found is not None, f"expected completion ack on {ack_topic}, got: {c.published}"
-    # Handler may publish an initial 'acknowledged' ACK before the
-    # completion payload; accept either. Prefer an ACK that contains
-    # a 'result' or 'completed' marker when available.
-    if not ("result" in found or "completed" in found):
-        assert "acknowledged" in found.get("status", ""), f"unexpected ack payload: {found}"
-    else:
-        assert "failed" in found.get("result", {}), f"expected failed entry in result, got: {found}"
+    assert {p["topic"] for p in c.published} == {ack_topic}
+    acks = [json.loads(p["payload"]) for p in c.published]
+    assert [a["status"] for a in acks] == ["acknowledged", "failed"]
+    assert acks[-1]["result"] == {"reason": "invalid_payload"}
+
+
+def test_sensors_set_no_ha_list_form_still_reminds_vault_and_completes():
+    mqtt_mod, handlers = _load_modules()
+    c = DummyClient()
+    topic = f"hubs/{c.client_id}/v1/cmd/sensors/set"
+    cmd = {"command_id": "noha2", "payload": {"sensors": ["sensor.x"]}}
+    handlers.handle_message(c, Msg(topic), json.dumps(cmd), None, None, None)
+
+    rem = [json.loads(p["payload"]) for p in c.published if p["topic"] == c.vault_topic]
+    assert rem and rem[-1]["selected_sensors"] == ["sensor.x"]
+    comp = _secure_final_ack(c.published)
+    assert comp["status"] == "completed"
+    assert comp["result"]["selected"] == ["sensor.x"]
+    assert comp["result"]["data"] == {}
+
+
+# --- helpers for the secure sensors/set and registry/set behaviour ---------
+
+
+def _secure_final_ack(records):
+    """Last non-"acknowledged" ACK body among recorded publishes (any record shape)."""
+    last = None
+    for r in records:
+        topic, payload = (r["topic"], r["payload"]) if isinstance(r, dict) else (r[0], r[1])
+        if "/ack/" not in topic:
+            continue
+        body = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+        if isinstance(body, dict) and body.get("status") != "acknowledged":
+            last = body
+    return last
+
+
+class _RecordingRequests:
+    """A `requests` stand-in that records calls and refuses every one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, *a, **k):
+        self.calls.append(("POST", url))
+        raise AssertionError(f"hub must not POST to Home Assistant: {url}")
+
+    def get(self, url, *a, **k):
+        self.calls.append(("GET", url))
+        raise AssertionError(f"sensors/set must not call Home Assistant per entity: {url}")
