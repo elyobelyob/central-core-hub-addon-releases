@@ -1009,6 +1009,8 @@ class CentralCoreClient:
         self.mqtt_username = options.get("mqtt_username") or ""
         self.mqtt_password = options.get("mqtt_password") or ""
         self.mqtt_tls = bool(options.get("mqtt_tls"))
+        if not self.mqtt_tls:
+            _log("WARNING: mqtt_tls is off; the MQTT password and all telemetry travel unencrypted")
         self.mqtt_ca = ""
         self.mqtt_cert = ""
         self.mqtt_key = ""
@@ -1707,6 +1709,9 @@ class CentralCoreClient:
         # Backwards-compatible public connect method implemented in
         # terms of smaller helpers: `connect_once` and `wait_for_connected`.
         while not self._stop_event.is_set():
+            if getattr(self, "_tls_error", None):
+                self.connect_once()  # logs why
+                return False
             ok = self.connect_once()
             if ok:
                 # wait for connection signal from on_connect handler
@@ -1736,6 +1741,10 @@ class CentralCoreClient:
         This helper is small and easy to unit-test (e.g. when the client
         shim raises or returns errors).
         """
+        tls_error = getattr(self, "_tls_error", None)
+        if tls_error:
+            _log(f"Not connecting: MQTT TLS is enabled but could not be set up ({tls_error})", sys.stderr)
+            return False
         try:
             _log(f"Connecting to {self.mqtt_host}:{self.mqtt_port} as {self.client_id}")
             self._client.connect(self.mqtt_host, self.mqtt_port, keepalive=60)

@@ -92,7 +92,10 @@ def setup_mqtt_client(ctx, mqtt_mod):
         if getattr(ctx, "mqtt_username", None):
             ctx._client.username_pw_set(ctx.mqtt_username, ctx.mqtt_password)
 
-    # TLS configuration (best-effort)
+    # TLS configuration. This fails closed: if TLS is enabled and cannot be
+    # set up, ctx._tls_error is set and the client refuses to connect rather
+    # than falling back to plaintext.
+    ctx._tls_error = None
     if getattr(ctx, "mqtt_tls", False):
         tls_kwargs = {}
         if getattr(ctx, "mqtt_ca", None):
@@ -101,13 +104,10 @@ def setup_mqtt_client(ctx, mqtt_mod):
             tls_kwargs["certfile"] = ctx.mqtt_cert
             tls_kwargs["keyfile"] = ctx.mqtt_key
         try:
-            # Some clients (shim) may not implement tls_set; ignore failures
             ctx._client.tls_set(**tls_kwargs)
-        except Exception:  # pragma: no cover - TLS setup failures are environment specific
-            try:
-                _log("Failed to configure TLS for MQTT", sys.stderr)
-            except Exception:  # pragma: no cover - logging to stderr may not be available in tests
-                pass
+        except Exception as exc:
+            ctx._tls_error = f"{type(exc).__name__}: {exc}"
+            _log(f"Failed to configure TLS for MQTT ({ctx._tls_error}); not connecting without TLS", sys.stderr)
 
     # Attach callbacks if present on the context
     try:
