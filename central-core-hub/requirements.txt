@@ -1,7 +1,9 @@
-paho-mqtt>=1.6.1
-requests>=2.25.1
-websocket-client>=1.9.2
-PyYAML>=6.0  # required by mqtt_client.py to parse SENSOR_REGISTRY.yaml
+# Runtime dependencies of the add-on image. Exact versions, so every hub that
+# builds this release gets the same code; change them deliberately.
+paho-mqtt==2.1.0
+requests==2.34.2
+websocket-client==1.9.2
+PyYAML==6.0.3  # required by mqtt_client.py to parse SENSOR_REGISTRY.yaml
 
-# Shared MQTT topics/schemas package
-central-core-mqtt-shared @ git+https://github.com/elyobelyob/central-core-mqtt-shared.git@v1.0.0
+# Shared MQTT topic templates, pinned to the commit of tag v1.0.0 (a tag can be moved).
+central-core-mqtt-shared @ git+https://github.com/elyobelyob/central-core-mqtt-shared.git@bc515bf108904a907ea5079b69795a10fff926d1
