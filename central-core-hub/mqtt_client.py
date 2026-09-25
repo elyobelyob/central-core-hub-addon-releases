@@ -14,6 +14,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import queue
 import re
 import socket
 import sys
@@ -1241,6 +1242,10 @@ class CentralCoreClient:
 
         self._connected = False
         self._stop_event = threading.Event()
+        # Work that may wait on Home Assistant (command handlers, the
+        # on-connect sensor publish) runs here, not on paho's network thread.
+        self._work_queue = queue.Queue()
+        self._worker = None
         # Cache the last HA version we observed so telemetry can reuse it
         self._ha_version_cache = None
         # track last sensors publish time (epoch seconds)
@@ -1321,6 +1326,59 @@ class CentralCoreClient:
             _log("Unexpected error during HA WS setup")
             traceback.print_exc()
             self._ha_ws_listener = None
+
+    def start_worker(self):
+        """Start the worker thread; from now on _submit() queues instead of running inline."""
+        worker = getattr(self, "_worker", None)
+        if worker is not None and worker.is_alive():
+            return
+        if getattr(self, "_work_queue", None) is None:
+            self._work_queue = queue.Queue()
+        self._worker = threading.Thread(target=self._work_loop, name="hub-worker", daemon=True)
+        self._worker.start()
+
+    def stop_worker(self, timeout=5):
+        worker = getattr(self, "_worker", None)
+        if worker is None:
+            return
+        self._work_queue.put(None)
+        worker.join(timeout)
+        self._worker = None
+
+    def _work_loop(self):
+        while True:
+            job = self._work_queue.get()
+            try:
+                if job is None:
+                    return
+                fn, args = job
+                try:
+                    fn(*args)
+                except Exception:
+                    _log(f"Worker job {getattr(fn, '__name__', fn)} failed", sys.stderr)
+                    traceback.print_exc()
+            finally:
+                self._work_queue.task_done()
+
+    def _submit(self, fn, *args):
+        """Run `fn(*args)` on the worker thread, or inline when no worker runs."""
+        worker = getattr(self, "_worker", None)
+        if worker is not None and worker.is_alive():
+            self._work_queue.put((fn, args))
+        else:
+            fn(*args)
+
+    def wait_for_commands(self, timeout=None):
+        """Wait until queued work is done; True if it finished within `timeout`."""
+        q = getattr(self, "_work_queue", None)
+        if q is None:
+            return True
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while q.unfinished_tasks:
+            if deadline is not None and time.monotonic() >= deadline:
+                return False
+            time.sleep(0.01)
+        return True
 
     def _update_ha_listener_selectors(self):
         listener = getattr(self, "_ha_ws_listener", None)
@@ -1705,33 +1763,37 @@ class CentralCoreClient:
             except Exception:
                 _log("Subscription failed", sys.stderr)
             self._connected = True
-            # Attempt to flush any persisted outbox messages on connect.
-            try:
-                outbox = getattr(self, "_outbox", None)
-                if outbox is not None:
-
-                    def _sender(t, p, q):
-                        try:
-                            r = self._client.publish(t, p, qos=q)
-                            rc = getattr(r, "rc", 0)
-                            return rc == 0
-                        except Exception:
-                            return False
-
-                    flushed = outbox.flush_with_sender(_sender)
-                    if flushed:
-                        _log(f"Flushed {flushed} messages from outbox")
-            except Exception:
-                pass
-            # Publish initial sensors with default device_class filtering on connect
-            try:
-                self.publish_sensors_with_default_filter()
-            except Exception:
-                _log("Failed to publish default sensors on connect", sys.stderr)
+            # Anything that may wait (outbox, Home Assistant) runs on the worker.
+            self._submit(self._after_connect)
         except Exception:
             # Ensure no exceptions escape the callback into paho's thread
             _log("Unhandled exception in on_connect", sys.stderr)
             traceback.print_exc()
+
+    def _after_connect(self):
+        """Work to do once connected; runs on the worker thread."""
+        try:
+            outbox = getattr(self, "_outbox", None)
+            if outbox is not None:
+
+                def _sender(t, p, q):
+                    try:
+                        r = self._client.publish(t, p, qos=q)
+                        rc = getattr(r, "rc", 0)
+                        return rc == 0
+                    except Exception:
+                        return False
+
+                flushed = outbox.flush_with_sender(_sender)
+                if flushed:
+                    _log(f"Flushed {flushed} messages from outbox")
+        except Exception:
+            pass
+        # Publish initial sensors with default device_class filtering on connect
+        try:
+            self.publish_sensors_with_default_filter()
+        except Exception:
+            _log("Failed to publish default sensors on connect", sys.stderr)
 
     def on_disconnect(self, _client, _userdata, *args, **kwargs):
         """MQTT on_disconnect callback.
@@ -1772,25 +1834,29 @@ class CentralCoreClient:
                 size = "?"
             _log(f"MQTT <- {msg.topic} len={size} retain={getattr(msg, 'retain', False) is True}")
             _log_debug(f"MQTT <- {msg.topic} payload={_preview(payload)}")
-            # Prefer a local import of the handlers module; fall back to
-            # loading relative to the file for test contexts.
-            try:
-                from handlers import handle_message as _hm
-            except Exception:
-                try:
-                    _base = pathlib.Path(__file__).parent
-                    spec_h = importlib.util.spec_from_file_location("cc_handlers", str(_base / "handlers.py"))
-                    if spec_h is None or spec_h.loader is None:
-                        raise ImportError("could not load handlers spec")
-                    _hmod = importlib.util.module_from_spec(spec_h)
-                    if getattr(spec_h, "name", None):
-                        sys.modules[spec_h.name] = _hmod
-                    spec_h.loader.exec_module(_hmod)
-                    _hm = _hmod.handle_message
-                except Exception:
-                    _hm = None
+            # Handlers may call Home Assistant: run them on the worker.
+            self._submit(self._dispatch_message, msg, payload)
+        except Exception:
+            traceback.print_exc()
 
-            if _hm is not None:
+    def _dispatch_message(self, msg, payload):
+        try:
+            from handlers import handle_message as _hm
+        except Exception:
+            try:
+                _base = pathlib.Path(__file__).parent
+                spec_h = importlib.util.spec_from_file_location("cc_handlers", str(_base / "handlers.py"))
+                if spec_h is None or spec_h.loader is None:
+                    raise ImportError("could not load handlers spec")
+                _hmod = importlib.util.module_from_spec(spec_h)
+                if getattr(spec_h, "name", None):
+                    sys.modules[spec_h.name] = _hmod
+                spec_h.loader.exec_module(_hmod)
+                _hm = _hmod.handle_message
+            except Exception:
+                _hm = None
+        if _hm is not None:
+            try:
                 _hm(
                     self,
                     msg,
@@ -1800,9 +1866,8 @@ class CentralCoreClient:
                     build_vault_payload,
                     requests,
                 )
-                return
-        except Exception:
-            traceback.print_exc()
+            except Exception:
+                traceback.print_exc()
 
     def connect(self):
         # Backwards-compatible public connect method implemented in
@@ -2228,6 +2293,7 @@ class CentralCoreClient:
         return True
 
     def run(self):
+        self.start_worker()
         # connect first
         self.connect()
         try:
@@ -2266,6 +2332,10 @@ class CentralCoreClient:
         """Stop background listeners and disconnect MQTT (safe to call multiple times)."""
         try:
             self._stop_event.set()
+        except Exception:
+            pass
+        try:
+            self.stop_worker()
         except Exception:
             pass
         for path in list(getattr(self, "_temp_cert_files", [])):
