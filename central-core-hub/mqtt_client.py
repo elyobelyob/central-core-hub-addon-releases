@@ -936,6 +936,18 @@ def _is_selectable_entity(entity_id):
     return ha_safety.is_selectable_entity(entity_id)
 
 
+def fetch_selected_sensors(ha_api_url, ha_api_token, entity_ids):
+    """States of just `entity_ids` (one GET per id), minus registry-denied ones."""
+    if not ha_api_url or not ha_api_token or requests is None:
+        return None
+    import ha_client
+
+    states = ha_client.fetch_sensors_by_ids(ha_api_url, ha_api_token, entity_ids, requests_mod=requests)
+    if states is None:
+        return None
+    return [s for s in states if is_entity_allowed(s.get("entity_id"))]
+
+
 def fetch_sensors(ha_api_url, ha_api_token, _safe_device_classes=None):
     if not ha_api_url or not ha_api_token or requests is None:
         return None
@@ -1273,14 +1285,22 @@ class CentralCoreClient:
                         # listener implementation. Older test fakes may not accept
                         # the kwarg, so fall back to constructing without it.
                         cls = getattr(_ha, "HAWebSocketListener")
-                        self._ha_ws_listener = cls(
-                            self.ha_api_url,
-                            self.ha_api_token,
+                        listener_kwargs = dict(
                             on_event=self._on_ha_state_event,
                             log_fn=_log,
                             selectors=self._selected_sensors_set,
                             on_ha_version=self._on_ha_version,
                         )
+                        try:
+                            self._ha_ws_listener = cls(
+                                self.ha_api_url,
+                                self.ha_api_token,
+                                on_snapshot=self._on_ha_snapshot,
+                                **listener_kwargs,
+                            )
+                        except TypeError:
+                            # listener without snapshot support: per-entity events only
+                            self._ha_ws_listener = cls(self.ha_api_url, self.ha_api_token, **listener_kwargs)
                         started = self._ha_ws_listener.start()
                         _log(f"HA WS listener started={started}")
                         # Log which sensors the websocket is currently monitoring
@@ -2094,18 +2114,52 @@ class CentralCoreClient:
             )
         self._last_sensors_sent = int(time.time())
 
+    def _ws_streaming(self):
+        """True while the HA websocket delivers the selected entities' changes."""
+        listener = getattr(self, "_ha_ws_listener", None)
+        check = getattr(listener, "is_streaming", None)
+        try:
+            return bool(check()) if callable(check) else False
+        except Exception:
+            return False
+
     def publish_selected_sensor_changes(self):
-        """Publish telemetry for selected sensors when their state changes."""
+        """REST fallback for selected sensors while the websocket is not streaming.
+
+        Fetches only the selected entities (by id), and publishes the selected
+        set when any of them changed since the last publish.
+        """
         if not self.selected_sensors:
+            return
+        if self._ws_streaming():
             return
         # Require HA configuration and a functioning `requests` runtime
         # dependency. Tests should monkeypatch the module-level `requests`
         # symbol when they intend to bypass network calls.
         if not self.ha_api_url or not self.ha_api_token or requests is None:
             return
-        sensors = fetch_sensors(self.ha_api_url, self.ha_api_token) or []
+        wanted = [e for e in self.selected_sensors if _is_selectable_entity(e)]
+        sensors = fetch_selected_sensors(self.ha_api_url, self.ha_api_token, wanted) or []
+        self._publish_selected_states(sensors)
+
+    def _on_ha_snapshot(self, states):
+        """Current states of the watched entities, sent by HA when a websocket
+        subscription starts (startup, reconnect, selection change)."""
+        try:
+            self._publish_selected_states(states or [])
+        except Exception:
+            _log("Failed to publish websocket snapshot", sys.stderr)
+
+    def _publish_selected_states(self, sensors):
+        """Publish the selected entities among `sensors` if any value changed."""
         selected_set = set(self.selected_sensors)
-        filtered = [s for s in sensors if s.get("entity_id") in selected_set and is_entity_allowed(s.get("entity_id"))]
+        filtered = [
+            s
+            for s in sensors
+            if s.get("entity_id") in selected_set
+            and _is_selectable_entity(s.get("entity_id"))
+            and is_entity_allowed(s.get("entity_id"))
+        ]
 
         data_map = {}
         names_map = {}
@@ -2116,7 +2170,7 @@ class CentralCoreClient:
             ent = s.get("entity_id")
             if not ent:
                 continue
-            attrs = s.get("attributes", {}) or {}
+            attrs = _sanitize_attributes(s.get("attributes"))
             data_map[ent] = s.get("state")
             names_map[ent] = attrs.get("friendly_name") or s.get("name") or ent
             enabled_map[ent] = not bool(attrs.get("disabled_by"))
@@ -2128,10 +2182,10 @@ class CentralCoreClient:
             return
 
         snapshot = {k: data_map[k] for k in data_map.keys()}
-        if snapshot == self._selected_sensor_cache:
+        if snapshot == {k: self._selected_sensor_cache.get(k) for k in snapshot}:
             return
 
-        self._selected_sensor_cache = snapshot
+        self._selected_sensor_cache.update(snapshot)
         now_iso = datetime.now(timezone.utc).isoformat()
         telemetry_payload = {
             "data": data_map,
