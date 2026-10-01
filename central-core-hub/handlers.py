@@ -813,6 +813,7 @@ def _handle_inventory(client, payload_str):
             getattr(client, "_ha_version_cache", None),
             _utc_now_iso(),
             _registry_allows(),
+            hub=str(getattr(client, "client_id", "") or ""),
         )
         payload = {"status": "completed", "result": result, "timestamp": _utc_now_iso()}
     except inventory.InventoryError as e:

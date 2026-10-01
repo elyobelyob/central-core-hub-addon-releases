@@ -204,3 +204,113 @@ def test_should_fail_with_reason_when_ha_unreachable():
     handlers._handle_inventory(client, json.dumps({"command_id": "c2", "payload": {}}))
     assert client.published[-1][1] == {"status": "failed", "result": {"reason": "ha_unreachable"},
                                        "timestamp": client.published[-1][1]["timestamp"]}
+
+
+class _Clock:
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+
+def test_run_store_keeps_at_most_three_runs():
+    clock = _Clock()
+    store = inv.RunStore(ttl=600, clock=clock)
+    for i in range(5):
+        clock.t = float(i)
+        store.put(f"r{i}", [str(i)])
+    assert [store.get(f"r{i}") for i in range(5)] == [None, None, ["2"], ["3"], ["4"]]
+
+
+def test_run_store_refuses_a_second_collection_for_the_same_hub():
+    clock = _Clock()
+    store = inv.RunStore(clock=clock)
+    first = store.begin("hub1")
+    assert first is not None
+    assert store.begin("hub1") is None
+    assert store.begin("hub2") is not None  # another hub is independent
+    clock.t = 59.9
+    assert store.begin("hub1") is None
+    store.end("hub1", first)
+    assert store.begin("hub1") is not None
+
+
+def test_run_store_lets_a_stuck_collection_be_overtaken():
+    clock = _Clock()
+    store = inv.RunStore(clock=clock)
+    stuck = store.begin("hub1")
+    clock.t = 61
+    fresh = store.begin("hub1")
+    assert fresh is not None
+    store.end("hub1", stuck)  # the stuck one finishing does not free the fresh one's slot
+    assert store.begin("hub1") is None
+    store.end("hub1", fresh)
+    assert store.begin("hub1") is not None
+
+
+def test_answer_refuses_part_one_while_a_collection_is_running():
+    store = inv.RunStore()
+    store.begin("hub1")
+    try:
+        inv.answer({"command_id": "c2", "payload": {}}, FakeListener(), "2.2.1", None, "x", runs=store, hub="hub1")
+    except inv.InventoryError as e:
+        assert str(e) == "busy"
+    else:
+        raise AssertionError("expected busy")
+
+
+def test_answer_frees_the_slot_when_collection_fails():
+    store = inv.RunStore()
+    for _ in range(2):
+        try:
+            inv.answer({"command_id": "c", "payload": {}}, FakeListener(deny={"config/device_registry/list"}),
+                       "2.2.1", None, "x", runs=store, hub="hub1")
+        except inv.InventoryError as e:
+            assert str(e) == "token_not_admin"
+
+
+class _SlowListener(FakeListener):
+    """Each answer takes `cost` seconds of a fake clock; records the timeouts asked for."""
+
+    def __init__(self, clock, cost, **kw):
+        super().__init__(**kw)
+        self.clock, self.cost, self.timeouts = clock, cost, []
+
+    def request(self, payload, timeout=15.0):
+        self.timeouts.append(timeout)
+        if self.cost >= timeout:
+            self.clock.t += timeout
+            return None
+        self.clock.t += self.cost
+        return super().request(payload, timeout)
+
+
+def test_collect_stops_optional_reads_at_the_deadline():
+    clock = _Clock()
+    listener = _SlowListener(clock, cost=14)
+    r = inv.collect(listener, "2.2.1", None, "x", deadline_s=45, clock=clock)
+    # 14 + 14 + 14 = 42 s; the fourth read gets the 3 s left and times out; the fifth is not sent
+    assert listener.timeouts == [15, 15, 15, 3]
+    assert r["errors"] == {"config/area_registry/list": "timeout", "zha/devices": "timeout"}
+    assert clock.t <= 45
+
+
+def test_collect_fails_with_timeout_when_a_required_read_runs_out_of_time():
+    clock = _Clock()
+    listener = _SlowListener(clock, cost=14)
+    try:
+        inv.collect(listener, "2.2.1", None, "x", deadline_s=20, clock=clock)
+    except inv.InventoryError as e:
+        assert str(e) == "timeout"
+    else:
+        raise AssertionError("expected timeout")
+    assert listener.timeouts == [15, 6]  # the entity registry read gets only what is left
+    assert clock.t <= 20
+
+
+def test_collect_reports_unreachable_not_timeout_when_time_is_left():
+    try:
+        inv.collect(type("L", (), {"request": lambda self, p, timeout=15.0: None})(), "2.2.1", None, "x")
+    except inv.InventoryError as e:
+        assert str(e) == "ha_unreachable"
