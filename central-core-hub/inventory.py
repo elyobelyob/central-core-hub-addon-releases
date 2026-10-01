@@ -11,6 +11,8 @@ import re
 import threading
 import time
 
+import privacy
+
 DOMAINS = ("sensor", "binary_sensor", "switch", "climate", "media_player")
 PAGE_CHARS = 96 * 1024  # escaped inside the ACK's JSON, a page stays well under 256 KiB
 MAX_PARTS = 16
@@ -97,12 +99,16 @@ def collect(listener, addon_version, ha_version, now, allowed=None):
     areas = _ask(listener, "config/area_registry/list", errors, False) or []
     zha = _ask(listener, "zha/devices", errors, False) or []
 
+    # Phones and location are left out exactly as on the sensor paths.
+    phone_ids = privacy.phone_entities(devices, listing.get("entities"))
     by_device = {}
     for e in listing.get("entities") or []:
         entity_id, device_id = e.get("ei"), e.get("di")
         if not entity_id or not device_id or e.get("hb"):
             continue
         if entity_id.split(".", 1)[0] not in DOMAINS or (allowed and not allowed(entity_id)):
+            continue
+        if entity_id in phone_ids or privacy.is_location_entity(entity_id):
             continue
         by_device.setdefault(device_id, []).append(entity_id)
 
@@ -112,7 +118,7 @@ def collect(listener, addon_version, ha_version, now, allowed=None):
         idents = d.get("identifiers") or []
         if d.get("disabled_by") or d.get("entry_type") == "service":
             continue
-        if any(i and i[0] == "mobile_app" for i in idents):
+        if privacy.is_phone_device(d):
             continue
         stack, ieee = _stack(idents)
         entities = sorted(by_device.get(d.get("id"), []))

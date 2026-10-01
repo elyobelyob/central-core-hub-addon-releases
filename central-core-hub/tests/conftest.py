@@ -173,3 +173,23 @@ def _restore_swapped_modules():
             sys.modules.pop(name, None)
         else:
             sys.modules[name] = module
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "phone_guard: use the real phone guard (no Home Assistant registry means nothing is sent)"
+    )
+
+
+@_pytest.fixture(autouse=True)
+def _known_phone_set(request, monkeypatch):
+    """Most tests have no Home Assistant registry to read: treat the hub as
+    knowing it has no phones. Tests marked `phone_guard` get the real guard."""
+    if request.node.get_closest_marker("phone_guard"):
+        yield
+        return
+    import privacy
+
+    monkeypatch.setattr(privacy.PhoneGuard, "excluded", lambda self: self._ids if self._at else frozenset())
+    monkeypatch.setattr(privacy.PhoneGuard, "cached", lambda self: self._ids if self._at else frozenset())
+    yield
