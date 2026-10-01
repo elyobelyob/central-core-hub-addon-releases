@@ -277,3 +277,16 @@ def test_stand_in_client_without_guard_still_drops_location():
     c = types.SimpleNamespace(client_id="hub1", ha_api_url="http://localhost:8123", ha_api_token="tok")
     assert [s["entity_id"] for s in handlers._privacy_filter(c, list(STATES))] == [
         "sensor.plug_power", "sensor.pixel_battery_level", "sensor.pixel_wifi_ssid", "sensor.loose_phone_sensor"]
+
+
+def test_main_loop_keeps_the_phone_set_for_the_websocket_thread(hub, monkeypatch):
+    c, sent, _ = hub
+    for name in ("publish_telemetry", "publish_selected_sensor_changes", "_flush_outbox", "publish_sensors"):
+        monkeypatch.setattr(c, name, lambda *a, **k: None)
+    c._connected = True
+    assert c.phones.cached() is None
+    c.run_iteration()
+    assert "sensor.pixel_wifi_ssid" in c.phones.cached()
+    c.selected_sensors = ["sensor.plug_power"]
+    c._on_ha_state_event("sensor.plug_power", _state("sensor.plug_power"))
+    assert list(_telemetry(c, sent)[-1]["data"]) == ["sensor.plug_power"]

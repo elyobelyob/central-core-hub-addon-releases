@@ -2316,6 +2316,13 @@ class CentralCoreClient:
         except Exception:
             _log("Telemetry publish exception", sys.stderr)
         try:
+            # Keep the phone set current: the websocket thread only reads it.
+            guard = getattr(self, "phones", None)
+            if guard is not None:
+                guard.excluded()
+        except Exception:
+            _log("Phone set refresh exception", sys.stderr)
+        try:
             self.publish_selected_sensor_changes()
         except Exception:
             _log("Selected sensor change publish exception", sys.stderr)
