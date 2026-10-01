@@ -541,6 +541,10 @@ def handle_message(
             _run_update_command(client, action, command_id, lambda updater, send: updater.check())
             return
 
+        if topic == f"hubs/{client.client_id}/v1/cmd/inventory/get":
+            _handle_inventory(client, payload_str)
+            return
+
         expected_cmd_topic_v1 = f"hubs/{client.client_id}/v1/cmd/sensors/poll"
         if topic == expected_cmd_topic_v1:
             try:
@@ -729,3 +733,66 @@ def handle_message(
             return
     except Exception:
         traceback.print_exc()  # pragma: no cover
+
+
+def _registry_allows():
+    """The privacy registry (SENSOR_REGISTRY) as a test on entity ids, or None when unset."""
+    import fnmatch
+
+    try:
+        import mqtt_client as _mc
+
+        reg = _mc._load_sensor_registry() or []
+        mode = str((_mc._load_sensor_registry_doc() or {}).get("registry_mode") or "deny").lower()
+    except Exception:
+        return None
+    ids = [e for e in reg if isinstance(e, dict) and isinstance(e.get("entity_id"), str)]
+    allow = [e["entity_id"] for e in ids if e.get("provide")]
+    deny = [e["entity_id"] for e in ids if e.get("provide") is False]
+    if mode == "allow" and allow:
+        return lambda eid: any(fnmatch.fnmatch(eid, p) for p in allow)
+    if mode != "allow" and deny:
+        return lambda eid: not any(fnmatch.fnmatch(eid, p) for p in deny)
+    return None
+
+
+def _handle_inventory(client, payload_str):
+    """cmd/inventory/get: answer with one page of the read-only device inventory."""
+    import inventory
+
+    try:
+        cmd = json.loads(payload_str) if payload_str and payload_str != "<binary>" else {}
+    except Exception:
+        cmd = {}
+    if not isinstance(cmd, dict):
+        cmd = {}
+    command_id = cmd.get("command_id")
+    action = "inventory/get"
+    _send_ack(client, action, command_id, {"status": "acknowledged", "timestamp": _utc_now_iso()})
+    try:
+        import mqtt_client as _mc
+
+        addon_version = _mc.get_addon_version()
+    except Exception:
+        addon_version = None
+    try:
+        result = inventory.answer(
+            cmd,
+            getattr(client, "_ha_ws_listener", None),
+            addon_version,
+            getattr(client, "_ha_version_cache", None),
+            _utc_now_iso(),
+            _registry_allows(),
+        )
+        payload = {"status": "completed", "result": result, "timestamp": _utc_now_iso()}
+    except inventory.InventoryError as e:
+        payload = {"status": "failed", "result": {"reason": str(e)}, "timestamp": _utc_now_iso()}
+    except Exception:
+        payload = {"status": "failed", "result": {"reason": "inventory_failed"}, "timestamp": _utc_now_iso()}
+    if not command_id:
+        return
+    try:
+        # Pages are not kept for resending: the vault asks again if one is lost.
+        client._publish(_ack_topic(client, action, command_id), json.dumps(payload), qos=1, persist=False)
+    except Exception:
+        pass
