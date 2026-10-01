@@ -72,12 +72,22 @@ def _int(v):
         return None
 
 
-def _zigbee(zha_devices):
-    nodes = []
+def _zigbee(zha_devices, hidden_devices=(), hidden_ieees=()):
+    """ZHA's nodes and links, without the devices the privacy rules hide
+    (neither as nodes nor as anyone's neighbour)."""
+    kept = []
+    hidden_ieees = set(hidden_ieees)
     for d in zha_devices or []:
+        ieee = _ieee(d.get("ieee"))
+        if d.get("device_reg_id") in hidden_devices or ieee in hidden_ieees:
+            hidden_ieees.add(ieee)
+        else:
+            kept.append((ieee, d))
+    nodes = []
+    for ieee, d in kept:
         rssi = _int(d.get("rssi"))
         nodes.append({
-            "ieee": _ieee(d.get("ieee")),
+            "ieee": ieee,
             "type": d.get("device_type"),
             "lqi": _int(d.get("lqi")),
             "rssi": None if rssi == 0 else rssi,  # Home Assistant reports the coordinator as 0
@@ -85,9 +95,23 @@ def _zigbee(zha_devices):
             "last_seen": d.get("last_seen"),
             "neighbours": [{"ieee": _ieee(n.get("ieee")), "lqi": _int(n.get("lqi")),
                             "relationship": n.get("relationship")}
-                           for n in (d.get("neighbors") or [])[:MAX_NEIGHBOURS]],
+                           for n in (d.get("neighbors") or [])[:MAX_NEIGHBOURS]
+                           if _ieee(n.get("ieee")) not in hidden_ieees],
         })
     return nodes
+
+
+def _hidden_devices(devices, entities, allowed):
+    """Device ids the privacy rules hide: phones, and devices that have
+    entities of which the registry allows none."""
+    hidden = {d.get("id") for d in devices if privacy.is_phone_device(d)}
+    if allowed:
+        per_device = {}
+        for e in entities or []:
+            if e.get("ei") and e.get("di"):
+                per_device.setdefault(e["di"], []).append(e["ei"])
+        hidden |= {dev for dev, ids in per_device.items() if not any(allowed(i) for i in ids)}
+    return hidden
 
 
 def collect(listener, addon_version, ha_version, now, allowed=None):
@@ -112,13 +136,15 @@ def collect(listener, addon_version, ha_version, now, allowed=None):
             continue
         by_device.setdefault(device_id, []).append(entity_id)
 
+    hidden = _hidden_devices(devices, listing.get("entities"), allowed)
+    hidden_ieees = {_stack(d.get("identifiers"))[1] for d in devices if d.get("id") in hidden} - {None}
     coordinators = {_ieee(d.get("ieee")) for d in zha if d.get("device_type") == "Coordinator"}
     out = []
     for d in devices:
         idents = d.get("identifiers") or []
         if d.get("disabled_by") or d.get("entry_type") == "service":
             continue
-        if privacy.is_phone_device(d):
+        if d.get("id") in hidden:
             continue
         stack, ieee = _stack(idents)
         entities = sorted(by_device.get(d.get("id"), []))
@@ -138,7 +164,7 @@ def collect(listener, addon_version, ha_version, now, allowed=None):
         "areas": [{"area_id": a.get("area_id"), "name": _clean(a.get("name")), "floor_id": a.get("floor_id")}
                   for a in areas],
         "devices": out,
-        "zigbee": {"nodes": _zigbee(zha), "network_map": None},
+        "zigbee": {"nodes": _zigbee(zha, hidden, hidden_ieees), "network_map": None},
         "errors": errors,
     }
 
