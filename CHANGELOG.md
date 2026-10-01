@@ -1,5 +1,35 @@
 # Changelog
 
+## [2.2.1] - 2026-10-01
+
+Upgrade notes (behaviour a hub owner may notice):
+- Phones and location are never sent. Sensors on Home Assistant Companion app (`mobile_app`) devices
+  (battery, Wi-Fi name, activity, ...), device trackers, people, zones, geocoded location sensors and
+  anything with coordinates are left out of sensor reports, `sensors/set` and the inventory. A vault
+  selection that names one of them stops receiving it; `sensors/set` lists it under `rejected`.
+- If the hub cannot read Home Assistant's device registry (websocket down or token not admin), it
+  cannot tell which sensors are on phones, so it sends no sensors until it can, and logs why.
+  `sensors/set` then fails with `ha_registry_unavailable` and keeps the previous selection.
+- Privacy registry (SENSOR_REGISTRY) fails closed. Migration: `registry_mode: allow` with no
+  `provide: true` entries used to send everything; it now sends nothing (logged once). To keep sending
+  everything, set `registry_mode: all` (everything except `provide: false` entries). An unreadable
+  registry or an unknown mode also sends nothing. No registry at all (the shipped default; the file
+  is not in the image unless `registry/set` wrote one) still sends everything, as before.
+- A plain `http://` Home Assistant URL whose host does not resolve at start-up is now refused (HA
+  integration off, with a log line) instead of accepted. `http://localhost:8123`,
+  `http://homeassistant:8123` and `https://` URLs are unaffected.
+- The start-up warning when `mqtt_tls` is off now names the broker and points to the TLS plan. The
+  default stays `mqtt_tls: false` / 1883 in this release.
+
+- security: the privacy registry is one rule (privacy.py) used by every path; errors deny.
+- security: inventory drops Zigbee nodes, and links to them, for devices the registry hides.
+- security: inventory keeps at most 3 runs; a second part-1 while one is running is refused (`busy`)
+  unless the first is over 60 s old; collecting takes at most 45 s (`timeout`).
+- security: at most 100 inbound commands wait for the worker; more, and any message over 64 KB, are
+  dropped before queueing and logged (at most once per 10 s).
+- docs: docs/security/mqtt-tls-and-command-signing.md, the plan for TLS by default, per-hub
+  credentials and signed commands.
+
 ## [2.2.0] - 2026-10-01
 
 Upgrade notes (behaviour a hub owner may notice):

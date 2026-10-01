@@ -15,18 +15,30 @@ import typing
 from datetime import datetime, timezone
 from typing import Optional
 
-try:
-    import ha_safety as _safety
-except ImportError:  # loaded by path without the add-on directory on sys.path
+
+
+def _sibling(name):
+    """A sibling module, also when loaded by path without the add-on directory on sys.path."""
+    import importlib
     import importlib.util as _ilu
     import pathlib as _pl
     import sys as _sys
 
-    _spec = _ilu.spec_from_file_location("ha_safety", str(_pl.Path(__file__).with_name("ha_safety.py")))
-    assert _spec is not None and _spec.loader is not None
-    _safety = _ilu.module_from_spec(_spec)
-    _spec.loader.exec_module(_safety)
-    _sys.modules["ha_safety"] = _safety
+    if name in _sys.modules:
+        return _sys.modules[name]
+    try:
+        return importlib.import_module(name)
+    except ImportError:
+        spec = _ilu.spec_from_file_location(name, str(_pl.Path(__file__).with_name(f"{name}.py")))
+        assert spec is not None and spec.loader is not None
+        mod = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _sys.modules[name] = mod
+        return mod
+
+
+_safety = _sibling("ha_safety")
+_privacy = _sibling("privacy")
 
 # re-exported for callers of ha_client
 SELECTABLE_DOMAINS = _safety.SELECTABLE_DOMAINS
@@ -181,7 +193,8 @@ def fetch_sensors_by_ids(ha_api_url, ha_api_token, entity_ids, requests_mod=None
             r = req.get(url, headers=headers, timeout=10)
             r.raise_for_status()
             data = r.json()
-            if data.get("entity_id"):
+            if data.get("entity_id") and not _privacy.is_location_entity(data.get("entity_id"),
+                                                                         data.get("attributes")):
                 attrs = sanitize_attributes(data.get("attributes"))
                 results.append(
                     {
@@ -256,6 +269,10 @@ class HAWebSocketListener:
             return
         self.selectors = new
         self._subscribe()
+
+    def is_connected(self):
+        """True while the websocket is open and authenticated (requests can be answered)."""
+        return self._ws is not None and bool(self._authed)
 
     def is_streaming(self):
         """True while a subscription is live and has delivered its snapshot."""

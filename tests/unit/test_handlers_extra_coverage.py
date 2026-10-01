@@ -76,7 +76,8 @@ def test_registry_missing_payload_publishes_failed(tmp_path):
 def test_sensors_set_readback_form_is_refused_and_list_reports(monkeypatch, tmp_path):
     handlers = load_handlers_module()
     # keep the persisted selection out of the add-on directory
-    monkeypatch.setitem(sys.modules, "mqtt_client", types.SimpleNamespace(SELECTED_SENSORS_FILE=tmp_path / "sel.json"))
+    monkeypatch.setitem(sys.modules, "mqtt_client", types.SimpleNamespace(SELECTED_SENSORS_FILE=tmp_path / "sel.json",
+                                                                         is_entity_allowed=lambda _e: True))
     client = DummyClient("setcli")
     client.ha_api_url = "http://ha"
     client.ha_api_token = "tok"

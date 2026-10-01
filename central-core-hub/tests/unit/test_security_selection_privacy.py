@@ -33,6 +33,9 @@ SECRET_ATTRS = {
     "password": "p",
 }
 SAFE_KEYS = {"friendly_name", "device_class", "unit_of_measurement"}
+# An entity with coordinates is not sent at all (test_phone_and_location_privacy);
+# these tests check what is stripped from one that is sent.
+ENTITY_ATTRS = {k: v for k, v in SECRET_ATTRS.items() if k not in ("latitude", "longitude")}
 
 
 def test_sanitize_attributes_strips_secrets_and_location():
@@ -93,7 +96,7 @@ def test_sensors_set_ack_has_no_secret_attributes(tmp_path, monkeypatch):
     body = json.dumps({"command_id": "c1", "payload": {"sensors": ["sensor.a"]}})
 
     def fetch(url, token):
-        return [{"entity_id": "sensor.a", "state": "1", "attributes": dict(SECRET_ATTRS)}]
+        return [{"entity_id": "sensor.a", "state": "1", "attributes": dict(ENTITY_ATTRS)}]
 
     handlers.handle_message(c, msg, body, fetch, None, None, None)
     done = [p for t, p in published if p.get("status") == "completed"][-1]
@@ -115,7 +118,7 @@ def test_sensors_poll_publishes_no_secret_attributes():
     body = json.dumps({"command_id": "p1", "payload": {"sensors": ["door"]}})
 
     def fetch(url, token):
-        return [{"entity_id": "sensor.a", "state": "1", "attributes": dict(SECRET_ATTRS)}]
+        return [{"entity_id": "sensor.a", "state": "1", "attributes": dict(ENTITY_ATTRS)}]
 
     handlers.handle_message(c, msg, body, fetch, None, None, None)
     tele = [p for t, p in published if t == c.preferred_sensors_topic][-1]
@@ -133,7 +136,7 @@ def _real_client(monkeypatch, tmp_path):
 def test_websocket_change_publishes_no_secret_attributes(monkeypatch, tmp_path):
     c, sent = _real_client(monkeypatch, tmp_path)
     c.selected_sensors = ["sensor.a"]
-    c._on_ha_state_event("sensor.a", {"entity_id": "sensor.a", "state": "on", "attributes": dict(SECRET_ATTRS)})
+    c._on_ha_state_event("sensor.a", {"entity_id": "sensor.a", "state": "on", "attributes": dict(ENTITY_ATTRS)})
     assert sent
     assert set(sent[-1][1]["attributes"]["sensor.a"]) == SAFE_KEYS
 
@@ -142,7 +145,7 @@ def test_websocket_change_ignores_non_sensor_entities(monkeypatch, tmp_path):
     c, sent = _real_client(monkeypatch, tmp_path)
     # e.g. an old persisted selection that still names a camera
     c.selected_sensors = ["camera.front_door"]
-    c._on_ha_state_event("camera.front_door", {"state": "idle", "attributes": dict(SECRET_ATTRS)})
+    c._on_ha_state_event("camera.front_door", {"state": "idle", "attributes": dict(ENTITY_ATTRS)})
     assert sent == []
 
 
@@ -153,8 +156,8 @@ def test_fetch_sensors_sanitizes_attributes(monkeypatch):
 
         def json(self):
             return [
-                {"entity_id": "sensor.a", "state": "1", "attributes": dict(SECRET_ATTRS)},
-                {"entity_id": "camera.front", "state": "idle", "attributes": dict(SECRET_ATTRS)},
+                {"entity_id": "sensor.a", "state": "1", "attributes": dict(ENTITY_ATTRS)},
+                {"entity_id": "camera.front", "state": "idle", "attributes": dict(ENTITY_ATTRS)},
             ]
 
     monkeypatch.setattr(_mc(), "requests", types.SimpleNamespace(get=lambda *a, **k: _R()))
@@ -169,7 +172,7 @@ def test_fetch_by_ids_sanitizes_attributes():
             return None
 
         def json(self):
-            return {"entity_id": "sensor.a", "state": "1", "attributes": dict(SECRET_ATTRS)}
+            return {"entity_id": "sensor.a", "state": "1", "attributes": dict(ENTITY_ATTRS)}
 
     req = types.SimpleNamespace(get=lambda *a, **k: _R())
     out = ha_client.fetch_sensors_by_ids("http://ha", "tok", ["sensor.a"], requests_mod=req)

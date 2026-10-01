@@ -32,21 +32,16 @@ def _normalize_ts(ts_str):
 
 
 def _is_entity_allowed(entity_id):
-    """Runtime helper that consults `mqtt_client.is_entity_allowed` when
-    available, falling back to allowing the entity on error.
+    """The privacy registry's verdict (mqtt_client.is_entity_allowed).
+
+    Fails closed: if the registry cannot be consulted, nothing is allowed.
     """
     try:
         import mqtt_client as _mc
 
-        fn = getattr(_mc, "is_entity_allowed", None)
-        if callable(fn):
-            try:
-                return bool(fn(entity_id))
-            except Exception:
-                return True
-        return True
+        return bool(_mc.is_entity_allowed(entity_id))
     except Exception:
-        return True
+        return False
 
 
 # One update or check at a time, off paho's network thread: an update can take
@@ -150,6 +145,38 @@ def _sanitize(attrs):
     return _ha_safety().sanitize_attributes(attrs)
 
 
+def _privacy():
+    try:
+        import privacy
+    except ImportError:
+        import importlib.util as _ilu
+        import pathlib as _pl
+
+        spec = _ilu.spec_from_file_location("privacy", str(_pl.Path(__file__).with_name("privacy.py")))
+        if spec is None or spec.loader is None:
+            raise
+        privacy = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(privacy)
+        sys.modules["privacy"] = privacy
+    return privacy
+
+
+def _privacy_filter(client, states) -> list:
+    """`states` without phone (mobile_app) or location entities.
+
+    The hub's client (CentralCoreClient.privacy_filter) knows which entities
+    are on phones, and returns nothing when it cannot tell. A stand-in client
+    without that method gets the location rules only.
+    """
+    fn = getattr(client, "privacy_filter", None)
+    if callable(fn):
+        kept = fn(states)
+        return kept if isinstance(kept, list) else []
+    privacy = _privacy()
+    return [s for s in states or []
+            if isinstance(s, dict) and not privacy.is_location_entity(s.get("entity_id"), s.get("attributes"))]
+
+
 def _utc_now_iso():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -244,12 +271,25 @@ def _handle_sensors_set(client, cmd, fetch_sensors):
         return
 
     accepted, rejected = [], []
+    privacy = _privacy()
     for ent in requested:
-        if ha_safety.is_selectable_entity(ent):
+        if ha_safety.is_selectable_entity(ent) and not privacy.is_location_entity(ent):
             if ent not in accepted:
                 accepted.append(ent)
         else:
             rejected.append(ent)
+
+    # Phones' entities are refused too. If the hub cannot tell which those
+    # are, the selection is left as it was rather than risk watching one.
+    guard = getattr(client, "phones", None)
+    if guard is not None:
+        phone_ids = guard.excluded()
+        if phone_ids is None:
+            _send_ack(client, action, command_id, {"status": "failed", "result": {"reason": "ha_registry_unavailable"},
+                                                   "timestamp": _utc_now_iso()})
+            return
+        rejected += [e for e in accepted if e in phone_ids]
+        accepted = [e for e in accepted if e not in phone_ids]
 
     try:
         client.selected_sensors = list(accepted)
@@ -266,6 +306,7 @@ def _handle_sensors_set(client, cmd, fetch_sensors):
             for s in (fetch_sensors(getattr(client, "ha_api_url", None), getattr(client, "ha_api_token", None)) or [])
             if s.get("entity_id") in wanted and _is_entity_allowed(s.get("entity_id"))
         ]
+        states = _privacy_filter(client, states)
     except Exception:
         states = []
     report = _states_report(states)
@@ -310,7 +351,8 @@ def _registry_token(client):
 def _valid_registry_doc(doc):
     if not isinstance(doc, dict):
         return False
-    if doc.get("registry_mode") not in (None, "allow", "deny", "ALLOW", "DENY"):
+    mode = doc.get("registry_mode")
+    if mode is not None and (not isinstance(mode, str) or mode.lower() not in ("all", "allow", "deny")):
         return False
     entries = doc.get("entries", [])
     if not isinstance(entries, list):
@@ -585,8 +627,10 @@ def handle_message(
                 return
 
             sensors = fetch_sensors(client.ha_api_url, client.ha_api_token) or []
-            # Always apply SENSOR_REGISTRY filtering at minimum
+            # Always apply SENSOR_REGISTRY filtering at minimum; phones and
+            # location never leave the home.
             sensors = [s for s in sensors if _is_entity_allowed(s.get("entity_id"))]
+            sensors = _privacy_filter(client, sensors)
 
             # Report the sensors whose device class or entity id was asked
             # for. This is a one-off report: the watch list (selected_sensors)
@@ -673,10 +717,7 @@ def handle_message(
                 if getattr(client, "vault_topic", None):
                     selected = getattr(client, "selected_sensors", None) or list(data_map.keys())
                     # Filter the selected sensors through the registry
-                    try:
-                        selected = [s for s in selected if _is_entity_allowed(s)]
-                    except Exception:
-                        pass
+                    selected = [s for s in selected if _is_entity_allowed(s)]
                     reminder = {
                         "schema_version": 1,
                         "client_id": client.client_id,
@@ -736,24 +777,13 @@ def handle_message(
 
 
 def _registry_allows():
-    """The privacy registry (SENSOR_REGISTRY) as a test on entity ids, or None when unset."""
-    import fnmatch
-
+    """The privacy registry as a test on entity ids; denies everything on error."""
     try:
         import mqtt_client as _mc
 
-        reg = _mc._load_sensor_registry() or []
-        mode = str((_mc._load_sensor_registry_doc() or {}).get("registry_mode") or "deny").lower()
+        return _mc.registry_predicate()
     except Exception:
-        return None
-    ids = [e for e in reg if isinstance(e, dict) and isinstance(e.get("entity_id"), str)]
-    allow = [e["entity_id"] for e in ids if e.get("provide")]
-    deny = [e["entity_id"] for e in ids if e.get("provide") is False]
-    if mode == "allow" and allow:
-        return lambda eid: any(fnmatch.fnmatch(eid, p) for p in allow)
-    if mode != "allow" and deny:
-        return lambda eid: not any(fnmatch.fnmatch(eid, p) for p in deny)
-    return None
+        return lambda _eid: False
 
 
 def _handle_inventory(client, payload_str):
@@ -783,6 +813,7 @@ def _handle_inventory(client, payload_str):
             getattr(client, "_ha_version_cache", None),
             _utc_now_iso(),
             _registry_allows(),
+            hub=str(getattr(client, "client_id", "") or ""),
         )
         payload = {"status": "completed", "result": result, "timestamp": _utc_now_iso()}
     except inventory.InventoryError as e:

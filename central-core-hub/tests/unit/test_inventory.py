@@ -116,6 +116,37 @@ def test_should_apply_privacy_filter_when_given():
     assert devices["Hallway Plug"]["entities"] == ["switch.hallway_plug"]
 
 
+def test_should_drop_zigbee_nodes_and_links_of_devices_the_registry_hides():
+    # every entity of the hallway plug (ieee ...02, device d1) is denied
+    r = inv.collect(FakeListener(), addon_version="2.2.0", ha_version=None, now="x",
+                    allowed=lambda e: "hallway_plug" not in e)
+    assert "Hallway Plug" not in {d["name"] for d in r["devices"]}
+    nodes = {n["ieee"]: n for n in r["zigbee"]["nodes"]}
+    assert "00124b0000000002" not in nodes
+    assert nodes["00124b0000000001"]["neighbours"] == []  # the coordinator's link to it is gone too
+    assert "00124b0000000002" not in json.dumps(r)
+
+
+def test_should_hide_a_zigbee_node_matched_by_ieee_without_device_reg_id():
+    zha = [dict(z, device_reg_id=None) for z in ZHA]
+
+    class L(FakeListener):
+        def request(self, payload, timeout=15.0):
+            reply = super().request(payload, timeout)
+            return {"success": True, "result": zha} if payload["type"] == "zha/devices" else reply
+
+    r = inv.collect(L(), addon_version="2.2.0", ha_version=None, now="x", allowed=lambda e: "hallway_plug" not in e)
+    assert [n["ieee"] for n in r["zigbee"]["nodes"]] == ["00124b0000000001"]
+
+
+def test_should_keep_zigbee_nodes_when_some_entities_are_allowed():
+    r = inv.collect(FakeListener(), addon_version="2.2.0", ha_version=None, now="x",
+                    allowed=lambda e: not e.startswith("sensor."))
+    nodes = {n["ieee"]: n for n in r["zigbee"]["nodes"]}
+    assert "00124b0000000002" in nodes
+    assert nodes["00124b0000000001"]["neighbours"][0]["ieee"] == "00124b0000000002"
+
+
 def test_should_never_send_location_or_states():
     text = json.dumps(_report())
     for word in ("latitude", "longitude", "state", "attributes", "picture"):
@@ -173,3 +204,113 @@ def test_should_fail_with_reason_when_ha_unreachable():
     handlers._handle_inventory(client, json.dumps({"command_id": "c2", "payload": {}}))
     assert client.published[-1][1] == {"status": "failed", "result": {"reason": "ha_unreachable"},
                                        "timestamp": client.published[-1][1]["timestamp"]}
+
+
+class _Clock:
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+
+def test_run_store_keeps_at_most_three_runs():
+    clock = _Clock()
+    store = inv.RunStore(ttl=600, clock=clock)
+    for i in range(5):
+        clock.t = float(i)
+        store.put(f"r{i}", [str(i)])
+    assert [store.get(f"r{i}") for i in range(5)] == [None, None, ["2"], ["3"], ["4"]]
+
+
+def test_run_store_refuses_a_second_collection_for_the_same_hub():
+    clock = _Clock()
+    store = inv.RunStore(clock=clock)
+    first = store.begin("hub1")
+    assert first is not None
+    assert store.begin("hub1") is None
+    assert store.begin("hub2") is not None  # another hub is independent
+    clock.t = 59.9
+    assert store.begin("hub1") is None
+    store.end("hub1", first)
+    assert store.begin("hub1") is not None
+
+
+def test_run_store_lets_a_stuck_collection_be_overtaken():
+    clock = _Clock()
+    store = inv.RunStore(clock=clock)
+    stuck = store.begin("hub1")
+    clock.t = 61
+    fresh = store.begin("hub1")
+    assert fresh is not None
+    store.end("hub1", stuck)  # the stuck one finishing does not free the fresh one's slot
+    assert store.begin("hub1") is None
+    store.end("hub1", fresh)
+    assert store.begin("hub1") is not None
+
+
+def test_answer_refuses_part_one_while_a_collection_is_running():
+    store = inv.RunStore()
+    store.begin("hub1")
+    try:
+        inv.answer({"command_id": "c2", "payload": {}}, FakeListener(), "2.2.1", None, "x", runs=store, hub="hub1")
+    except inv.InventoryError as e:
+        assert str(e) == "busy"
+    else:
+        raise AssertionError("expected busy")
+
+
+def test_answer_frees_the_slot_when_collection_fails():
+    store = inv.RunStore()
+    for _ in range(2):
+        try:
+            inv.answer({"command_id": "c", "payload": {}}, FakeListener(deny={"config/device_registry/list"}),
+                       "2.2.1", None, "x", runs=store, hub="hub1")
+        except inv.InventoryError as e:
+            assert str(e) == "token_not_admin"
+
+
+class _SlowListener(FakeListener):
+    """Each answer takes `cost` seconds of a fake clock; records the timeouts asked for."""
+
+    def __init__(self, clock, cost, **kw):
+        super().__init__(**kw)
+        self.clock, self.cost, self.timeouts = clock, cost, []
+
+    def request(self, payload, timeout=15.0):
+        self.timeouts.append(timeout)
+        if self.cost >= timeout:
+            self.clock.t += timeout
+            return None
+        self.clock.t += self.cost
+        return super().request(payload, timeout)
+
+
+def test_collect_stops_optional_reads_at_the_deadline():
+    clock = _Clock()
+    listener = _SlowListener(clock, cost=14)
+    r = inv.collect(listener, "2.2.1", None, "x", deadline_s=45, clock=clock)
+    # 14 + 14 + 14 = 42 s; the fourth read gets the 3 s left and times out; the fifth is not sent
+    assert listener.timeouts == [15, 15, 15, 3]
+    assert r["errors"] == {"config/area_registry/list": "timeout", "zha/devices": "timeout"}
+    assert clock.t <= 45
+
+
+def test_collect_fails_with_timeout_when_a_required_read_runs_out_of_time():
+    clock = _Clock()
+    listener = _SlowListener(clock, cost=14)
+    try:
+        inv.collect(listener, "2.2.1", None, "x", deadline_s=20, clock=clock)
+    except inv.InventoryError as e:
+        assert str(e) == "timeout"
+    else:
+        raise AssertionError("expected timeout")
+    assert listener.timeouts == [15, 6]  # the entity registry read gets only what is left
+    assert clock.t <= 20
+
+
+def test_collect_reports_unreachable_not_timeout_when_time_is_left():
+    try:
+        inv.collect(type("L", (), {"request": lambda self, p, timeout=15.0: None})(), "2.2.1", None, "x")
+    except inv.InventoryError as e:
+        assert str(e) == "ha_unreachable"
