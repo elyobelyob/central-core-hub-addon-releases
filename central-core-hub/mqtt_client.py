@@ -317,6 +317,13 @@ SHARED_DEFAULT_CLIENT_ID = "home-assistant"
 _GENERIC_HOSTNAMES = {"", "localhost", "homeassistant", "home-assistant", "hassio", "supervisor"}
 MQTT_OPTIONS_ENV = "MQTT_OPTIONS_PATH"
 SENSOR_REGISTRY = pathlib.Path(__file__).parent / "SENSOR_REGISTRY.yaml"
+# Inbound commands wait here for the worker. Bounded so a flood of messages
+# cannot grow memory without limit; over the limit, messages are dropped.
+WORK_QUEUE_MAX = 100
+# Larger inbound messages are dropped before they are queued (the handlers
+# refuse anything this size anyway; see handlers.MAX_COMMAND_BYTES).
+MAX_INBOUND_BYTES = 64 * 1024
+DROP_LOG_INTERVAL_S = 10
 
 # File to persist the vault-selected sensors so selections survive restarts.
 # Default to the add-on data directory (`/data`) so the file survives
@@ -1206,7 +1213,7 @@ class CentralCoreClient:
         self._stop_event = threading.Event()
         # Work that may wait on Home Assistant (command handlers, the
         # on-connect sensor publish) runs here, not on paho's network thread.
-        self._work_queue = queue.Queue()
+        self._work_queue = queue.Queue(maxsize=WORK_QUEUE_MAX)
         self._worker = None
         # Cache the last HA version we observed so telemetry can reuse it
         self._ha_version_cache = None
@@ -1294,7 +1301,7 @@ class CentralCoreClient:
         if worker is not None and worker.is_alive():
             return
         if getattr(self, "_work_queue", None) is None:
-            self._work_queue = queue.Queue()
+            self._work_queue = queue.Queue(maxsize=WORK_QUEUE_MAX)
         self._worker = threading.Thread(target=self._work_loop, name="hub-worker", daemon=True)
         self._worker.start()
 
@@ -1325,9 +1332,24 @@ class CentralCoreClient:
         """Run `fn(*args)` on the worker thread, or inline when no worker runs."""
         worker = getattr(self, "_worker", None)
         if worker is not None and worker.is_alive():
-            self._work_queue.put((fn, args))
+            try:
+                self._work_queue.put_nowait((fn, args))
+            except queue.Full:
+                # Never block paho's network thread: drop, and say so.
+                self._log_drop(f"work queue full ({WORK_QUEUE_MAX}); dropped {getattr(fn, '__name__', fn)}")
+                return False
         else:
             fn(*args)
+        return True
+
+    def _log_drop(self, reason):
+        """Log a dropped message; during a flood, at most one line per DROP_LOG_INTERVAL_S."""
+        self._drops = getattr(self, "_drops", 0) + 1
+        now = time.monotonic()
+        last = getattr(self, "_last_drop_log", None)
+        if last is None or now - last >= DROP_LOG_INTERVAL_S:
+            _log(f"WARNING: {reason} ({self._drops} dropped since start)")
+            self._last_drop_log = now
 
     def wait_for_commands(self, timeout=None):
         """Wait until queued work is done; True if it finished within `timeout`."""
@@ -1770,14 +1792,16 @@ class CentralCoreClient:
     def on_message(self, _client, userdata, msg):
         try:
             try:
-                payload = msg.payload.decode("utf-8", errors="replace")
-            except Exception:
-                payload = "<binary>"
-
-            try:
                 size = len(msg.payload)
             except Exception:
                 size = "?"
+            if isinstance(size, int) and size > MAX_INBOUND_BYTES:
+                self._log_drop(f"dropped MQTT message on {msg.topic}: {size} bytes is over {MAX_INBOUND_BYTES}")
+                return
+            try:
+                payload = msg.payload.decode("utf-8", errors="replace")
+            except Exception:
+                payload = "<binary>"
             _log(f"MQTT <- {msg.topic} len={size} retain={getattr(msg, 'retain', False) is True}")
             _log_debug(f"MQTT <- {msg.topic} payload={_preview(payload)}")
             # Handlers may call Home Assistant: run them on the worker.
