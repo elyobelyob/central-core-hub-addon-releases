@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.2] - 2026-10-02
+
+- The hub now uses the same MQTT protocol package as the vault: `central-core-mqtt-shared` v1.0.2
+  (it shipped v1.0.0 before). The only change is that incoming sensor messages keep `attributes`
+  and `device_class`; nothing on the wire changes. Both requirement files pin the commit of the `v1.0.2` tag,
+  and a test fails if they ever differ.
+
 ## [2.2.1] - 2026-10-01
 
 Upgrade notes (behaviour a hub owner may notice):
