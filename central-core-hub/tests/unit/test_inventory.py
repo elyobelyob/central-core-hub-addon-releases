@@ -116,6 +116,37 @@ def test_should_apply_privacy_filter_when_given():
     assert devices["Hallway Plug"]["entities"] == ["switch.hallway_plug"]
 
 
+def test_should_drop_zigbee_nodes_and_links_of_devices_the_registry_hides():
+    # every entity of the hallway plug (ieee ...02, device d1) is denied
+    r = inv.collect(FakeListener(), addon_version="2.2.0", ha_version=None, now="x",
+                    allowed=lambda e: "hallway_plug" not in e)
+    assert "Hallway Plug" not in {d["name"] for d in r["devices"]}
+    nodes = {n["ieee"]: n for n in r["zigbee"]["nodes"]}
+    assert "00124b0000000002" not in nodes
+    assert nodes["00124b0000000001"]["neighbours"] == []  # the coordinator's link to it is gone too
+    assert "00124b0000000002" not in json.dumps(r)
+
+
+def test_should_hide_a_zigbee_node_matched_by_ieee_without_device_reg_id():
+    zha = [dict(z, device_reg_id=None) for z in ZHA]
+
+    class L(FakeListener):
+        def request(self, payload, timeout=15.0):
+            reply = super().request(payload, timeout)
+            return {"success": True, "result": zha} if payload["type"] == "zha/devices" else reply
+
+    r = inv.collect(L(), addon_version="2.2.0", ha_version=None, now="x", allowed=lambda e: "hallway_plug" not in e)
+    assert [n["ieee"] for n in r["zigbee"]["nodes"]] == ["00124b0000000001"]
+
+
+def test_should_keep_zigbee_nodes_when_some_entities_are_allowed():
+    r = inv.collect(FakeListener(), addon_version="2.2.0", ha_version=None, now="x",
+                    allowed=lambda e: not e.startswith("sensor."))
+    nodes = {n["ieee"]: n for n in r["zigbee"]["nodes"]}
+    assert "00124b0000000002" in nodes
+    assert nodes["00124b0000000001"]["neighbours"][0]["ieee"] == "00124b0000000002"
+
+
 def test_should_never_send_location_or_states():
     text = json.dumps(_report())
     for word in ("latitude", "longitude", "state", "attributes", "picture"):
