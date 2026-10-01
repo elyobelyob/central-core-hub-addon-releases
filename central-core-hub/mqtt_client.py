@@ -317,6 +317,13 @@ SHARED_DEFAULT_CLIENT_ID = "home-assistant"
 _GENERIC_HOSTNAMES = {"", "localhost", "homeassistant", "home-assistant", "hassio", "supervisor"}
 MQTT_OPTIONS_ENV = "MQTT_OPTIONS_PATH"
 SENSOR_REGISTRY = pathlib.Path(__file__).parent / "SENSOR_REGISTRY.yaml"
+# Inbound commands wait here for the worker. Bounded so a flood of messages
+# cannot grow memory without limit; over the limit, messages are dropped.
+WORK_QUEUE_MAX = 100
+# Larger inbound messages are dropped before they are queued (the handlers
+# refuse anything this size anyway; see handlers.MAX_COMMAND_BYTES).
+MAX_INBOUND_BYTES = 64 * 1024
+DROP_LOG_INTERVAL_S = 10
 
 # File to persist the vault-selected sensors so selections survive restarts.
 # Default to the add-on data directory (`/data`) so the file survives
@@ -392,16 +399,20 @@ def _load_sensor_registry():
         return []
 
 
-def _load_sensor_registry_doc():
+class RegistryError(Exception):
+    """The privacy registry exists but cannot be read; callers deny everything."""
+
+
+def _load_sensor_registry_doc(strict=False):
     """Load and cache the full SENSOR_REGISTRY.yaml document dict.
 
     Uses mtime-based caching so the file is only read when it changes.
-    Returns an empty dict if the file is absent, unreadable, or malformed.
+    Returns {} if the file is absent. If it exists but cannot be read or
+    parsed, returns {} or, with `strict`, raises RegistryError: anything
+    deciding what may be sent must use strict and deny on error.
     """
     global _SENSOR_REGISTRY_DOC_CACHE, _SENSOR_REGISTRY_DOC_MTIME
     try:
-        import yaml
-
         if not SENSOR_REGISTRY.exists():
             _SENSOR_REGISTRY_DOC_CACHE = {}
             _SENSOR_REGISTRY_DOC_MTIME = None
@@ -412,13 +423,39 @@ def _load_sensor_registry_doc():
             mtime = None
         if _SENSOR_REGISTRY_DOC_CACHE is not None and mtime is not None and mtime == _SENSOR_REGISTRY_DOC_MTIME:
             return _SENSOR_REGISTRY_DOC_CACHE
+        import yaml
+
         with open(SENSOR_REGISTRY, "r") as f:
             doc = yaml.safe_load(f) or {}
-        _SENSOR_REGISTRY_DOC_CACHE = doc if isinstance(doc, dict) else {}
+        if not isinstance(doc, dict):
+            raise RegistryError("the privacy registry is not a mapping")
+        _SENSOR_REGISTRY_DOC_CACHE = doc
         _SENSOR_REGISTRY_DOC_MTIME = mtime
         return _SENSOR_REGISTRY_DOC_CACHE
-    except Exception:
+    except Exception as exc:
+        _SENSOR_REGISTRY_DOC_CACHE = None
+        _SENSOR_REGISTRY_DOC_MTIME = None
+        if strict:
+            raise exc if isinstance(exc, RegistryError) else RegistryError(str(exc)) from exc
         return {}
+
+
+_REGISTRY_PROBLEM_LOGGED = None
+
+
+def registry_predicate():
+    """The privacy registry as `allowed(entity_id) -> bool`. Fails closed: an
+    unreadable registry or an unknown mode allows nothing (and is logged)."""
+    global _REGISTRY_PROBLEM_LOGGED
+    privacy = _sibling("privacy")
+    try:
+        allowed, problem = privacy.registry_rule(_load_sensor_registry_doc(strict=True))
+    except Exception as exc:
+        allowed, problem = privacy.deny_all, f"the privacy registry cannot be read ({exc}); nothing is sent"
+    if problem and problem != _REGISTRY_PROBLEM_LOGGED:
+        _log(f"WARNING: {problem}")
+    _REGISTRY_PROBLEM_LOGGED = problem
+    return allowed
 
 
 def reload_sensor_registry():
@@ -477,54 +514,14 @@ def list_monitored_sensors():
 
 
 def is_entity_allowed(entity_id: str) -> bool:
-    """Return True if entity_id is allowed by the registry (uses mtime cache).
+    """True if the privacy registry allows sending `entity_id`.
 
-    Defaults to True (allow) when the registry is absent or not enabled.
+    No registry (or one not opted in) allows everything; any error denies.
     """
     try:
-        import fnmatch
-
-        doc = _load_sensor_registry_doc()
-        if not doc:
-            return True
-        mode = doc.get("registry_mode")
-        apply_registry = bool(doc.get("apply_registry", False))
-        if mode is None and not apply_registry:
-            return True
-        active_mode = str(mode).lower() if mode else "deny"
-
-        allow_patterns = []
-        deny_patterns = []
-        for e in doc.get("entries") or []:
-            if not isinstance(e, dict):
-                continue
-            eid = e.get("entity_id")
-            prov = e.get("provide")
-            if not isinstance(eid, str):
-                continue
-            if active_mode == "allow":
-                if prov:
-                    allow_patterns.append(eid)
-            else:
-                if prov is False:
-                    deny_patterns.append(eid)
-
-        if active_mode == "allow":
-            if not allow_patterns:
-                return True
-            for p in allow_patterns:
-                if fnmatch.fnmatch(entity_id, p):
-                    return True
-            return False
-
-        if not deny_patterns:
-            return True
-        for p in deny_patterns:
-            if fnmatch.fnmatch(entity_id, p):
-                return False
-        return True
+        return bool(registry_predicate()(entity_id))
     except Exception:
-        return True
+        return False
 
 
 def _certificate_common_name(cert_path):
@@ -883,22 +880,26 @@ def get_cpu_percent():  # noqa: F811
         return None
 
 
-def _ha_safety():
-    """The sibling ha_safety module, also when this file was loaded by path
-    (the add-on directory not on sys.path)."""
+def _sibling(name):
+    """A sibling module of this file (ha_safety, privacy), also when this file
+    was loaded by path (the add-on directory not on sys.path)."""
+    mod = sys.modules.get(name)
+    if mod is not None:
+        return mod
     try:
-        import ha_safety
+        return importlib.import_module(name)
     except ImportError:
-        import importlib.util as _ilu
-        import pathlib as _pl
-
-        spec = _ilu.spec_from_file_location("ha_safety", str(_pl.Path(__file__).with_name("ha_safety.py")))
+        spec = importlib.util.spec_from_file_location(name, str(pathlib.Path(__file__).with_name(f"{name}.py")))
         if spec is None or spec.loader is None:
             raise
-        ha_safety = _ilu.module_from_spec(spec)
-        spec.loader.exec_module(ha_safety)
-        sys.modules["ha_safety"] = ha_safety
-    return ha_safety
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        sys.modules[name] = mod
+        return mod
+
+
+def _ha_safety():
+    return _sibling("ha_safety")
 
 
 def _sanitize_attributes(attrs):
@@ -942,6 +943,9 @@ def fetch_sensors(ha_api_url, ha_api_token, _safe_device_classes=None):
                 continue
             if not (ent_id.startswith("sensor.") or ent_id.startswith("binary_sensor.")):
                 continue
+            # Location never leaves the home (judged on the raw attributes).
+            if _sibling("privacy").is_location_entity(ent_id, ent.get("attributes")):
+                continue
 
             attrs = _sanitize_attributes(ent.get("attributes"))
             # Device class resolution deferred until after registry check
@@ -957,75 +961,20 @@ def fetch_sensors(ha_api_url, ha_api_token, _safe_device_classes=None):
                 }
             )
 
-        # Consult SENSOR_REGISTRY if present. Registry is the source-of-truth:
-        reg = _load_sensor_registry()
-        if not reg:
-            return sensors
-
-        # If registry is present, ensure sensors have device_class either from
-        # HA attributes or from the registry; exclude those without one.
-        resolved = []
-        for s in sensors:
-            ent_id = s.get("entity_id")
-            dc = s.get("device_class")
-            if not dc:
-                try:
-                    dc = _device_class_from_registry(ent_id)
-                except Exception:
-                    dc = None
-            if not dc:
-                continue
-            s["device_class"] = dc
-            resolved.append(s)
-        sensors = resolved
-
-        import fnmatch
-
-        # registry_mode from the (cached) registry document
-        mode = (_load_sensor_registry_doc() or {}).get("registry_mode")
-
-        active_mode = str(mode).lower() if mode else "deny"
-
-        allow_patterns = []
-        deny_patterns = []
-        for e in reg:
-            eid = e.get("entity_id")
-            prov = e.get("provide")
-            if not isinstance(eid, str):
-                continue
-            if active_mode == "allow":
-                if prov:
-                    allow_patterns.append(eid)
-            else:
-                if prov is False:
-                    deny_patterns.append(eid)
-
-        if active_mode == "allow":
-            if not allow_patterns:
-                return sensors
-            filtered = []
+        # With registry entries, a sensor needs a device_class (from Home
+        # Assistant or the registry); those without one are left out.
+        if _load_sensor_registry():
+            resolved = []
             for s in sensors:
-                ent = s.get("entity_id")
-                for p in allow_patterns:
-                    if fnmatch.fnmatch(ent, p):
-                        filtered.append(s)
-                        break
-            return filtered
+                dc = s.get("device_class") or _device_class_from_registry(s.get("entity_id"))
+                if dc:
+                    s["device_class"] = dc
+                    resolved.append(s)
+            sensors = resolved
 
-        # deny mode
-        if not deny_patterns:
-            return sensors
-        filtered = []
-        for s in sensors:
-            ent = s.get("entity_id")
-            denied = False
-            for p in deny_patterns:
-                if fnmatch.fnmatch(ent, p):
-                    denied = True
-                    break
-            if not denied:
-                filtered.append(s)
-        return filtered
+        # The privacy registry decides what may leave (fails closed).
+        allowed = registry_predicate()
+        return [s for s in sensors if allowed(s.get("entity_id"))]
     except Exception:
         return None
 
@@ -1039,7 +988,12 @@ class CentralCoreClient:
         self.mqtt_password = options.get("mqtt_password") or ""
         self.mqtt_tls = bool(options.get("mqtt_tls"))
         if not self.mqtt_tls:
-            _log("WARNING: mqtt_tls is off; the MQTT password and all telemetry travel unencrypted")
+            _log(
+                f"WARNING: mqtt_tls is off: the MQTT password, telemetry and commands travel unencrypted to "
+                f"{self.mqtt_host or '(no host)'}:{self.mqtt_port}, and anyone on the path can read or alter them. "
+                "Turn on mqtt_tls with the vault's certificate bundle (port 8883). A future release will "
+                "require TLS; see docs/security/mqtt-tls-and-command-signing.md."
+            )
         self.mqtt_ca = ""
         self.mqtt_cert = ""
         self.mqtt_key = ""
@@ -1073,8 +1027,6 @@ class CentralCoreClient:
                 )
                 self.ha_api_url = ""
                 self.ha_api_token = ""
-            elif why != "encrypted" and why != "local name" and why != "local address":
-                _log(f"WARNING: Home Assistant URL {self.ha_api_url!r}: {why}")
         if options.get("debug_logging"):
             global _DEBUG_LOGGING
             _DEBUG_LOGGING = True
@@ -1204,11 +1156,15 @@ class CentralCoreClient:
         except Exception:
             self._outbox = None
 
+        # Entities on phones (mobile_app) never leave the home; their ids
+        # come from Home Assistant's registries over the websocket.
+        self.phones = _sibling("privacy").PhoneGuard(lambda: getattr(self, "_ha_ws_listener", None))
+
         self._connected = False
         self._stop_event = threading.Event()
         # Work that may wait on Home Assistant (command handlers, the
         # on-connect sensor publish) runs here, not on paho's network thread.
-        self._work_queue = queue.Queue()
+        self._work_queue = queue.Queue(maxsize=WORK_QUEUE_MAX)
         self._worker = None
         # Cache the last HA version we observed so telemetry can reuse it
         self._ha_version_cache = None
@@ -1296,7 +1252,7 @@ class CentralCoreClient:
         if worker is not None and worker.is_alive():
             return
         if getattr(self, "_work_queue", None) is None:
-            self._work_queue = queue.Queue()
+            self._work_queue = queue.Queue(maxsize=WORK_QUEUE_MAX)
         self._worker = threading.Thread(target=self._work_loop, name="hub-worker", daemon=True)
         self._worker.start()
 
@@ -1327,9 +1283,24 @@ class CentralCoreClient:
         """Run `fn(*args)` on the worker thread, or inline when no worker runs."""
         worker = getattr(self, "_worker", None)
         if worker is not None and worker.is_alive():
-            self._work_queue.put((fn, args))
+            try:
+                self._work_queue.put_nowait((fn, args))
+            except queue.Full:
+                # Never block paho's network thread: drop, and say so.
+                self._log_drop(f"work queue full ({WORK_QUEUE_MAX}); dropped {getattr(fn, '__name__', fn)}")
+                return False
         else:
             fn(*args)
+        return True
+
+    def _log_drop(self, reason):
+        """Log a dropped message; during a flood, at most one line per DROP_LOG_INTERVAL_S."""
+        self._drops = getattr(self, "_drops", 0) + 1
+        now = time.monotonic()
+        last = getattr(self, "_last_drop_log", None)
+        if last is None or now - last >= DROP_LOG_INTERVAL_S:
+            _log(f"WARNING: {reason} ({self._drops} dropped since start)")
+            self._last_drop_log = now
 
     def wait_for_commands(self, timeout=None):
         """Wait until queued work is done; True if it finished within `timeout`."""
@@ -1581,6 +1552,24 @@ class CentralCoreClient:
                 pass
             return None
 
+    def privacy_filter(self, states, wait=True):
+        """`states` without phone or location entities.
+
+        `wait=False` uses only the phone ids already known (for the
+        websocket thread, which must not wait on Home Assistant). If they are
+        not known, nothing is returned: any entity might be a phone's.
+        """
+        privacy = _sibling("privacy")
+        guard = getattr(self, "phones", None)
+        ids = None if guard is None else (guard.excluded() if wait else guard.cached())
+        if ids is None and states:
+            now = time.monotonic()
+            if now - getattr(self, "_last_phone_warning", -1e9) >= 300:
+                self._last_phone_warning = now
+                _log("WARNING: cannot read Home Assistant's device registry to exclude phones; sending no sensors")
+        return [s for s in states or []
+                if isinstance(s, dict) and privacy.leaves_home(s.get("entity_id"), s.get("attributes"), ids)]
+
     def _on_ha_state_event(self, entity_id, new_state):
         """Handle HA websocket state_changed events for selected sensors."""
         if not entity_id:
@@ -1592,13 +1581,11 @@ class CentralCoreClient:
 
         # Respect the central SENSOR_REGISTRY: if the entity is not allowed
         # by the registry, skip publishing its state changes even if selected.
-        try:
-            if not is_entity_allowed(entity_id):
-                _log(f"Registry denies publishing for {entity_id}; skipping")
-                return
-        except Exception:
-            # If registry check fails, fall back to previous behavior
-            pass
+        if not is_entity_allowed(entity_id):
+            _log_debug(f"Registry denies publishing for {entity_id}; skipping")
+            return
+        if not self.privacy_filter([dict(new_state, entity_id=entity_id)], wait=False):
+            return
 
         if not _is_selectable_entity(entity_id):
             return
@@ -1772,14 +1759,16 @@ class CentralCoreClient:
     def on_message(self, _client, userdata, msg):
         try:
             try:
-                payload = msg.payload.decode("utf-8", errors="replace")
-            except Exception:
-                payload = "<binary>"
-
-            try:
                 size = len(msg.payload)
             except Exception:
                 size = "?"
+            if isinstance(size, int) and size > MAX_INBOUND_BYTES:
+                self._log_drop(f"dropped MQTT message on {msg.topic}: {size} bytes is over {MAX_INBOUND_BYTES}")
+                return
+            try:
+                payload = msg.payload.decode("utf-8", errors="replace")
+            except Exception:
+                payload = "<binary>"
             _log(f"MQTT <- {msg.topic} len={size} retain={getattr(msg, 'retain', False) is True}")
             _log_debug(f"MQTT <- {msg.topic} payload={_preview(payload)}")
             # Handlers may call Home Assistant: run them on the worker.
@@ -2045,7 +2034,7 @@ class CentralCoreClient:
         if not self.ha_api_url or not self.ha_api_token:
             # HA integration not configured
             return
-        sensors = fetch_sensors(self.ha_api_url, self.ha_api_token) or []
+        sensors = self.privacy_filter(fetch_sensors(self.ha_api_url, self.ha_api_token) or [])
         # Filter by safe_device_classes if configured
         filtered = self._filter_sensors_by_device_class(sensors, self.safe_device_classes)
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -2096,7 +2085,7 @@ class CentralCoreClient:
         if not self.ha_api_url or not self.ha_api_token:
             # HA integration not configured
             return
-        sensors = fetch_sensors(self.ha_api_url, self.ha_api_token) or []
+        sensors = self.privacy_filter(fetch_sensors(self.ha_api_url, self.ha_api_token) or [])
         # Note: fetch_sensors already applies SENSOR_REGISTRY filtering
         payload = {
             "schema_version": 1,
@@ -2147,11 +2136,11 @@ class CentralCoreClient:
         """Current states of the watched entities, sent by HA when a websocket
         subscription starts (startup, reconnect, selection change)."""
         try:
-            self._publish_selected_states(states or [])
+            self._publish_selected_states(states or [], wait=False)
         except Exception:
             _log("Failed to publish websocket snapshot", sys.stderr)
 
-    def _publish_selected_states(self, sensors):
+    def _publish_selected_states(self, sensors, wait=True):
         """Publish the selected entities among `sensors` if any value changed."""
         selected_set = set(self.selected_sensors)
         filtered = [
@@ -2161,6 +2150,7 @@ class CentralCoreClient:
             and _is_selectable_entity(s.get("entity_id"))
             and is_entity_allowed(s.get("entity_id"))
         ]
+        filtered = self.privacy_filter(filtered, wait=wait)
 
         data_map = {}
         names_map = {}
@@ -2325,6 +2315,13 @@ class CentralCoreClient:
             self.publish_telemetry()
         except Exception:
             _log("Telemetry publish exception", sys.stderr)
+        try:
+            # Keep the phone set current: the websocket thread only reads it.
+            guard = getattr(self, "phones", None)
+            if guard is not None:
+                guard.excluded()
+        except Exception:
+            _log("Phone set refresh exception", sys.stderr)
         try:
             self.publish_selected_sensor_changes()
         except Exception:

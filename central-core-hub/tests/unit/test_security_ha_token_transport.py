@@ -43,8 +43,8 @@ def fake_network(monkeypatch):
         "http://supervisor/core",
         "http://192.168.1.10:8123",
         "http://homeassistant.local:8123",
-        # cannot be resolved now, so no connection (and no token) can go anywhere
-        "http://does-not-resolve.example",
+        # https needs no resolution: the token is encrypted whoever answers
+        "https://does-not-resolve.example",
     ],
 )
 def test_allowed(url):
@@ -62,6 +62,10 @@ def test_allowed(url):
         "ftp://localhost",
         "localhost:8123",
         "",
+        # fail closed: a name that does not resolve cannot be shown to be this
+        # machine, and could resolve elsewhere later
+        "http://does-not-resolve.example",
+        "ws://does-not-resolve.example:8123",
     ],
 )
 def test_refused(url):
@@ -81,6 +85,17 @@ def test_client_disables_ha_integration_for_remote_plaintext(monkeypatch, tmp_pa
     assert c._ha_ws_listener is None
     assert any("not sending the Home Assistant token" in m for m in lines)
     assert not any("tok" == m for m in lines)
+
+
+def test_client_disables_ha_integration_for_unresolvable_plaintext_host(monkeypatch, tmp_path):
+    mc = importlib.import_module("mqtt_client")
+    monkeypatch.setattr(mc, "SELECTED_SENSORS_FILE", tmp_path / "sel.json")
+    lines = []
+    monkeypatch.setattr(mc, "_log", lambda m, file=None: lines.append(m))
+    c = mc.CentralCoreClient({"client_id": "hub1", "ha_api_url": "http://does-not-resolve.example:8123",
+                              "ha_api_token": "tok"})
+    assert c.ha_api_token == "" and c.ha_api_url == ""
+    assert any("does not resolve" in m for m in lines)
 
 
 def test_client_keeps_local_config(monkeypatch, tmp_path):

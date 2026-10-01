@@ -77,14 +77,27 @@ The add-on subscribes to Vault-style command topics and supports the following c
 
 	- Behavior:
 		- ACKs to `hubs/<client_id>/v1/ack/sensors.set/<command_id>`.
-		- Keeps ids that are well-formed (`^[a-z0-9_]+\.[a-z0-9_]+$`) `sensor.*` / `binary_sensor.*` entity ids; others are listed in `result.rejected`.
+		- Keeps ids that are well-formed (`^[a-z0-9_]+\.[a-z0-9_]+$`) `sensor.*` / `binary_sensor.*` entity ids; others are listed in `result.rejected`, as are phone and location entities (see "Privacy" below).
+		- If the hub cannot read Home Assistant's device registry it cannot tell which entities are on phones: the command fails with `ha_registry_unavailable` and the previous selection is kept.
 		- Stores the list (it survives restarts) and re-subscribes the Home Assistant websocket to exactly these entities.
 		- Completes with `result.selected`, `result.sensors_reported` (those Home Assistant has now) and the current values.
 	- The add-on never writes state to Home Assistant. Any other payload shape (an `{entity_id: state}` map, a list of objects) gets a `failed` completion with reason `invalid_payload`.
 
 - `hubs/<client_id>/v1/cmd/registry/set` (QoS 1): replace the local SENSOR_REGISTRY. Refused (`registry_updates_disabled`) unless a registry token is configured (`registry_token` option or `REGISTRY_TOKEN`), and the payload must carry the same `token`.
 
-- All commands: retained messages, repeated `command_id`s, `command_id`s outside `^[A-Za-z0-9_.-]{1,64}$` and payloads over 64 KiB are ignored; a command whose `timestamp` is more than 10 minutes old gets a `failed` completion (`stale_command`). The ACK topic uses the action from the command topic.
+- `hubs/<client_id>/v1/cmd/inventory/get` (QoS 1): one page of the read-only device inventory. A part-1 request while a collection is under way is refused (`busy`) unless that one started over 60 s ago; collecting takes at most 45 s (`timeout`); the last 3 runs are kept for 10 minutes for later pages.
+
+- All commands: retained messages, repeated `command_id`s, `command_id`s outside `^[A-Za-z0-9_.-]{1,64}$` and payloads over 64 KiB are ignored; a command whose `timestamp` is more than 10 minutes old gets a `failed` completion (`stale_command`). The ACK topic uses the action from the command topic. At most 100 commands wait for the worker; more are dropped and logged.
+
+### Privacy
+
+- **Phones and location never leave the home.** Entities on devices from Home Assistant's `mobile_app` integration, `device_tracker`/`person`/`zone` entities, `*geocoded_location*` sensors and any entity whose attributes carry `latitude`/`longitude` are left out of every sensor publish, `sensors/set` and the inventory. If the device registry cannot be read, no sensors are sent until it can.
+- **SENSOR_REGISTRY** (`registry_mode`):
+	- absent, or no `registry_mode` and no `apply_registry`: everything is allowed;
+	- `all`: everything except entries with `provide: false`;
+	- `deny`: the same as `all`;
+	- `allow`: only entries with `provide: true`. **An allow list with no such entries allows nothing** (before 2.2.1 it allowed everything; use `all` for that).
+	- A registry that cannot be read, is not a mapping, or has an unknown mode allows nothing, and the log says why.
 
 ### Config update command (Vault-driven)
 

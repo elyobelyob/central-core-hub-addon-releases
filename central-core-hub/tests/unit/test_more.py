@@ -112,7 +112,7 @@ def test_resolve_ha_version_falls_back_to_rest(monkeypatch):
     c = mod.CentralCoreClient(
         {
             "client_id": "unit-ha",
-            "ha_api_url": "http://ha.local",
+            "ha_api_url": "http://localhost:8123",
             "ha_api_token": "tok",
         }
     )
