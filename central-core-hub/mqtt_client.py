@@ -943,6 +943,9 @@ def fetch_sensors(ha_api_url, ha_api_token, _safe_device_classes=None):
                 continue
             if not (ent_id.startswith("sensor.") or ent_id.startswith("binary_sensor.")):
                 continue
+            # Location never leaves the home (judged on the raw attributes).
+            if _sibling("privacy").is_location_entity(ent_id, ent.get("attributes")):
+                continue
 
             attrs = _sanitize_attributes(ent.get("attributes"))
             # Device class resolution deferred until after registry check
@@ -1147,6 +1150,10 @@ class CentralCoreClient:
             self._outbox = PersistentOutbox(OUTBOX_FILE, max_items=OUTBOX_MAX, max_bytes=OUTBOX_MAX_BYTES)
         except Exception:
             self._outbox = None
+
+        # Entities on phones (mobile_app) never leave the home; their ids
+        # come from Home Assistant's registries over the websocket.
+        self.phones = _sibling("privacy").PhoneGuard(lambda: getattr(self, "_ha_ws_listener", None))
 
         self._connected = False
         self._stop_event = threading.Event()
@@ -1540,6 +1547,24 @@ class CentralCoreClient:
                 pass
             return None
 
+    def privacy_filter(self, states, wait=True):
+        """`states` without phone or location entities.
+
+        `wait=False` uses only the phone ids already known (for the
+        websocket thread, which must not wait on Home Assistant). If they are
+        not known, nothing is returned: any entity might be a phone's.
+        """
+        privacy = _sibling("privacy")
+        guard = getattr(self, "phones", None)
+        ids = None if guard is None else (guard.excluded() if wait else guard.cached())
+        if ids is None and states:
+            now = time.monotonic()
+            if now - getattr(self, "_last_phone_warning", -1e9) >= 300:
+                self._last_phone_warning = now
+                _log("WARNING: cannot read Home Assistant's device registry to exclude phones; sending no sensors")
+        return [s for s in states or []
+                if isinstance(s, dict) and privacy.leaves_home(s.get("entity_id"), s.get("attributes"), ids)]
+
     def _on_ha_state_event(self, entity_id, new_state):
         """Handle HA websocket state_changed events for selected sensors."""
         if not entity_id:
@@ -1553,6 +1578,8 @@ class CentralCoreClient:
         # by the registry, skip publishing its state changes even if selected.
         if not is_entity_allowed(entity_id):
             _log_debug(f"Registry denies publishing for {entity_id}; skipping")
+            return
+        if not self.privacy_filter([dict(new_state, entity_id=entity_id)], wait=False):
             return
 
         if not _is_selectable_entity(entity_id):
@@ -2002,7 +2029,7 @@ class CentralCoreClient:
         if not self.ha_api_url or not self.ha_api_token:
             # HA integration not configured
             return
-        sensors = fetch_sensors(self.ha_api_url, self.ha_api_token) or []
+        sensors = self.privacy_filter(fetch_sensors(self.ha_api_url, self.ha_api_token) or [])
         # Filter by safe_device_classes if configured
         filtered = self._filter_sensors_by_device_class(sensors, self.safe_device_classes)
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -2053,7 +2080,7 @@ class CentralCoreClient:
         if not self.ha_api_url or not self.ha_api_token:
             # HA integration not configured
             return
-        sensors = fetch_sensors(self.ha_api_url, self.ha_api_token) or []
+        sensors = self.privacy_filter(fetch_sensors(self.ha_api_url, self.ha_api_token) or [])
         # Note: fetch_sensors already applies SENSOR_REGISTRY filtering
         payload = {
             "schema_version": 1,
@@ -2104,11 +2131,11 @@ class CentralCoreClient:
         """Current states of the watched entities, sent by HA when a websocket
         subscription starts (startup, reconnect, selection change)."""
         try:
-            self._publish_selected_states(states or [])
+            self._publish_selected_states(states or [], wait=False)
         except Exception:
             _log("Failed to publish websocket snapshot", sys.stderr)
 
-    def _publish_selected_states(self, sensors):
+    def _publish_selected_states(self, sensors, wait=True):
         """Publish the selected entities among `sensors` if any value changed."""
         selected_set = set(self.selected_sensors)
         filtered = [
@@ -2118,6 +2145,7 @@ class CentralCoreClient:
             and _is_selectable_entity(s.get("entity_id"))
             and is_entity_allowed(s.get("entity_id"))
         ]
+        filtered = self.privacy_filter(filtered, wait=wait)
 
         data_map = {}
         names_map = {}

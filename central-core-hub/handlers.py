@@ -145,6 +145,38 @@ def _sanitize(attrs):
     return _ha_safety().sanitize_attributes(attrs)
 
 
+def _privacy():
+    try:
+        import privacy
+    except ImportError:
+        import importlib.util as _ilu
+        import pathlib as _pl
+
+        spec = _ilu.spec_from_file_location("privacy", str(_pl.Path(__file__).with_name("privacy.py")))
+        if spec is None or spec.loader is None:
+            raise
+        privacy = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(privacy)
+        sys.modules["privacy"] = privacy
+    return privacy
+
+
+def _privacy_filter(client, states) -> list:
+    """`states` without phone (mobile_app) or location entities.
+
+    The hub's client (CentralCoreClient.privacy_filter) knows which entities
+    are on phones, and returns nothing when it cannot tell. A stand-in client
+    without that method gets the location rules only.
+    """
+    fn = getattr(client, "privacy_filter", None)
+    if callable(fn):
+        kept = fn(states)
+        return kept if isinstance(kept, list) else []
+    privacy = _privacy()
+    return [s for s in states or []
+            if isinstance(s, dict) and not privacy.is_location_entity(s.get("entity_id"), s.get("attributes"))]
+
+
 def _utc_now_iso():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -239,12 +271,25 @@ def _handle_sensors_set(client, cmd, fetch_sensors):
         return
 
     accepted, rejected = [], []
+    privacy = _privacy()
     for ent in requested:
-        if ha_safety.is_selectable_entity(ent):
+        if ha_safety.is_selectable_entity(ent) and not privacy.is_location_entity(ent):
             if ent not in accepted:
                 accepted.append(ent)
         else:
             rejected.append(ent)
+
+    # Phones' entities are refused too. If the hub cannot tell which those
+    # are, the selection is left as it was rather than risk watching one.
+    guard = getattr(client, "phones", None)
+    if guard is not None:
+        phone_ids = guard.excluded()
+        if phone_ids is None:
+            _send_ack(client, action, command_id, {"status": "failed", "result": {"reason": "ha_registry_unavailable"},
+                                                   "timestamp": _utc_now_iso()})
+            return
+        rejected += [e for e in accepted if e in phone_ids]
+        accepted = [e for e in accepted if e not in phone_ids]
 
     try:
         client.selected_sensors = list(accepted)
@@ -261,6 +306,7 @@ def _handle_sensors_set(client, cmd, fetch_sensors):
             for s in (fetch_sensors(getattr(client, "ha_api_url", None), getattr(client, "ha_api_token", None)) or [])
             if s.get("entity_id") in wanted and _is_entity_allowed(s.get("entity_id"))
         ]
+        states = _privacy_filter(client, states)
     except Exception:
         states = []
     report = _states_report(states)
@@ -581,8 +627,10 @@ def handle_message(
                 return
 
             sensors = fetch_sensors(client.ha_api_url, client.ha_api_token) or []
-            # Always apply SENSOR_REGISTRY filtering at minimum
+            # Always apply SENSOR_REGISTRY filtering at minimum; phones and
+            # location never leave the home.
             sensors = [s for s in sensors if _is_entity_allowed(s.get("entity_id"))]
+            sensors = _privacy_filter(client, sensors)
 
             # Report the sensors whose device class or entity id was asked
             # for. This is a one-off report: the watch list (selected_sensors)
@@ -669,10 +717,7 @@ def handle_message(
                 if getattr(client, "vault_topic", None):
                     selected = getattr(client, "selected_sensors", None) or list(data_map.keys())
                     # Filter the selected sensors through the registry
-                    try:
-                        selected = [s for s in selected if _is_entity_allowed(s)]
-                    except Exception:
-                        pass
+                    selected = [s for s in selected if _is_entity_allowed(s)]
                     reminder = {
                         "schema_version": 1,
                         "client_id": client.client_id,
