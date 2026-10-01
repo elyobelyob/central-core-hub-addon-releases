@@ -39,7 +39,7 @@ class Msg:
         self.topic = topic
 
 
-def test_is_entity_allowed_exception_falls_back_to_allow(monkeypatch):
+def test_is_entity_allowed_exception_fails_closed(monkeypatch):
     # Provide a mqtt_client.is_entity_allowed that raises
     mod = types.ModuleType("mqtt_client")
 
@@ -47,7 +47,7 @@ def test_is_entity_allowed_exception_falls_back_to_allow(monkeypatch):
         raise RuntimeError("boom")
 
     mod.is_entity_allowed = bad_allowed
-    sys.modules["mqtt_client"] = mod
+    monkeypatch.setitem(sys.modules, "mqtt_client", mod)
 
     client = DummyClient()
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/poll"
@@ -58,11 +58,11 @@ def test_is_entity_allowed_exception_falls_back_to_allow(monkeypatch):
 
     handlers.handle_message(client, Msg(topic), payload, fetch_sensors, None, None)
 
-    # telemetry should have been published despite is_entity_allowed raising
+    # the registry could not be consulted, so nothing is reported
     tele = None
     for t, payload_str, qos in client.published:
         if t == client.preferred_sensors_topic:
             tele = json.loads(payload_str)
             break
     assert tele is not None
-    assert "sensor.x" in (tele.get("data") or {})
+    assert "sensor.x" not in (tele.get("data") or {})

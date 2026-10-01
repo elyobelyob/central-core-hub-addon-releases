@@ -64,12 +64,12 @@ def test_is_entity_allowed_variants(monkeypatch):
     fake.is_entity_allowed = lambda e: False
     assert handlers._is_entity_allowed("sensor.x") is False
 
-    # Exception -> fallback True
+    # Exception -> fails closed
     def bad(e):
         raise RuntimeError("boom")
 
     fake.is_entity_allowed = bad
-    assert handlers._is_entity_allowed("sensor.x") is True
+    assert handlers._is_entity_allowed("sensor.x") is False
 
     # cleanup
     del sys.modules["mqtt_client"]

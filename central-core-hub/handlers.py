@@ -32,21 +32,16 @@ def _normalize_ts(ts_str):
 
 
 def _is_entity_allowed(entity_id):
-    """Runtime helper that consults `mqtt_client.is_entity_allowed` when
-    available, falling back to allowing the entity on error.
+    """The privacy registry's verdict (mqtt_client.is_entity_allowed).
+
+    Fails closed: if the registry cannot be consulted, nothing is allowed.
     """
     try:
         import mqtt_client as _mc
 
-        fn = getattr(_mc, "is_entity_allowed", None)
-        if callable(fn):
-            try:
-                return bool(fn(entity_id))
-            except Exception:
-                return True
-        return True
+        return bool(_mc.is_entity_allowed(entity_id))
     except Exception:
-        return True
+        return False
 
 
 # One update or check at a time, off paho's network thread: an update can take
@@ -310,7 +305,8 @@ def _registry_token(client):
 def _valid_registry_doc(doc):
     if not isinstance(doc, dict):
         return False
-    if doc.get("registry_mode") not in (None, "allow", "deny", "ALLOW", "DENY"):
+    mode = doc.get("registry_mode")
+    if mode is not None and (not isinstance(mode, str) or mode.lower() not in ("all", "allow", "deny")):
         return False
     entries = doc.get("entries", [])
     if not isinstance(entries, list):
@@ -736,24 +732,13 @@ def handle_message(
 
 
 def _registry_allows():
-    """The privacy registry (SENSOR_REGISTRY) as a test on entity ids, or None when unset."""
-    import fnmatch
-
+    """The privacy registry as a test on entity ids; denies everything on error."""
     try:
         import mqtt_client as _mc
 
-        reg = _mc._load_sensor_registry() or []
-        mode = str((_mc._load_sensor_registry_doc() or {}).get("registry_mode") or "deny").lower()
+        return _mc.registry_predicate()
     except Exception:
-        return None
-    ids = [e for e in reg if isinstance(e, dict) and isinstance(e.get("entity_id"), str)]
-    allow = [e["entity_id"] for e in ids if e.get("provide")]
-    deny = [e["entity_id"] for e in ids if e.get("provide") is False]
-    if mode == "allow" and allow:
-        return lambda eid: any(fnmatch.fnmatch(eid, p) for p in allow)
-    if mode != "allow" and deny:
-        return lambda eid: not any(fnmatch.fnmatch(eid, p) for p in deny)
-    return None
+        return lambda _eid: False
 
 
 def _handle_inventory(client, payload_str):
