@@ -988,7 +988,12 @@ class CentralCoreClient:
         self.mqtt_password = options.get("mqtt_password") or ""
         self.mqtt_tls = bool(options.get("mqtt_tls"))
         if not self.mqtt_tls:
-            _log("WARNING: mqtt_tls is off; the MQTT password and all telemetry travel unencrypted")
+            _log(
+                f"WARNING: mqtt_tls is off: the MQTT password, telemetry and commands travel unencrypted to "
+                f"{self.mqtt_host or '(no host)'}:{self.mqtt_port}, and anyone on the path can read or alter them. "
+                "Turn on mqtt_tls with the vault's certificate bundle (port 8883). A future release will "
+                "require TLS; see docs/security/mqtt-tls-and-command-signing.md."
+            )
         self.mqtt_ca = ""
         self.mqtt_cert = ""
         self.mqtt_key = ""
