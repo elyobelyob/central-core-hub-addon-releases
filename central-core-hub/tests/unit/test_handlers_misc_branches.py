@@ -66,7 +66,7 @@ def test_config_ack_fallback_when_build_ack_raises():
     assert ok
 
 
-def test__is_entity_allowed_returns_true_on_mqtt_error(monkeypatch):
+def test__is_entity_allowed_denies_on_mqtt_error(monkeypatch):
     # install a fake mqtt_client that raises from is_entity_allowed
     orig = sys.modules.get("mqtt_client")
     mc = types.SimpleNamespace()
@@ -77,7 +77,7 @@ def test__is_entity_allowed_returns_true_on_mqtt_error(monkeypatch):
     mc.is_entity_allowed = is_entity_allowed
     sys.modules["mqtt_client"] = mc
     try:
-        assert handlers._is_entity_allowed("sensor.foo") is True
+        assert handlers._is_entity_allowed("sensor.foo") is False  # fails closed
     finally:
         if orig is None:
             sys.modules.pop("mqtt_client", None)

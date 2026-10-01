@@ -43,6 +43,7 @@ def test_set_string_list_includes_monitor_telemetry_and_completion(tmp_path):
     # ensure mqtt_client SELECTED_SENSORS_FILE points to tmp so persistence path exercised
     mc = types.SimpleNamespace()
     mc.SELECTED_SENSORS_FILE = str(tmp_path / "SELECTED_SENSORS.json")
+    mc.is_entity_allowed = lambda _e: True
     orig = sys.modules.get("mqtt_client")
     sys.modules["mqtt_client"] = mc
 

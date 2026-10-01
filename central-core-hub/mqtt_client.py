@@ -399,16 +399,20 @@ def _load_sensor_registry():
         return []
 
 
-def _load_sensor_registry_doc():
+class RegistryError(Exception):
+    """The privacy registry exists but cannot be read; callers deny everything."""
+
+
+def _load_sensor_registry_doc(strict=False):
     """Load and cache the full SENSOR_REGISTRY.yaml document dict.
 
     Uses mtime-based caching so the file is only read when it changes.
-    Returns an empty dict if the file is absent, unreadable, or malformed.
+    Returns {} if the file is absent. If it exists but cannot be read or
+    parsed, returns {} or, with `strict`, raises RegistryError: anything
+    deciding what may be sent must use strict and deny on error.
     """
     global _SENSOR_REGISTRY_DOC_CACHE, _SENSOR_REGISTRY_DOC_MTIME
     try:
-        import yaml
-
         if not SENSOR_REGISTRY.exists():
             _SENSOR_REGISTRY_DOC_CACHE = {}
             _SENSOR_REGISTRY_DOC_MTIME = None
@@ -419,13 +423,39 @@ def _load_sensor_registry_doc():
             mtime = None
         if _SENSOR_REGISTRY_DOC_CACHE is not None and mtime is not None and mtime == _SENSOR_REGISTRY_DOC_MTIME:
             return _SENSOR_REGISTRY_DOC_CACHE
+        import yaml
+
         with open(SENSOR_REGISTRY, "r") as f:
             doc = yaml.safe_load(f) or {}
-        _SENSOR_REGISTRY_DOC_CACHE = doc if isinstance(doc, dict) else {}
+        if not isinstance(doc, dict):
+            raise RegistryError("the privacy registry is not a mapping")
+        _SENSOR_REGISTRY_DOC_CACHE = doc
         _SENSOR_REGISTRY_DOC_MTIME = mtime
         return _SENSOR_REGISTRY_DOC_CACHE
-    except Exception:
+    except Exception as exc:
+        _SENSOR_REGISTRY_DOC_CACHE = None
+        _SENSOR_REGISTRY_DOC_MTIME = None
+        if strict:
+            raise exc if isinstance(exc, RegistryError) else RegistryError(str(exc)) from exc
         return {}
+
+
+_REGISTRY_PROBLEM_LOGGED = None
+
+
+def registry_predicate():
+    """The privacy registry as `allowed(entity_id) -> bool`. Fails closed: an
+    unreadable registry or an unknown mode allows nothing (and is logged)."""
+    global _REGISTRY_PROBLEM_LOGGED
+    privacy = _sibling("privacy")
+    try:
+        allowed, problem = privacy.registry_rule(_load_sensor_registry_doc(strict=True))
+    except Exception as exc:
+        allowed, problem = privacy.deny_all, f"the privacy registry cannot be read ({exc}); nothing is sent"
+    if problem and problem != _REGISTRY_PROBLEM_LOGGED:
+        _log(f"WARNING: {problem}")
+    _REGISTRY_PROBLEM_LOGGED = problem
+    return allowed
 
 
 def reload_sensor_registry():
@@ -484,54 +514,14 @@ def list_monitored_sensors():
 
 
 def is_entity_allowed(entity_id: str) -> bool:
-    """Return True if entity_id is allowed by the registry (uses mtime cache).
+    """True if the privacy registry allows sending `entity_id`.
 
-    Defaults to True (allow) when the registry is absent or not enabled.
+    No registry (or one not opted in) allows everything; any error denies.
     """
     try:
-        import fnmatch
-
-        doc = _load_sensor_registry_doc()
-        if not doc:
-            return True
-        mode = doc.get("registry_mode")
-        apply_registry = bool(doc.get("apply_registry", False))
-        if mode is None and not apply_registry:
-            return True
-        active_mode = str(mode).lower() if mode else "deny"
-
-        allow_patterns = []
-        deny_patterns = []
-        for e in doc.get("entries") or []:
-            if not isinstance(e, dict):
-                continue
-            eid = e.get("entity_id")
-            prov = e.get("provide")
-            if not isinstance(eid, str):
-                continue
-            if active_mode == "allow":
-                if prov:
-                    allow_patterns.append(eid)
-            else:
-                if prov is False:
-                    deny_patterns.append(eid)
-
-        if active_mode == "allow":
-            if not allow_patterns:
-                return True
-            for p in allow_patterns:
-                if fnmatch.fnmatch(entity_id, p):
-                    return True
-            return False
-
-        if not deny_patterns:
-            return True
-        for p in deny_patterns:
-            if fnmatch.fnmatch(entity_id, p):
-                return False
-        return True
+        return bool(registry_predicate()(entity_id))
     except Exception:
-        return True
+        return False
 
 
 def _certificate_common_name(cert_path):
@@ -890,22 +880,26 @@ def get_cpu_percent():  # noqa: F811
         return None
 
 
-def _ha_safety():
-    """The sibling ha_safety module, also when this file was loaded by path
-    (the add-on directory not on sys.path)."""
+def _sibling(name):
+    """A sibling module of this file (ha_safety, privacy), also when this file
+    was loaded by path (the add-on directory not on sys.path)."""
+    mod = sys.modules.get(name)
+    if mod is not None:
+        return mod
     try:
-        import ha_safety
+        return importlib.import_module(name)
     except ImportError:
-        import importlib.util as _ilu
-        import pathlib as _pl
-
-        spec = _ilu.spec_from_file_location("ha_safety", str(_pl.Path(__file__).with_name("ha_safety.py")))
+        spec = importlib.util.spec_from_file_location(name, str(pathlib.Path(__file__).with_name(f"{name}.py")))
         if spec is None or spec.loader is None:
             raise
-        ha_safety = _ilu.module_from_spec(spec)
-        spec.loader.exec_module(ha_safety)
-        sys.modules["ha_safety"] = ha_safety
-    return ha_safety
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        sys.modules[name] = mod
+        return mod
+
+
+def _ha_safety():
+    return _sibling("ha_safety")
 
 
 def _sanitize_attributes(attrs):
@@ -964,75 +958,20 @@ def fetch_sensors(ha_api_url, ha_api_token, _safe_device_classes=None):
                 }
             )
 
-        # Consult SENSOR_REGISTRY if present. Registry is the source-of-truth:
-        reg = _load_sensor_registry()
-        if not reg:
-            return sensors
-
-        # If registry is present, ensure sensors have device_class either from
-        # HA attributes or from the registry; exclude those without one.
-        resolved = []
-        for s in sensors:
-            ent_id = s.get("entity_id")
-            dc = s.get("device_class")
-            if not dc:
-                try:
-                    dc = _device_class_from_registry(ent_id)
-                except Exception:
-                    dc = None
-            if not dc:
-                continue
-            s["device_class"] = dc
-            resolved.append(s)
-        sensors = resolved
-
-        import fnmatch
-
-        # registry_mode from the (cached) registry document
-        mode = (_load_sensor_registry_doc() or {}).get("registry_mode")
-
-        active_mode = str(mode).lower() if mode else "deny"
-
-        allow_patterns = []
-        deny_patterns = []
-        for e in reg:
-            eid = e.get("entity_id")
-            prov = e.get("provide")
-            if not isinstance(eid, str):
-                continue
-            if active_mode == "allow":
-                if prov:
-                    allow_patterns.append(eid)
-            else:
-                if prov is False:
-                    deny_patterns.append(eid)
-
-        if active_mode == "allow":
-            if not allow_patterns:
-                return sensors
-            filtered = []
+        # With registry entries, a sensor needs a device_class (from Home
+        # Assistant or the registry); those without one are left out.
+        if _load_sensor_registry():
+            resolved = []
             for s in sensors:
-                ent = s.get("entity_id")
-                for p in allow_patterns:
-                    if fnmatch.fnmatch(ent, p):
-                        filtered.append(s)
-                        break
-            return filtered
+                dc = s.get("device_class") or _device_class_from_registry(s.get("entity_id"))
+                if dc:
+                    s["device_class"] = dc
+                    resolved.append(s)
+            sensors = resolved
 
-        # deny mode
-        if not deny_patterns:
-            return sensors
-        filtered = []
-        for s in sensors:
-            ent = s.get("entity_id")
-            denied = False
-            for p in deny_patterns:
-                if fnmatch.fnmatch(ent, p):
-                    denied = True
-                    break
-            if not denied:
-                filtered.append(s)
-        return filtered
+        # The privacy registry decides what may leave (fails closed).
+        allowed = registry_predicate()
+        return [s for s in sensors if allowed(s.get("entity_id"))]
     except Exception:
         return None
 
@@ -1612,13 +1551,9 @@ class CentralCoreClient:
 
         # Respect the central SENSOR_REGISTRY: if the entity is not allowed
         # by the registry, skip publishing its state changes even if selected.
-        try:
-            if not is_entity_allowed(entity_id):
-                _log(f"Registry denies publishing for {entity_id}; skipping")
-                return
-        except Exception:
-            # If registry check fails, fall back to previous behavior
-            pass
+        if not is_entity_allowed(entity_id):
+            _log_debug(f"Registry denies publishing for {entity_id}; skipping")
+            return
 
         if not _is_selectable_entity(entity_id):
             return

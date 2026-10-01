@@ -25,8 +25,8 @@ def test_is_entity_allowed_import_fails(monkeypatch):
 
     monkeypatch.setattr("builtins.__import__", fake_import)
 
-    # Should return True when import fails
-    assert handlers._is_entity_allowed("sensor.x") is True
+    # Fails closed when the registry cannot be consulted
+    assert handlers._is_entity_allowed("sensor.x") is False
 
 
 def test_is_entity_allowed_callable_raises_and_returns(monkeypatch):
@@ -42,8 +42,8 @@ def test_is_entity_allowed_callable_raises_and_returns(monkeypatch):
 
     mod.is_entity_allowed = raising
     monkeypatch.setitem(sys.modules, "mqtt_client", mod)
-    # When callable raises, fallback to True
-    assert handlers._is_entity_allowed("sensor.y") is True
+    # When callable raises, fail closed
+    assert handlers._is_entity_allowed("sensor.y") is False
 
     # Replace with a callable that returns False
     mod.is_entity_allowed = allowed
