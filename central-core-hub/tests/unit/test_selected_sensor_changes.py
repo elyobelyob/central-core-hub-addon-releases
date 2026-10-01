@@ -19,7 +19,7 @@ def _load_client_module():
 
 def test_selected_sensor_changes_publish_on_change(monkeypatch):
     mc = _load_client_module()
-    c = mc.CentralCoreClient({"client_id": "hub1", "ha_api_url": "http://ha", "ha_api_token": "tok"})
+    c = mc.CentralCoreClient({"client_id": "hub1", "ha_api_url": "http://localhost:8123", "ha_api_token": "tok"})
     # Ensure the module-level `requests` symbol is present so the
     # stricter runtime behavior in `publish_selected_sensor_changes`
     # does not early-return during tests. Tests mock `fetch_selected_sensors`
@@ -87,7 +87,7 @@ def test_selected_sensor_changes_publish_on_change(monkeypatch):
 
 def test_selected_sensor_changes_streaming(monkeypatch):
     mc = _load_client_module()
-    c = mc.CentralCoreClient({"client_id": "hub2", "ha_api_url": "http://ha", "ha_api_token": "tok"})
+    c = mc.CentralCoreClient({"client_id": "hub2", "ha_api_url": "http://localhost:8123", "ha_api_token": "tok"})
     publishes = []
     monkeypatch.setattr(
         c,
