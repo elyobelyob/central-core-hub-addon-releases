@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.2.0] - 2026-10-01
+
+Upgrade notes (behaviour a hub owner may notice):
+- New read-only command `cmd/inventory/get` for the vault's floor plans. On request the hub reports
+  Home Assistant's floors, areas and devices (names, makers, models, areas, Zigbee addresses and
+  entity ids) and ZHA's Zigbee link readings, in pages of at most 96 KB. It needs the admin token the
+  hub already uses. It never sends locations, entity states or attributes; entities are limited to
+  sensor, binary_sensor, switch, climate and media_player, and the privacy registry applies.
+- Zigbee2MQTT devices are listed from Home Assistant's device registry. Their links are not read
+  yet (that needs a network-map scan).
+
+- feat: `inventory/get` (inventory.py), answered from a 10-minute page store; failures carry a
+  reason (`ha_unreachable`, `token_not_admin`, `too_large`, `run_expired`).
+
 ## [2.1.0] - 2026-09-25
 
 Upgrade notes (behaviour a hub owner may notice):
