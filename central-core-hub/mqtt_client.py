@@ -1073,8 +1073,6 @@ class CentralCoreClient:
                 )
                 self.ha_api_url = ""
                 self.ha_api_token = ""
-            elif why != "encrypted" and why != "local name" and why != "local address":
-                _log(f"WARNING: Home Assistant URL {self.ha_api_url!r}: {why}")
         if options.get("debug_logging"):
             global _DEBUG_LOGGING
             _DEBUG_LOGGING = True

@@ -56,7 +56,7 @@ def test_publish_sensors_calls_publish_and_updates_timestamp(monkeypatch):
 
     options = {
         "client_id": "unit-hub",
-        "ha_api_url": "http://ha",
+        "ha_api_url": "http://localhost:8123",
         "ha_api_token": "tok",
     }
     c = CentralCoreClient(options)
@@ -91,7 +91,7 @@ def test_handle_sensors_poll_command_ack_and_completion(monkeypatch):
 
     options = {
         "client_id": "unit-hub",
-        "ha_api_url": "http://ha",
+        "ha_api_url": "http://localhost:8123",
         "ha_api_token": "tok",
     }
     c = CentralCoreClient(options)
@@ -123,7 +123,7 @@ def test_handle_sensors_set_list_of_dicts_is_refused_without_calling_ha(monkeypa
     req = _RecordingRequests()
     monkeypatch.setattr(mod, "requests", req)
 
-    c = CentralCoreClient({"client_id": "unit-hub", "ha_api_url": "http://ha", "ha_api_token": "tok"})
+    c = CentralCoreClient({"client_id": "unit-hub", "ha_api_url": "http://localhost:8123", "ha_api_token": "tok"})
     dummy = DummyClient()
     c._client = dummy
     before = c.selected_sensors
@@ -166,7 +166,7 @@ def test_handle_sensors_set_string_list_reports_names_and_enabled(monkeypatch):
             {"entity_id": "sensor.hum", "state": "43", "attributes": {"friendly_name": "Humidity"}},
         ],
     )
-    c = CentralCoreClient({"client_id": "unit-hub", "ha_api_url": "http://ha", "ha_api_token": "tok"})
+    c = CentralCoreClient({"client_id": "unit-hub", "ha_api_url": "http://localhost:8123", "ha_api_token": "tok"})
     dummy = DummyClient()
     c._client = dummy
 
@@ -192,7 +192,7 @@ def test_handle_sensors_set_single_write_refused_even_without_readback(monkeypat
     monkeypatch.setattr(mod, "requests", req)
 
     c = CentralCoreClient(
-        {"client_id": "unit-hub", "ha_api_url": "http://ha", "ha_api_token": "tok", "ha_readback_after_set": False}
+        {"client_id": "unit-hub", "ha_api_url": "http://localhost:8123", "ha_api_token": "tok", "ha_readback_after_set": False}
     )
     dummy = DummyClient()
     c._client = dummy

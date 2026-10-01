@@ -85,8 +85,9 @@ def check_token_transport(url):
         if addresses is None:
             addresses = _resolve_host(host)
     except OSError:
-        # Nothing can be sent to a name that does not resolve.
-        return True, "host does not resolve; not verified"
+        # Fail closed: a name that does not resolve now cannot be checked, and
+        # may later resolve to another machine (DNS change, rebinding).
+        return False, f"{host} does not resolve, so it cannot be checked to be this machine"
     remote = [a for a in addresses if not _is_local_address(a)]
     if remote:
         return False, f"{host} is not this machine ({', '.join(remote)})"
