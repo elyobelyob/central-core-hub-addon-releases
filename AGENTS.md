@@ -12,6 +12,7 @@ The five repos sit side by side in a `cc-all` folder: `central-core-vault` (owns
 - Never commit `.env*`, keys or certs; never print secret values. GitGuardian flags made-up test passwords, so check before dismissing.
 - Tests use `monkeypatch.setattr`, never `module.attr = fake` (leaked fakes broke unrelated tests in the full run).
 - Write anything families read in plain English.
+- **Never give medical advice, anywhere**: portal, morning updates, care reports, AI prompts, emails, the website and marketing. Describe only what the sensors showed and how it compares with that home's usual pattern. Never name, suggest or guess at an illness, infection or condition; never say something is a sign or symptom; never mention doctors, medication or treatment. This is an owner rule, and it also keeps Central Core outside medical-device regulation (MHRA). The most we ever suggest is that the family checks in.
 
 ## This repo
 
