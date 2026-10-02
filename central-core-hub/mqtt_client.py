@@ -38,6 +38,19 @@ OUTBOX_MAX = int(os.environ.get("MQTT_OUTBOX_MAX") or "1000")
 OUTBOX_MAX_BYTES = int(os.environ.get("MQTT_OUTBOX_MAX_BYTES") or str(1024 * 1024))
 OUTBOX_TOPICS = os.environ.get("MQTT_OUTBOX_TOPICS")
 
+# Store and confirm (mqtt-shared protocol 1.1): readings (state changes and
+# status telemetry) wait in an on-disk SQLite outbox until the vault confirms
+# it stored them (outbox.py). HUB_OUTBOX_DB="" turns it off (the tests do).
+OUTBOX_DB_DEFAULT = "/data/outbox.db"
+OUTBOX_MAX_AGE_DAYS = 7
+OUTBOX_MAX_MB = 50
+# Catch-up: at most this many readings per batch, one batch per interval
+# (20 readings a second).
+CATCHUP_BATCH_SIZE = 20
+CATCHUP_INTERVAL_S = 1.0
+# A reading sent but not confirmed within this long is sent again.
+RESEND_AFTER_S = 300
+
 
 def _normalize_timestamp(ts_str):
     """Normalize a timestamp string to UTC ISO format.
@@ -221,6 +234,10 @@ _PREVIEW_CHARS = 300
 _PEM_RE = re.compile(r"-----BEGIN [^-]+-----.*?-----END [^-]+-----", re.DOTALL)
 
 
+def _utc_now_iso():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def _log_debug(msg):
     if _DEBUG_LOGGING:
         _log(msg)
@@ -253,6 +270,9 @@ class _FallbackTopics:
     CMD_GENERIC = "hubs/{hub_id}/v{version}/cmd/{domain}/{action}"
     ACK_GENERIC = "hubs/{hub_id}/v{version}/ack/{command_name}/{command_id}"
     STATUS_OFFLINE = "hubs/{hub_id}/v{version}/status/offline"
+    # Protocol 1.1 (central-core-mqtt-shared v1.1.0)
+    TELEMETRY_BATCH = "hubs/{hub_id}/v{version}/telemetry/batch"
+    STORE_ACK = "hubs/{hub_id}/v{version}/ack"
 
     @staticmethod
     def build_topic(tpl, **kwargs):
@@ -979,6 +999,53 @@ def fetch_sensors(ha_api_url, ha_api_token, _safe_device_classes=None):
         return None
 
 
+def _open_reading_store():
+    """The on-disk outbox for readings, or None when it is off or cannot open.
+
+    Without it the hub publishes as before (QoS 0, nothing kept), so a broken
+    data directory never stops readings from flowing.
+    """
+    path = os.environ.get("HUB_OUTBOX_DB", OUTBOX_DB_DEFAULT)
+    if not path:
+        return None
+    if path == OUTBOX_DB_DEFAULT and not pathlib.Path(path).parent.is_dir():
+        # Not running as the add-on (no /data): nothing to keep readings in.
+        return None
+    try:
+        days = float(os.environ.get("HUB_OUTBOX_MAX_AGE_DAYS") or OUTBOX_MAX_AGE_DAYS)
+        megabytes = float(os.environ.get("HUB_OUTBOX_MAX_MB") or OUTBOX_MAX_MB)
+        store = _sibling("outbox").SqliteOutbox(
+            path, max_age_s=days * 86400, max_bytes=int(megabytes * 1024 * 1024), log=_log
+        )
+        stats = store.stats()
+        _log(
+            f"Outbox {stats['outbox_id']} at {path}: {stats['backlog']} readings waiting for the vault, "
+            f"next seq {stats['next_seq']}"
+        )
+        return store
+    except Exception as exc:
+        _log(f"WARNING: outbox at {path} unavailable ({type(exc).__name__}: {exc}); readings are not kept "
+             "until the vault confirms them", sys.stderr)
+        return None
+
+
+def _latest_time(times, default):
+    """The latest of some ISO times (unparseable ones skipped), else `default`."""
+    best, best_text = None, None
+    for value in times or []:
+        if not value:
+            continue
+        try:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.astimezone()
+        except ValueError:
+            continue
+        if best is None or dt > best:
+            best, best_text = dt, value
+    return best_text if best_text is not None else default
+
+
 class CentralCoreClient:
     def __init__(self, options):
         self.options = options
@@ -1085,6 +1152,17 @@ class CentralCoreClient:
             )
             # expose sensors_topic for compatibility; prefer preferred_sensors_topic
             self.sensors_topic = self.preferred_sensors_topic
+            # Store and confirm (protocol 1.1): catch-up batches out, store acks in.
+            self.batch_topic = topics.build_topic(
+                getattr(topics, "TELEMETRY_BATCH", _FallbackTopics.TELEMETRY_BATCH),
+                hub_id=self.client_id,
+                version=ver,
+            )
+            self.store_ack_topic = topics.build_topic(
+                getattr(topics, "STORE_ACK", _FallbackTopics.STORE_ACK),
+                hub_id=self.client_id,
+                version=ver,
+            )
         except Exception as e:
             raise RuntimeError(
                 (
@@ -1155,6 +1233,10 @@ class CentralCoreClient:
             self._outbox = PersistentOutbox(OUTBOX_FILE, max_items=OUTBOX_MAX, max_bytes=OUTBOX_MAX_BYTES)
         except Exception:
             self._outbox = None
+
+        # Store and confirm: readings wait on disk until the vault confirms them.
+        self._store = _open_reading_store()
+        self._sender = None
 
         # Entities on phones (mobile_app) never leave the home; their ids
         # come from Home Assistant's registries over the websocket.
@@ -1552,6 +1634,126 @@ class CentralCoreClient:
                 pass
             return None
 
+    # ------------------------------------------------------------------
+    # Store and confirm (protocol 1.1)
+    # ------------------------------------------------------------------
+
+    def _publish_reading(self, record_type, topic, payload, event_ts, legacy_qos=0):
+        """Keep a reading in the outbox, then send it at QoS 1.
+
+        `payload` is a dict; `event_ts` is when the reading happened (Home
+        Assistant's last_changed, any ISO form with an offset). Without an
+        outbox this is a plain publish at `legacy_qos`, as before.
+        """
+        store = getattr(self, "_store", None)
+        if store is None:
+            return self._publish(topic, json.dumps(payload), qos=legacy_qos)
+        try:
+            _sibling("outbox").utc_iso(event_ts)
+        except Exception:
+            event_ts = _utc_now_iso()  # no usable event time: the time it was queued
+        try:
+            seq, stored = store.append(record_type, topic, payload, event_ts)
+        except Exception as exc:
+            _log(f"Outbox write failed ({type(exc).__name__}: {exc}); sending without keeping it", sys.stderr)
+            return self._publish(topic, json.dumps(payload), qos=1, persist=False)
+        if not getattr(self, "_connected", False):
+            _log_debug(f"MQTT OUTBOX <- {topic} seq={seq} (not connected)")
+            return None
+        live = dict(stored, oldest_seq=store.oldest_seq() or seq, hub_time=_utc_now_iso())
+        try:
+            result = self._client.publish(topic, json.dumps(live), qos=1)
+            rc = getattr(result, "rc", 0)
+        except Exception as exc:
+            _log(f"MQTT ERROR publishing seq {seq} to {topic}: {type(exc).__name__}", sys.stderr)
+            return None
+        _log(f"MQTT -> {topic} qos=1 seq={seq} rc={rc}")
+        if rc == 0:
+            store.mark_sent([seq])
+        return result
+
+    def _handle_store_ack(self, payload_bytes):
+        """The vault stored everything up to `upto`: delete it from the outbox."""
+        store = getattr(self, "_store", None)
+        if store is None:
+            return 0
+        try:
+            ack = json.loads(payload_bytes.decode("utf-8") if isinstance(payload_bytes, bytes) else payload_bytes)
+            upto = ack.get("upto") if isinstance(ack, dict) else None
+            if isinstance(upto, bool) or not isinstance(upto, int) or upto < 0:
+                raise ValueError("upto must be a non-negative integer")
+            outbox_id = ack.get("outbox_id")
+        except Exception as exc:
+            self._log_drop(f"ignored store ack: {type(exc).__name__}: {exc}")
+            return 0
+        deleted = store.ack(upto, outbox_id=outbox_id if isinstance(outbox_id, str) else None)
+        _log(f"Vault stored readings up to seq {upto}; removed {deleted} from the outbox")
+        return deleted
+
+    def _send_due_readings(self, now=None):
+        """Send one batch of readings the vault has not confirmed, oldest first.
+
+        Due: never sent since the last (re)connect, or sent more than
+        RESEND_AFTER_S ago without an acknowledgement. Nothing is resent
+        until the vault has acknowledged this outbox at least once (an older
+        vault never does). Returns how many were sent.
+        """
+        store = getattr(self, "_store", None)
+        if store is None or not getattr(self, "_connected", False):
+            return 0
+        if not store.vault_confirms():
+            return 0  # an older vault: keep readings, do not resend them
+        now = time.time() if now is None else now
+        rows = store.due(CATCHUP_BATCH_SIZE, sent_before=now - RESEND_AFTER_S)
+        if not rows:
+            return 0
+        batch = {
+            "hub_time": _utc_now_iso(),
+            "outbox_id": store.outbox_id,
+            "oldest_seq": store.oldest_seq() or rows[0]["seq"],
+            "records": [
+                {k: r[k] for k in ("seq", "type", "event_ts", "queued_at", "payload")} for r in rows
+            ],
+        }
+        try:
+            result = self._client.publish(self.batch_topic, json.dumps(batch), qos=1)
+            rc = getattr(result, "rc", 0)
+        except Exception as exc:
+            _log(f"MQTT ERROR sending outbox batch: {type(exc).__name__}", sys.stderr)
+            return 0
+        if rc != 0:
+            return 0
+        store.mark_sent([r["seq"] for r in rows], when=now)
+        _log(f"Outbox: resent {len(rows)} readings (seq {rows[0]['seq']}-{rows[-1]['seq']})")
+        return len(rows)
+
+    def start_outbox_sender(self):
+        """Background resend of unconfirmed readings, rate-limited."""
+        if getattr(self, "_store", None) is None:
+            return
+        sender = getattr(self, "_sender", None)
+        if sender is not None and sender.is_alive():
+            return
+        self._sender = threading.Thread(target=self._sender_loop, name="hub-outbox", daemon=True)
+        self._sender.start()
+
+    def _sender_loop(self):
+        while not self._stop_event.wait(timeout=CATCHUP_INTERVAL_S):
+            try:
+                self._send_due_readings()
+            except Exception:
+                _log("Outbox resend failed", sys.stderr)
+                traceback.print_exc()
+
+    def outbox_stats(self):
+        store = getattr(self, "_store", None)
+        if store is None:
+            return None
+        try:
+            return store.stats()
+        except Exception:
+            return None
+
     def privacy_filter(self, states, wait=True):
         """`states` without phone or location entities.
 
@@ -1621,11 +1823,7 @@ class CentralCoreClient:
             "timestamp": now_iso,
         }
         try:
-            self._publish(
-                self.preferred_sensors_topic,
-                json.dumps(telemetry_payload),
-                qos=0,
-            )
+            self._publish_reading("sensors", self.preferred_sensors_topic, telemetry_payload, obs_ts)
             _log_debug(f"HA WS -> sent change for {entity_id}: {raw_state!r}")
         except Exception:
             _log("Failed to publish selected sensor change via HA WS", sys.stderr)
@@ -1694,6 +1892,15 @@ class CentralCoreClient:
                 _log(f"Subscribed to {self.cmd_sub_topic} (Vault command pattern)")
             except Exception:
                 _log("Subscription failed", sys.stderr)
+            store = getattr(self, "_store", None)
+            if store is not None:
+                try:
+                    client.subscribe(self.store_ack_topic, qos=1)
+                    _log(f"Subscribed to {self.store_ack_topic} (store acks)")
+                    # Catch up: resend everything the vault has not confirmed.
+                    store.mark_unsent()
+                except Exception:
+                    _log("Store ack subscription failed", sys.stderr)
             self._connected = True
             # Anything that may wait (outbox, Home Assistant) runs on the worker.
             self._submit(self._after_connect)
@@ -1771,6 +1978,9 @@ class CentralCoreClient:
                 payload = "<binary>"
             _log(f"MQTT <- {msg.topic} len={size} retain={getattr(msg, 'retain', False) is True}")
             _log_debug(f"MQTT <- {msg.topic} payload={_preview(payload)}")
+            if msg.topic == getattr(self, "store_ack_topic", None):
+                self._handle_store_ack(msg.payload)
+                return
             # Handlers may call Home Assistant: run them on the worker.
             self._submit(self._dispatch_message, msg, payload)
         except Exception:
@@ -1980,8 +2190,17 @@ class CentralCoreClient:
                 payload = json.dumps(data)
         except Exception:
             pass
+        stats = self.outbox_stats()
         try:
-            self._publish(self.telemetry_topic, payload)
+            if stats is not None:
+                data = json.loads(payload)
+                # The backlog the vault shows on the hub's page.
+                data["outbox"] = {k: stats[k] for k in ("backlog", "bytes", "oldest_event_ts", "last_acked_seq",
+                                                        "dropped_total")}
+                payload = json.dumps(data)
+                self._publish_reading("system", self.telemetry_topic, data, data.get("timestamp") or _utc_now_iso())
+            else:
+                self._publish(self.telemetry_topic, payload)
         except Exception:
             _log("Failed to publish telemetry")
         # Also publish to an optional vault-specific topic if configured.
@@ -2187,7 +2406,8 @@ class CentralCoreClient:
             "timestamp": now_iso,
         }
         try:
-            self._publish(self.preferred_sensors_topic, json.dumps(telemetry_payload), qos=0)
+            event_ts = _latest_time(observed_map.values(), now_iso)
+            self._publish_reading("sensors", self.preferred_sensors_topic, telemetry_payload, event_ts)
         except Exception:
             _log("Failed to publish selected sensor changes", sys.stderr)
 
@@ -2220,6 +2440,7 @@ class CentralCoreClient:
 
     def run(self):
         self.start_worker()
+        self.start_outbox_sender()
         # connect first
         self.connect()
         try:
@@ -2264,6 +2485,12 @@ class CentralCoreClient:
             self.stop_worker()
         except Exception:
             pass
+        store = getattr(self, "_store", None)
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
         for path in list(getattr(self, "_temp_cert_files", [])):
             try:
                 os.unlink(path)
