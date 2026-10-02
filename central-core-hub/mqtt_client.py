@@ -19,6 +19,7 @@ import re
 import socket
 import sys
 import tempfile
+import atexit
 import threading
 import time
 import traceback
@@ -1736,12 +1737,17 @@ class CentralCoreClient:
             return
         self._sender = threading.Thread(target=self._sender_loop, name="hub-outbox", daemon=True)
         self._sender.start()
+        # Stop resending before the interpreter tears down stdio (a daemon thread
+        # writing to stderr during shutdown can abort the process).
+        atexit.register(self._stop_event.set)
 
     def _sender_loop(self):
         while not self._stop_event.wait(timeout=CATCHUP_INTERVAL_S):
             try:
                 self._send_due_readings()
             except Exception:
+                if self._stop_event.is_set() or sys.is_finalizing():
+                    return
                 _log("Outbox resend failed", sys.stderr)
                 traceback.print_exc()
 
