@@ -1,5 +1,6 @@
-# tag v1.0.2, pinned to its commit
-central-core-mqtt-shared @ git+https://github.com/elyobelyob/central-core-mqtt-shared.git@e95f7ceb88c8fba2fdc1c60016b2f28c1ca7e78e
+# tag v1.1.0, pinned to its commit
+# central-core-mqtt-shared v1.1.0 (tag commit); keep all three requirement files on the same commit.
+central-core-mqtt-shared @ git+https://github.com/elyobelyob/central-core-mqtt-shared.git@74ea2072093bcee7f7119a60b704f15877d2a103
 pytest>=7.0.0
 pytest-cov>=4.0.0
 ruff>=0.16.9

@@ -5,5 +5,6 @@ requests==2.34.2
 websocket-client==1.9.2
 PyYAML==6.0.3  # required by mqtt_client.py to parse SENSOR_REGISTRY.yaml
 
-# Shared MQTT topic templates, pinned to the commit of tag v1.0.0 (a tag can be moved).
-central-core-mqtt-shared @ git+https://github.com/elyobelyob/central-core-mqtt-shared.git@e95f7ceb88c8fba2fdc1c60016b2f28c1ca7e78e
+# Shared MQTT topic templates, pinned to the commit of tag v1.1.0 (a tag can be moved).
+# central-core-mqtt-shared v1.1.0 (tag commit); keep all three requirement files on the same commit.
+central-core-mqtt-shared @ git+https://github.com/elyobelyob/central-core-mqtt-shared.git@74ea2072093bcee7f7119a60b704f15877d2a103

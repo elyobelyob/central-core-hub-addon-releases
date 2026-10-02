@@ -1,5 +1,5 @@
 """The hub must ship the same MQTT protocol package it is tested with: the exact
-commit of a release tag (currently v1.0.2, the tag the vault pins). Commits, not
+commit of a release tag (currently v1.1.0, the tag the vault pins). Commits, not
 tags, because a tag can be moved (see test_supply_chain_pins)."""
 import re
 from pathlib import Path
