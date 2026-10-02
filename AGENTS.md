@@ -28,4 +28,4 @@ The Home Assistant add-on that runs in each home (`central-core-hub/`). It **onl
 - Commands from MQTT are untrusted: check `command_id`, size (64 KB) and type; the queue is bounded.
 - Privacy fails closed (`privacy.py`). Phones, people, zones, trackers and anything with coordinates never leave the hub, on every path (poll, set, publishes, inventory).
 - Never change defaults that would disconnect existing hubs (for example MQTT TLS) without a migration plan; see `docs/security/mqtt-tls-and-command-signing.md`.
-- The MQTT protocol comes from `central-core-mqtt-shared`. Both `requirements.txt` and `central-core-hub/requirements.txt` pin the exact commit of the same release tag the vault pins (currently `v1.0.2` = `e95f7ceb88c8fba2fdc1c60016b2f28c1ca7e78e`); `tests/unit/test_mqtt_shared_pin.py` enforces the match.
+- The MQTT protocol comes from `central-core-mqtt-shared`. Both `requirements.txt` and `central-core-hub/requirements.txt` pin the exact commit of the same release tag the vault pins (currently `v1.1.0`; TODO: the commit is a placeholder until the tag exists); `tests/unit/test_mqtt_shared_pin.py` enforces the match.

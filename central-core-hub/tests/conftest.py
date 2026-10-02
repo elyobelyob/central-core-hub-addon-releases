@@ -8,6 +8,9 @@ import pytest as _pytest
 import time as _time
 import os as _os
 
+# No on-disk reading outbox unless a test asks for one (HUB_OUTBOX_DB=<path>).
+_os.environ.setdefault("HUB_OUTBOX_DB", "")
+
 
 class _TopicsModule(types.ModuleType):
     TELEMETRY_SYSTEM: str
