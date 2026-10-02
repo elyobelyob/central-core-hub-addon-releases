@@ -1,5 +1,34 @@
 # Changelog
 
+## [2.3.0] - 2026-10-02
+
+Store and confirm: the hub keeps every reading until the vault confirms it stored it
+(`central-core-mqtt-shared` protocol 1.1).
+
+- Every state change and status message is first written to an on-disk outbox
+  (`/data/outbox.db`, SQLite, kept through restarts and power cuts) with a sequence number, the time
+  it happened (Home Assistant's `last_changed`, in UTC) and, separately, the time the hub queued it.
+  It is then sent at QoS 1 (it was QoS 0).
+- The vault answers on `hubs/<id>/v1/ack` (`{"upto": N, "stored": K}`) once it has stored
+  everything up to N; the hub then deletes those readings.
+- After a reconnect, everything the vault has not confirmed is resent, oldest first, in batches of
+  20 a second on `hubs/<id>/v1/telemetry/batch`, each reading with its own time, so readings sent
+  hours late are stored at the minute they happened. A reading not confirmed within 5 minutes is
+  sent again; the vault ignores duplicates.
+- Nothing is resent until the vault has confirmed this outbox once, so a vault older than protocol
+  1.1 sees no extra traffic; readings are kept (within the caps) until it is updated.
+- The outbox is capped at 7 days and 50 MB; beyond that the oldest readings are dropped and the hub
+  logs how many (and counts them).
+- Each batch carries the hub's clock time so the vault can flag a hub whose clock is wrong.
+- Status telemetry includes `outbox` (backlog size, bytes, oldest waiting reading, last confirmed
+  sequence number, readings dropped), shown on the vault's hub page.
+- Not changed: the hourly sensor list, the sensor list sent on connect and poll replies are still
+  sent as before (QoS 0, not kept): they describe what exists, not what happened, and the next one
+  replaces them.
+
+Upgrade notes: update the vault (with its database migration) before hubs, so acknowledgements
+flow from the first message. The MQTT broker must let each hub subscribe to `hubs/<id>/v1/ack`.
+
 ## [2.2.2] - 2026-10-02
 
 - The hub now uses the same MQTT protocol package as the vault: `central-core-mqtt-shared` v1.0.2
