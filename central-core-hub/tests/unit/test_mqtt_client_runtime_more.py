@@ -340,7 +340,7 @@ def test_cert_content_handling():
     # Mock options with cert content
     ca_content = "-----BEGIN CERTIFICATE-----\nMOCK CA\n-----END CERTIFICATE-----"
     cert_content = "-----BEGIN CERTIFICATE-----\nMOCK CERT\n-----END CERTIFICATE-----"
-    key_content = "-----BEGIN PRIVATE KEY-----\nMOCK KEY\n-----END PRIVATE KEY-----"
+    key_content = "-----BEGIN PRIVATE KEY-----\nMOCK KEY\n-----END PRIVATE KEY-----"  # gitleaks:allow
 
     options = {
         "mqtt_host": "localhost",
