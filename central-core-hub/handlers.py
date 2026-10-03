@@ -609,7 +609,7 @@ def handle_message(
                 try:
                     client._publish(v1_ack, json.dumps(ack_payload), qos=1)
                 except Exception:
-                    pass  # pragma: no cover
+                    pass
 
             sensors_requested = None
             try:
@@ -618,7 +618,7 @@ def handle_message(
                     srv = payload_obj.get("sensors")
                     if isinstance(srv, list):
                         sensors_requested = srv
-            except Exception:  # pragma: no cover - defensive branch hard to reproduce in tests
+            except Exception:
                 sensors_requested = None
 
             # Only publish telemetry if the Vault has requested specific sensors.
@@ -645,11 +645,11 @@ def handle_message(
 
             data_map = {}
             raw_map = {}
-            for s in sensors:  # pragma: no cover
-                ent = s.get("entity_id")  # pragma: no cover
+            for s in sensors:
+                ent = s.get("entity_id")
                 if not ent:
                     continue
-                st = s.get("state")  # pragma: no cover
+                st = s.get("state")
                 # preserve the raw state as reported by HA
                 raw_map[ent] = st
                 # Do not normalize — preserve the exact HA-provided state
@@ -700,7 +700,7 @@ def handle_message(
             try:
                 client._publish(client.preferred_sensors_topic, json.dumps(telemetry_payload), qos=0)
             except Exception:
-                pass  # pragma: no cover
+                pass
 
             # Log the sensors we just published for operator visibility
             try:
@@ -726,7 +726,7 @@ def handle_message(
                     }
                     client._publish(client.vault_topic, json.dumps(reminder), qos=0)
             except Exception:
-                pass  # pragma: no cover
+                pass
 
             if command_id:
                 # Publish versioned completion response only; remove legacy response
@@ -746,7 +746,7 @@ def handle_message(
                 try:
                     client._publish(v1_comp, json.dumps(comp_payload), qos=1)
                 except Exception:
-                    pass  # pragma: no cover
+                    pass
             return
 
         expected_set_topic_v1 = f"hubs/{client.client_id}/v1/cmd/sensors/set"
@@ -773,7 +773,7 @@ def handle_message(
             _handle_registry_set(client, cmd)
             return
     except Exception:
-        traceback.print_exc()  # pragma: no cover
+        traceback.print_exc()
 
 
 def _registry_allows():
