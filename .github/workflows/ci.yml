@@ -1,12 +1,20 @@
 name: CI
 
+# The whole suite is quick, so every pull request runs all of it, once per change
+# (not again on the merge to main), skipping doc-only changes. "Run workflow" runs
+# it on demand. Keeps within the free GitHub Actions minutes.
 on:
-  push:
-    branches:
-      - main
   pull_request:
-    branches:
-      - main
+    branches: [ main ]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+# A newer push to the same PR cancels the run for the older one.
+concurrency:
+  group: ci-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   tests:
