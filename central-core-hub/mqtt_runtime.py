@@ -141,7 +141,7 @@ def setup_mqtt_client(ctx, mqtt_mod):
         ctx._client.on_connect = ctx.on_connect
         ctx._client.on_disconnect = ctx.on_disconnect
         ctx._client.on_message = ctx.on_message
-    except Exception:  # pragma: no cover - assignment may fail on exotic clients
+    except Exception:
         traceback.print_exc()
 
     return ctx._client
