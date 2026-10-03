@@ -46,7 +46,7 @@ def _read_proc_stat():
     try:
         with open("/proc/stat", "r") as f:
             line = f.readline()
-            if not line.startswith("cpu "):  # pragma: no cover
+            if not line.startswith("cpu "):
                 return None, None
             parts = line.split()[1:]
             vals = [int(x) for x in parts]
@@ -63,13 +63,13 @@ def get_cpu_percent():
         return None
     time.sleep(0.1)
     idle2, total2 = _read_proc_stat()
-    if idle2 is None or total2 is None or total1 is None or total2 == total1:  # pragma: no cover
+    if idle2 is None or total2 is None or total1 is None or total2 == total1:
         return None
     # At this point all values are non-None ints
     idle_delta = int(idle2) - int(idle1)
     total_delta = int(total2) - int(total1)
-    try:  # pragma: no cover
+    try:
         usage = (1.0 - (idle_delta / total_delta)) * 100.0
         return round(usage, 1)
     except Exception:
-        return None  # pragma: no cover
+        return None  # pragma: no cover - unreachable: total_delta is a non-zero int (checked above)
