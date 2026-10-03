@@ -1,0 +1,20 @@
+Central Core Hub add-on
+Copyright 2025-2026 elyobelyob (https://github.com/elyobelyob)
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Trademarks
+----------
+"Central Core" and the Central Core logo (the circular mark and the
+"Central Core" wordmark, including central-core-hub/icon.png and
+central-core-hub/logo.png) are trademarks of the copyright holder. They are
+not covered by the Apache License: section 6 of that licence grants no
+permission to use them. If you distribute a modified version, remove the
+name and logo and use your own branding.
+
+Third-party software
+--------------------
+The add-on's container image is built on a Home Assistant base image and
+bundles third-party software, such as the operating system packages, Python
+and the Python packages listed in requirements.txt. Each of those components
+is distributed under its own licence, not this one.
