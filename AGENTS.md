@@ -1,5 +1,16 @@
 # AGENTS.md: central-core-hub-addon-releases
 
+## What we believe
+
+Dementia care should be care. These principles come before any feature, design or price; check every change against them.
+
+1. **Care first.** Every feature has to help a family look after someone better. If it only helps us, it doesn't ship.
+2. **Dignity.** No cameras, no microphones, nothing that watches. Sensors notice the rhythm of the day, not the person.
+3. **The family stays in control.** They choose who sees what, how alerts work and when to stop. Their data is theirs.
+4. **Plain and honest.** We say what the sensors showed, never more. No medical claims, no scare tactics.
+5. **Affordable.** The monthly fee stays low, and you pay only for extras you use.
+6. **Open.** The code is public, so anyone can check it, run it or improve it.
+
 ## Central Core in one paragraph
 
 Home monitoring for people living with dementia: a few door and motion sensors, no cameras or microphones, and a plain-English morning update for the family. Pre-launch: today it watches the owner's parents' home (`rookery-001`) and the owner's flat (`elyob-main-001`), but **build it as a future multi-customer health-data product**. Scope every query to a home, rate-limit anything that sends messages, and never cut a security corner because "it's only one family".
