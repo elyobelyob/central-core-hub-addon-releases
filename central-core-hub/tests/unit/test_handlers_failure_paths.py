@@ -63,7 +63,7 @@ def test_updater_crash_is_reported_as_failed_with_its_message(action):
     assert final["result"]["reason"] == "supervisor said no"
 
 
-def test_check_update_without_ack_topic_still_runs():
+def test_check_update_without_ack_topic_still_runs(monkeypatch):
     class Checker:
         def check(self):
             return {"outcome": "checked", "installed": "1", "latest": "2", "auto_update": False, "reason": None}
@@ -79,7 +79,7 @@ def test_check_update_without_ack_topic_still_runs():
             raise ValueError("bad id")
         return real(action, cid)
 
-    client.build_ack_topic = flaky
+    monkeypatch.setattr(client, "build_ack_topic", flaky)
     _send(client, "config/check_update", {"command_id": "k1"})
     handlers.wait_for_update_worker(timeout=5)
     assert [a["status"] for a in client.acks("k1")] == ["completed"]
