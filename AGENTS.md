@@ -14,6 +14,14 @@ The five repos sit side by side in a `cc-all` folder: `central-core-vault` (owns
 - Write anything families read in plain English.
 - **Never give medical advice, anywhere**: portal, morning updates, care reports, AI prompts, emails, the website and marketing. Describe only what the sensors showed and how it compares with that home's usual pattern. Never name, suggest or guess at an illness, infection or condition; never say something is a sign or symptom; never mention doctors, medication or treatment. This is an owner rule, and it also keeps Central Core outside medical-device regulation (MHRA). The most we ever suggest is that the family checks in.
 
+## Checks: once, at the right level
+
+- **While building:** run focused tests for what you touched (in the vault, plus `tests/test_security_hardening.py`).
+- **Before the PR:** run the full suite once, locally, on the final commit. Vault: `make test` (parallel, one database per worker, a few minutes). Other repos: their whole suite; it is quick.
+- **GitHub:** vault PRs run only the quick safety subset (`make test-quick`: security, no medical advice, the message lock, logins, migrations, Herbert, night watch); the full vault suite runs nightly on `main` and on "Run workflow". The client, add-on and protocol repos run their whole suite on each PR; the website has no GitHub CI (run its tests before deploying). A failed nightly run is fixed before new work.
+- **Don't repeat:** never re-run a full suite that already passed on the same commit.
+- **Review depth scales with risk:** Herbert Protocol, night-door alerts, money and billing, security, logins and roles, database migrations, and anything that sends messages get a full review by several reviewers. Ordinary features get one reviewer. Copy, styling and docs get none.
+
 ## This repo
 
 The Home Assistant add-on that runs in each home (`central-core-hub/`). It **only supplies data**: sensor states, telemetry, inventory. It never designs floor plans or stores customer data; the vault does that.
