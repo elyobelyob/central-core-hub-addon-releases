@@ -146,6 +146,19 @@ def _patch_ha_ws(monkeypatch):
         except Exception:
             pass
 
+    # Stop every listener thread a test starts (e.g. by building a
+    # CentralCoreClient) before the fake websocket is undone; otherwise the
+    # daemon thread outlives the test and retries a real ws://localhost:8123.
+    started = []
+    if ha is not None:
+        real_start = ha.HAWebSocketListener.start
+
+        def _tracked_start(self):
+            started.append(self)
+            return real_start(self)
+
+        monkeypatch.setattr(ha.HAWebSocketListener, "start", _tracked_start)
+
     # Redirect stdout to devnull for the duration of the test to suppress prints
     orig_stdout = sys.stdout
     devnull = open(_os.devnull, "w")
@@ -153,6 +166,11 @@ def _patch_ha_ws(monkeypatch):
     try:
         yield
     finally:
+        for listener in started:
+            try:
+                listener.stop()
+            except Exception:
+                pass
         sys.stdout = orig_stdout
         try:
             devnull.close()

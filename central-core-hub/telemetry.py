@@ -14,7 +14,7 @@ def _get_cpu_percent():
     if ext:
         try:
             return ext()
-        except Exception:  # pragma: no cover - external override error is environment-specific
+        except Exception:
             pass
 
     try:
@@ -23,7 +23,7 @@ def _get_cpu_percent():
         cpu_val = helpers.get_cpu_percent()
         if cpu_val is not None:
             return cpu_val
-    except Exception:  # pragma: no cover - helpers module not available in test harness
+    except Exception:
         pass
     return None
 
@@ -55,7 +55,7 @@ def build_telemetry(
     mem_free = None
     disk_total = None
     disk_free = None
-    try:  # pragma: no cover
+    try:
         if callable(uptime_fn):
             up_val = uptime_fn()
         else:
@@ -65,8 +65,8 @@ def build_telemetry(
         # accept numeric or None
         up = int(up_val) if isinstance(up_val, (int, float)) else None
     except Exception:
-        up = None  # pragma: no cover
-    try:  # pragma: no cover
+        up = None
+    try:
         if callable(loadavg_fn):
             la_val = loadavg_fn()
         else:
@@ -79,8 +79,8 @@ def build_telemetry(
         else:
             la = []
     except Exception:
-        la = []  # pragma: no cover
-    try:  # pragma: no cover
+        la = []
+    try:
         if callable(mem_info_fn):
             mem_val = mem_info_fn()
         else:
@@ -92,8 +92,8 @@ def build_telemetry(
         else:
             mem_total, mem_free = None, None
     except Exception:
-        mem_total, mem_free = None, None  # pragma: no cover
-    try:  # pragma: no cover
+        mem_total, mem_free = None, None
+    try:
         if callable(disk_info_fn):
             disk_val = disk_info_fn()
         else:
@@ -105,7 +105,7 @@ def build_telemetry(
         else:
             disk_total, disk_free = None, None
     except Exception:
-        disk_total, disk_free = None, None  # pragma: no cover
+        disk_total, disk_free = None, None
     cpu_count = os.cpu_count() or 1
     # Allow caller to supply a specific get_cpu_percent function (useful for tests);
     # otherwise resolve at runtime.

@@ -1,4 +1,14 @@
-.PHONY: release
+.PHONY: release coverage
+
+PYTHON ?= .venv/bin/python
+# Local coverage floor (CI does not run this target). Raise it when coverage
+# goes up; never lower it to make a change pass.
+COVERAGE_FAIL_UNDER ?= 96
+
+# Usage: make coverage
+coverage:
+	$(PYTHON) -m coverage run --source=. --omit='*/tests/*,*/test_*,.venv/*' -m pytest -q
+	$(PYTHON) -m coverage report --fail-under=$(COVERAGE_FAIL_UNDER)
 
 # Usage:
 #   make release VERSION=1.0.89 [GIT_BRANCH=main]
