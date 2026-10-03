@@ -67,14 +67,14 @@ def test_new_selection_unsubscribes_old_and_drops_unwatched_states():
     assert "HA WS watching 1 entities" in logs
 
 
-def test_subscribe_failure_is_logged_not_raised():
+def test_subscribe_failure_is_logged_not_raised(monkeypatch):
     lst, logs = _listener()
     _connected(lst)
 
     def boom(_payload):
         raise RuntimeError("send failed")
 
-    lst._send_command = boom
+    monkeypatch.setattr(lst, "_send_command", boom)
     lst.update_selectors(["sensor.temp"])
     assert any("HA WS subscribe failed: send failed" in m for m in logs)
     assert lst._sub_id is None

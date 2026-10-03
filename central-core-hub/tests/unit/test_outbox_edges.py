@@ -1,7 +1,9 @@
 """SqliteOutbox edge cases: failed writes leave the outbox as it was,
 damaged rows and meta values do not stop a resend, and timestamps are UTC."""
 
+import os
 import re
+import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -31,10 +33,27 @@ def test_utc_iso_now_is_utc_with_z():
     assert datetime.fromisoformat(text.replace("Z", "+00:00")) >= before
 
 
-def test_utc_iso_naive_datetime_is_local_time(monkeypatch):
-    naive = datetime(2026, 7, 1, 12, 0, 0)
-    expected = naive.astimezone().astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-    assert ob.utc_iso(naive) == expected
+@pytest.fixture
+def london_time():
+    """Run with the hub's local time zone fixed to UK time (BST in summer)."""
+    old = os.environ.get("TZ")
+    os.environ["TZ"] = "Europe/London"
+    time.tzset()
+    try:
+        yield
+    finally:
+        if old is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = old
+        time.tzset()
+
+
+def test_utc_iso_naive_datetime_is_local_time(london_time):
+    # 12:00 on 1 July in the UK is BST (UTC+1), so 11:00 UTC; in January it is GMT.
+    assert ob.utc_iso(datetime(2026, 7, 1, 12, 0, 0)) == "2026-07-01T11:00:00Z"
+    assert ob.utc_iso(datetime(2026, 1, 1, 12, 0, 0)) == "2026-01-01T12:00:00Z"
+    assert ob.utc_iso("2026-07-01T12:00:00") == "2026-07-01T11:00:00Z"
 
 
 def test_utc_iso_converts_offsets_and_epochs():
