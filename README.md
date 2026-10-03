@@ -1,6 +1,17 @@
 
 # Central Core Hub Add-on Releases
 
+## What we believe
+
+Central Core helps families look after someone living with dementia at home. Dementia care should be care:
+
+1. **Care first.** Every feature has to help a family look after someone better. If it only helps us, it doesn't ship.
+2. **Dignity.** No cameras, no microphones, nothing that watches. Sensors notice the rhythm of the day, not the person.
+3. **The family stays in control.** They choose who sees what, how alerts work and when to stop. Their data is theirs.
+4. **Plain and honest.** We say what the sensors showed, never more. No medical claims, no scare tactics.
+5. **Affordable.** The monthly fee stays low, and you pay only for extras you use.
+6. **Open.** The code is public, so anyone can check it, run it or improve it.
+
 ## Home Assistant Add-on Base Images
 This add-on now uses the official Home Assistant base images for all supported architectures, as required for Supervisor compliance. See `central-core-hub/build.yaml` for details.
 
