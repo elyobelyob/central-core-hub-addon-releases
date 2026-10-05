@@ -3,7 +3,7 @@
 central-core-mqtt-shared @ git+https://github.com/elyobelyob/central-core-mqtt-shared.git@74ea2072093bcee7f7119a60b704f15877d2a103
 pytest>=7.0.0
 pytest-cov>=4.0.0
-ruff>=0.16.9
+ruff>=0.16.10
 requests>=2.25.1
 paho-mqtt>=1.6.1
 PyYAML>=6.0
