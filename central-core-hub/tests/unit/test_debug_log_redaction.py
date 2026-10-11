@@ -110,3 +110,32 @@ def test_nothing_is_rendered_when_debug_logging_is_off(mc, monkeypatch):
     msg = types.SimpleNamespace(topic="hubs/demo-home-001/v1/cmd/x/y", payload=b"{}", retain=False)
     client.on_message(None, None, msg)
     client._publish("hubs/demo-home-001/v1/telemetry/system", "{}")
+
+
+def test_a_pem_block_cut_off_by_the_limit_is_still_redacted(mc):
+    pem = "-----BEGIN PRIVATE KEY-----\n" + "A" * 2000 + "\n-----END PRIVATE KEY-----"
+    out = mc._preview("cert " + pem, limit=100)
+    assert "AAAA" not in out
+    assert out.startswith("cert [PEM REDACTED]")
+
+
+def test_large_non_json_input_is_cheap(mc, monkeypatch):
+    """The scrub runs only on the cut preview and is linear: a 60 KB message full
+    of quotes takes milliseconds, not seconds, even on the paho thread of a small hub."""
+    import time as _t
+
+    nasty = ('"' + "a" * 50 + '" ' + "'b' : ") * 1200  # ~ 60 KB, many quotes, never valid JSON
+    start = _t.perf_counter()
+    for _ in range(20):
+        mc._preview(nasty)
+    assert (_t.perf_counter() - start) / 20 < 0.02
+    # the regex itself is linear on long input too (in case someone raises the limit)
+    start = _t.perf_counter()
+    mc._QUOTED_FIELD_RE.sub(mc._redact_field, nasty[:40_000])
+    assert _t.perf_counter() - start < 0.5
+
+
+def test_deeply_nested_json_does_not_break_the_preview(mc):
+    deep = "[" * 100_000 + "]" * 100_000
+    out = mc._preview(deep, limit=50)
+    assert out.startswith("[[[[") and "chars)" in out

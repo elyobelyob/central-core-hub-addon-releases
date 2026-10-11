@@ -232,7 +232,8 @@ def _log(msg, file=None):
 # debug logging is on: the `debug_logging` add-on option or CC_HUB_DEBUG=1.
 _DEBUG_LOGGING = os.environ.get("CC_HUB_DEBUG", "").lower() in ("1", "true", "yes")
 _PREVIEW_CHARS = 300
-_PEM_RE = re.compile(r"-----BEGIN [^-]+-----.*?-----END [^-]+-----", re.DOTALL)
+# A PEM block, also one cut off by the preview limit (no END line left).
+_PEM_RE = re.compile(r"-----BEGIN [^-\n]{1,64}-----.*?(?:-----END [^-\n]{1,64}-----|\Z)", re.DOTALL)
 
 
 def _utc_now_iso():
@@ -247,11 +248,12 @@ def _log_debug(msg):
 # Fields whose values never reach a log line, wherever they sit in a payload:
 # the registry/set `token`, passwords, secrets, private keys, API keys, ...
 _SECRET_KEY_RE = re.compile(r"token|passw|secret|private_?key|api_?key|authorization|credential|bearer", re.I)
-# Fallback for text that is not (or no longer) valid JSON, e.g. cut off by the size limit.
-_SECRET_FIELD_RE = re.compile(
-    r"""(?P<key>["'][^"']*(?:token|passw|secret|private_?key|api_?key|authorization|credential|bearer)[^"']*["']"""
-    r"""\s*:\s*)(?:"(?:[^"\\]|\\.)*"?|'(?:[^'\\]|\\.)*'?|[^,}\]\s]+)""",
-    re.I,
+# For text that is not valid JSON (run on the cut preview only). Every part is
+# bounded or consumed once, so it is linear: a quoted key of at most 64
+# characters, a colon, then a quoted (possibly unterminated) or bare value.
+_QUOTED_FIELD_RE = re.compile(
+    r"""(?P<key>(?P<q>["'])(?P<name>[^"'\\\n]{1,64})(?P=q)[ \t]{0,8}:[ \t]{0,8})"""
+    r"""(?P<value>"(?:[^"\\]|\\.)*"?|'(?:[^'\\]|\\.)*'?|[^,{}\[\]\s"']{1,256})"""
 )
 _REDACTED = "[REDACTED]"
 
@@ -268,26 +270,41 @@ def _redact_secrets(value):
     return value
 
 
+def _redact_field(match):
+    if _SECRET_KEY_RE.search(match.group("name")):
+        return match.group("key") + f'"{_REDACTED}"'
+    return match.group(0)
+
+
 def _preview(payload, limit=_PREVIEW_CHARS):
-    """A short rendering of a payload for debug logs, with PEM blocks and
-    secret fields (token, password, secret, private_key, ...) redacted before
-    the text is cut to `limit`."""
+    """A short rendering of a payload for debug logs, with PEM blocks and secret
+    fields (token, password, secret, private_key, ...) redacted.
+
+    JSON is redacted field by field (linear) and then cut to `limit`. Anything
+    else is cut to `limit` first and only the preview is scrubbed, so the work
+    stays small however large the message.
+    """
     if payload is None:
         return "<none>"
     try:
         text = payload.decode("utf-8", errors="replace") if isinstance(payload, (bytes, bytearray)) else str(payload)
     except Exception:
         return "<unprintable>"
-    text = _PEM_RE.sub("[PEM REDACTED]", text)
+    structured = False
     try:
         decoded = json.loads(text)
-    except ValueError:
-        decoded = None
-    if isinstance(decoded, (dict, list)):
-        text = json.dumps(_redact_secrets(decoded), separators=(",", ":"))
-    else:
-        text = _SECRET_FIELD_RE.sub(lambda m: m.group("key") + f'"{_REDACTED}"', text)
-    return text if len(text) <= limit else text[:limit] + f"...(+{len(text) - limit} chars)"
+        if isinstance(decoded, (dict, list)):
+            text = json.dumps(_redact_secrets(decoded), separators=(",", ":"))
+            structured = True
+    except Exception:  # not JSON, or nested too deeply to walk
+        pass
+    extra = len(text) - limit
+    if extra > 0:
+        text = text[:limit]
+    text = _PEM_RE.sub("[PEM REDACTED]", text)
+    if not structured:
+        text = _QUOTED_FIELD_RE.sub(_redact_field, text)
+    return text + (f"...(+{extra} chars)" if extra > 0 else "")
 
 
 try:
@@ -1155,11 +1172,13 @@ class CentralCoreClient:
         self.ha_api_url = options.get("ha_api_url") or ""
         self.ha_api_token = options.get("ha_api_token") or ""
         if self.ha_api_url and self.ha_api_token:
-            # Plain http to a host name is pinned to the address that was checked.
-            ok, why, pinned_url = _ha_safety().pin_token_url(self.ha_api_url)
-            if ok:
-                self.ha_api_url = pinned_url
-            else:
+            # Checked again, and pinned, for every connection (_ha_base); this
+            # only decides whether the Home Assistant integration runs at all.
+            try:
+                ok, why = _ha_safety().check_token_transport(self.ha_api_url)
+            except Exception as exc:  # never stop the hub (MQTT) over a bad HA URL
+                ok, why = False, f"{type(exc).__name__}: {exc}"
+            if not ok:
                 _log(
                     f"ERROR: not sending the Home Assistant token over unencrypted {self.ha_api_url!r}: {why}. "
                     "Use http://localhost:8123 (or https://). Home Assistant integration is disabled."
@@ -1382,6 +1401,9 @@ class CentralCoreClient:
                         except TypeError:
                             # listener without snapshot support: per-entity events only
                             self._ha_ws_listener = cls(self.ha_api_url, self.ha_api_token, **listener_kwargs)
+                        # Each (re)connect re-checks the address and pins it for that
+                        # connection only (Home Assistant's address can change).
+                        self._ha_ws_listener.url_guard = _ha_safety().pin_token_url
                         started = self._ha_ws_listener.start()
                         _log(f"HA WS listener started={started}")
                         # Log which sensors the websocket is currently monitoring
@@ -2237,11 +2259,34 @@ class CentralCoreClient:
                         return hv
         return None
 
+    def _ha_base(self):
+        """The Home Assistant URL for one request: checked now and, for plain http
+        to a host name, pinned to the address checked now. "" when it may not be
+        used now (logged once per reason). Never stored: the next request checks
+        again, so a DHCP change of Home Assistant's address is followed."""
+        url = getattr(self, "ha_api_url", "") or ""
+        if not url or not getattr(self, "ha_api_token", ""):
+            return url
+        try:
+            ok, why, use = _ha_safety().pin_token_url(url)
+        except Exception as exc:
+            ok, why, use = False, f"{type(exc).__name__}", ""
+        if ok:
+            self._ha_refused_reason = None
+            return use
+        if getattr(self, "_ha_refused_reason", None) != why:
+            self._ha_refused_reason = why
+            _log(f"WARNING: not sending the Home Assistant token to {url!r} now: {why}")
+        return ""
+
     def _fetch_ha_version_from_api(self):
         if not self.ha_api_url or not self.ha_api_token or requests is None:
             return None
+        base = self._ha_base()
+        if not base:
+            return None
         try:
-            url = self.ha_api_url.rstrip("/") + "/api/config"
+            url = base.rstrip("/") + "/api/config"
             headers = {
                 "Authorization": f"Bearer {self.ha_api_token}",
                 "Content-Type": "application/json",
@@ -2344,7 +2389,7 @@ class CentralCoreClient:
         if not self.ha_api_url or not self.ha_api_token:
             # HA integration not configured
             return
-        sensors = self.privacy_filter(fetch_sensors(self.ha_api_url, self.ha_api_token) or [])
+        sensors = self.privacy_filter(fetch_sensors(self._ha_base(), self.ha_api_token) or [])
         # Filter by safe_device_classes if configured
         filtered = self._filter_sensors_by_device_class(sensors, self.safe_device_classes)
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -2395,7 +2440,7 @@ class CentralCoreClient:
         if not self.ha_api_url or not self.ha_api_token:
             # HA integration not configured
             return
-        sensors = self.privacy_filter(fetch_sensors(self.ha_api_url, self.ha_api_token) or [])
+        sensors = self.privacy_filter(fetch_sensors(self._ha_base(), self.ha_api_token) or [])
         # Note: fetch_sensors already applies SENSOR_REGISTRY filtering
         payload = {
             "schema_version": 1,
@@ -2439,7 +2484,7 @@ class CentralCoreClient:
         if not self.ha_api_url or not self.ha_api_token or requests is None:
             return
         wanted = [e for e in self.selected_sensors if _is_selectable_entity(e)]
-        sensors = fetch_selected_sensors(self.ha_api_url, self.ha_api_token, wanted) or []
+        sensors = fetch_selected_sensors(self._ha_base(), self.ha_api_token, wanted) or []
         self._publish_selected_states(sensors)
 
     def _on_ha_snapshot(self, states):

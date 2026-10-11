@@ -303,7 +303,7 @@ def _handle_sensors_set(client, cmd, fetch_sensors):
         wanted = set(accepted)
         states = [
             s
-            for s in (fetch_sensors(getattr(client, "ha_api_url", None), getattr(client, "ha_api_token", None)) or [])
+            for s in (fetch_sensors(_ha_url(client), getattr(client, "ha_api_token", None)) or [])
             if s.get("entity_id") in wanted and _is_entity_allowed(s.get("entity_id"))
         ]
         states = _privacy_filter(client, states)
@@ -635,7 +635,7 @@ def handle_message(
             if not sensors_requested:
                 return
 
-            sensors = fetch_sensors(client.ha_api_url, client.ha_api_token) or []
+            sensors = fetch_sensors(_ha_url(client), client.ha_api_token) or []
             # Always apply SENSOR_REGISTRY filtering at minimum; phones and
             # location never leave the home.
             sensors = [s for s in sensors if _is_entity_allowed(s.get("entity_id"))]
@@ -783,6 +783,15 @@ def handle_message(
             return
     except Exception:
         traceback.print_exc()
+
+
+def _ha_url(client):
+    """The Home Assistant URL for one request: the client's per-request checked
+    and pinned URL (CentralCoreClient._ha_base), else its configured URL."""
+    base = getattr(client, "_ha_base", None)
+    if callable(base):
+        return base()
+    return getattr(client, "ha_api_url", None)
 
 
 def _registry_allows():
