@@ -212,7 +212,33 @@ def _ack(hub, upto, outbox_id):
     hub.on_message(None, None, msg)
 
 
-def test_a_restored_backup_gets_a_new_outbox_id_and_resends_under_it(mc, monkeypatch, tmp_path):
+def test_every_start_gets_a_new_outbox_id_and_resends_what_it_kept(mc, monkeypatch, tmp_path):
+    db = tmp_path / "outbox.db"
+    hub = _hub(mc, monkeypatch, db)
+    first = hub._store.outbox_id
+    _ack(hub, 0, first)  # this vault confirms outboxes
+    hub._connected = False
+    _door(hub, "on", "2026-10-02T07:00:00Z")  # kept, not yet confirmed
+    hub._store.close()
+    hub = _hub(mc, monkeypatch, db)
+    second = hub._store.outbox_id
+    assert second != first
+    assert hub._store.stats()["next_seq"] == 2  # seq keeps counting up
+    assert hub._send_due_readings() == 1
+    [batch] = hub._client.published
+    assert batch["payload"]["outbox_id"] == second
+    assert batch["payload"]["records"][0]["payload"]["outbox_id"] == second
+    _ack(hub, 1, second)
+    assert hub._store.stats()["backlog"] == 0
+    assert hub._store.stats()["rotations_total"] == 0  # a start is not a detection
+    hub.close()
+
+
+def test_a_restored_backup_starts_under_a_new_id(mc, monkeypatch, tmp_path):
+    """A backup taken with readings still waiting, restored after the vault has
+    stored later seqs under the old ids: the restart gives it a new id, so the
+    vault stores the readings it sends from here instead of taking them for
+    duplicates."""
     db = tmp_path / "outbox.db"
     lines = []
     monkeypatch.setattr(mc, "_log", lambda m, file=None: lines.append(m))
@@ -220,44 +246,80 @@ def test_a_restored_backup_gets_a_new_outbox_id_and_resends_under_it(mc, monkeyp
     hub = _hub(mc, monkeypatch, db)
     _door(hub, "on", "2026-10-02T07:00:00Z")
     _door(hub, "off", "2026-10-02T07:01:00Z")
-    original_id = hub._store.outbox_id
-    _ack(hub, 2, original_id)  # the vault stored seqs 1-2
+    _ack(hub, 1, hub._store.outbox_id)  # seq 2 still waiting
+    before = {hub._store.outbox_id}
     hub._store.close()
     shutil.copy(db, tmp_path / "backup.db")  # the backup is taken here
 
-    hub = _hub(mc, monkeypatch, db)
-    for i in range(3, 9):  # seqs 3-8 reach the vault after the backup
+    hub = _hub(mc, monkeypatch, db)  # after the backup the hub goes on
+    before.add(hub._store.outbox_id)
+    assert hub._send_due_readings() == 1
+    for i in range(3, 9):
         _door(hub, "on" if i % 2 else "off", f"2026-10-02T07:0{i}:00Z")
-    _ack(hub, 8, original_id)
+    _ack(hub, 8, hub._store.outbox_id)
     hub._store.close()
 
     shutil.copy(tmp_path / "backup.db", db)  # Home Assistant restores the backup
     hub = _hub(mc, monkeypatch, db)
-    assert hub._store.outbox_id == original_id
-    _door(hub, "on", "2026-10-02T09:00:00Z")  # numbered seq 3 again: the vault has a seq 3 already
-    assert hub._client.published[-1]["payload"]["seq"] == 3
-    lines.clear()
-    _ack(hub, 8, original_id)  # the vault answers from its own (later) view of this outbox
+    restored_id = hub._store.outbox_id
+    assert restored_id not in before
+    assert hub._store.stats()["backlog"] == 1  # seq 2 from the backup, due again
+    _door(hub, "on", "2026-10-02T09:00:00Z")  # numbered seq 3 again, but under a new id
+    assert hub._client.published[-1]["payload"]["outbox_id"] == restored_id
+    for old_id in before:  # late acknowledgements for the old ids change nothing
+        _ack(hub, 8, old_id)
+    assert hub._store.outbox_id == restored_id and hub._store.stats()["backlog"] == 2
+    assert not [m for m in lines if "backup is restored" in m]  # nothing for the backstop to do
+    hub.close()
 
-    new_id = hub._store.outbox_id
-    assert new_id != original_id
-    warnings = [m for m in lines if m.startswith("WARNING") and "backup is restored" in m]
-    assert len(warnings) == 1 and original_id in warnings[0] and new_id in warnings[0]
-    assert hub._store.stats()["backlog"] == 1  # nothing deleted
-    hub._client.published.clear()
-    assert hub._send_due_readings() == 1
-    [batch] = hub._client.published
-    assert batch["topic"] == hub.batch_topic
-    assert batch["payload"]["outbox_id"] == new_id
-    assert batch["payload"]["records"][0]["seq"] == 3
-    assert batch["payload"]["records"][0]["payload"]["outbox_id"] == new_id
-    # the vault stores it under the new id and confirms it
-    _ack(hub, 3, new_id)
+
+def test_a_restored_backup_with_nothing_waiting_starts_under_a_new_id(mc, monkeypatch, tmp_path):
+    """The case the in-run check cannot see: the backup's outbox was empty, so
+    no acknowledgement ever covers anything unsent."""
+    db = tmp_path / "outbox.db"
+    hub = _hub(mc, monkeypatch, db)
+    for i in range(1, 11):
+        _door(hub, "on" if i % 2 else "off", f"2026-10-02T07:{i:02d}:00Z")
+    _ack(hub, 10, hub._store.outbox_id)
     assert hub._store.stats()["backlog"] == 0
-    # a late acknowledgement for the old id changes nothing and starts nothing new
-    _door(hub, "off", "2026-10-02T09:01:00Z")
-    _ack(hub, 8, original_id)
-    assert hub._store.outbox_id == new_id and hub._store.stats()["backlog"] == 1
+    hub._store.close()
+    shutil.copy(db, tmp_path / "backup.db")
+
+    hub = _hub(mc, monkeypatch, db)
+    later_id = hub._store.outbox_id
+    for i in range(11, 16):
+        _door(hub, "on" if i % 2 else "off", f"2026-10-02T08:{i:02d}:00Z")
+    _ack(hub, 15, later_id)  # the vault has 11-15 under later_id
+    hub._store.close()
+
+    shutil.copy(tmp_path / "backup.db", db)
+    hub = _hub(mc, monkeypatch, db)
+    _door(hub, "on", "2026-10-02T09:00:00Z")  # seq 11 again
+    sent = hub._client.published[-1]["payload"]
+    assert sent["seq"] == 11 and sent["outbox_id"] not in (later_id,)
+    hub.close()
+
+
+def test_in_a_run_an_ack_covering_unsent_readings_starts_a_new_id(mc, monkeypatch, tmp_path):
+    """The backstop: within one run, the vault confirming readings this outbox
+    never sent means it is ahead of it. The readings are kept and resent."""
+    lines = []
+    monkeypatch.setattr(mc, "_log", lambda m, file=None: lines.append(m))
+    hub = _hub(mc, monkeypatch, tmp_path / "outbox.db")
+    for i in range(1, 11):
+        _door(hub, "on" if i % 2 else "off", f"2026-10-02T07:{i:02d}:00Z")
+    current = hub._store.outbox_id
+    _ack(hub, 10, current)
+    hub._connected = False
+    for i in range(11, 16):  # queued while offline: never sent
+        _door(hub, "on" if i % 2 else "off", f"2026-10-02T08:{i:02d}:00Z")
+    hub._connected = True
+    _door(hub, "off", "2026-10-02T09:00:00Z")  # seq 16 sent live
+    _ack(hub, 15, current)
+    assert hub._store.stats()["backlog"] == 6  # 11-15 kept, and 16
+    assert hub._store.outbox_id != current
+    assert len([m for m in lines if "backup is restored" in m]) == 1
+    assert [r["seq"] for r in hub._store.due(10)] == [11, 12, 13, 14, 15, 16]
     hub.close()
 
 
@@ -329,42 +391,6 @@ def test_the_new_id_is_started_on_the_worker_thread(mc, monkeypatch, tmp_path):
     hub.close()
 
 
-def test_a_recent_backup_past_the_vault_mark_is_caught_before_unsent_rows_go(mc, monkeypatch, tmp_path):
-    """The other restore shape: the restored outbox has already numbered past
-    the vault's high mark, so the vault's ack is not past every numbered seq,
-    but it covers readings this outbox never sent. Those must not be deleted."""
-    db = tmp_path / "outbox.db"
-    lines = []
-    monkeypatch.setattr(mc, "_log", lambda m, file=None: lines.append(m))
-    hub = _hub(mc, monkeypatch, db)
-    for i in range(1, 11):  # seqs 1-10 sent and confirmed
-        _door(hub, "on" if i % 2 else "off", f"2026-10-02T07:{i:02d}:00Z")
-    original_id = hub._store.outbox_id
-    _ack(hub, 10, original_id)
-    hub._connected = False
-    for i in range(11, 16):  # seqs 11-15 queued while offline: in the backup, never sent
-        _door(hub, "on" if i % 2 else "off", f"2026-10-02T08:{i:02d}:00Z")
-    hub._store.close()
-    shutil.copy(db, tmp_path / "backup.db")
-
-    hub = _hub(mc, monkeypatch, db)  # the old timeline goes on: 11-15 are sent and stored
-    assert hub._send_due_readings() == 5
-    _ack(hub, 15, original_id)
-    assert hub._store.stats()["backlog"] == 0 and hub._store.outbox_id == original_id
-    hub._store.close()
-    shutil.copy(tmp_path / "backup.db", db)  # restore
-
-    hub = _hub(mc, monkeypatch, db)
-    _door(hub, "on", "2026-10-02T09:00:00Z")  # seq 16 sent live
-    lines.clear()
-    _ack(hub, 15, original_id)  # the vault's view: 1-15 stored
-    assert hub._store.stats()["backlog"] == 6  # 11-15 never sent from this outbox: kept, and 16
-    assert hub._store.outbox_id != original_id
-    assert len([m for m in lines if "backup is restored" in m]) == 1
-    assert [r["seq"] for r in hub._store.due(10)] == [11, 12, 13, 14, 15, 16]
-    hub.close()
-
-
 def test_without_a_rotating_store_the_hub_only_refuses(mc, monkeypatch, tmp_path):
     hub = _hub(mc, monkeypatch, tmp_path / "outbox.db")
     hub._store.close()
@@ -379,7 +405,76 @@ def test_a_rotation_error_is_logged_not_raised(mc, monkeypatch, tmp_path):
     lines = []
     monkeypatch.setattr(mc, "_log", lambda m, file=None: lines.append(m))
     hub = _hub(mc, monkeypatch, tmp_path / "outbox.db")
-    monkeypatch.setattr(hub._store, "rotate_outbox_id", lambda: (_ for _ in ()).throw(RuntimeError("disk")))
-    assert hub._start_new_outbox(5, "x") is None
+
+    def boom(**_kw):
+        raise RuntimeError("disk")
+
+    monkeypatch.setattr(hub._store, "rotate_outbox_id", boom)
+    assert hub._start_new_outbox(5, "x", hub._store.outbox_id) is None
     assert any("could not start a new outbox id" in m for m in lines)
+    hub.close()
+
+
+def test_a_rotation_for_an_id_that_has_moved_on_does_nothing(ob, tmp_path):
+    box = _sent_box(ob, tmp_path / "o.db", 2)
+    old = box.outbox_id
+    box.start_new_id()
+    current = box.outbox_id
+    assert box.rotate_outbox_id(expected_id=old) is None
+    assert box.outbox_id == current
+    assert box.rotate_outbox_id(expected_id=current) is not None
+
+
+def test_a_start_does_not_use_up_the_rate_limit(ob, tmp_path):
+    box = _sent_box(ob, tmp_path / "o.db", 2)
+    box.start_new_id()
+    assert box.rotation_allowed() and box.rotation_allowed(unambiguous=True)
+    assert box.rotate_outbox_id() is not None
+    assert not box.rotation_allowed() and not box.rotation_allowed(unambiguous=True)
+    assert box.stats()["rotations_total"] == 1
+
+
+def test_a_flood_of_acks_queues_one_rotation(mc, monkeypatch, tmp_path):
+    hub = _hub(mc, monkeypatch, tmp_path / "outbox.db")
+    _door(hub, "on", "2026-10-02T07:00:00Z")
+    queued = []
+    hub._submit = lambda fn, *args: queued.append((fn, args)) or True
+    current = hub._store.outbox_id
+    for _ in range(50):
+        _ack(hub, 10**6, current)
+    assert len(queued) == 1  # one queued, the rest dropped
+    fn, args = queued[0]
+    fn(*args)  # runs: a new id
+    assert hub._store.outbox_id != current
+    for _ in range(50):
+        _ack(hub, 10**6, hub._store.outbox_id)
+    assert len(queued) == 1  # rate-limited now: nothing queued at all
+    hub.close()
+
+
+def test_a_full_work_queue_does_not_block_later_requests(mc, monkeypatch, tmp_path):
+    hub = _hub(mc, monkeypatch, tmp_path / "outbox.db")
+    _door(hub, "on", "2026-10-02T07:00:00Z")
+    hub._submit = lambda fn, *args: False  # queue full
+    current = hub._store.outbox_id
+    _ack(hub, 10**6, current)
+    assert hub._new_outbox_queued is False
+    hub._submit = lambda fn, *args: fn(*args) or True
+    _ack(hub, 10**6, current)
+    assert hub._store.outbox_id != current
+    hub.close()
+
+
+def test_a_batch_queued_by_paho_while_disconnected_counts_as_sent(mc, monkeypatch, tmp_path):
+    hub = _hub(mc, monkeypatch, tmp_path / "outbox.db")
+    _ack(hub, 0, hub._store.outbox_id)
+    hub._connected = False
+    _door(hub, "on", "2026-10-02T07:00:00Z")
+    hub._connected = True
+    hub._client.publish = lambda topic, payload, qos=0: types.SimpleNamespace(rc=4)  # MQTT_ERR_NO_CONN
+    assert hub._send_due_readings() == 1
+    assert hub._store.highest_sent_seq() == 1
+    hub._client.publish = lambda topic, payload, qos=0: types.SimpleNamespace(rc=1)
+    _door(hub, "off", "2026-10-02T07:00:01Z")  # live: failed, left for the resend
+    assert hub._store.highest_sent_seq() == 1
     hub.close()

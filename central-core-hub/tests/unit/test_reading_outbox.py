@@ -462,9 +462,19 @@ def test_nothing_is_resent_while_disconnected(hub):
 
 
 def test_a_failed_live_publish_is_left_for_the_resend(hub):
-    hub._client.rc = 4
+    hub._client.rc = 1  # MQTT_ERR_NOMEM: paho did not take it
     hub._on_ha_state_event("binary_sensor.front_door", _door("on", "2026-10-02T07:15:00Z"))
     assert [r["seq"] for r in hub._store.due(10)] == [1]
+    assert hub._store.highest_sent_seq() == 0
+
+
+def test_a_publish_paho_queued_while_disconnected_counts_as_sent(hub):
+    """For QoS 1, MQTT_ERR_NO_CONN means paho keeps the message and sends it
+    after the reconnect: it is in flight, not failed."""
+    hub._client.rc = 4
+    hub._on_ha_state_event("binary_sensor.front_door", _door("on", "2026-10-02T07:15:00Z"))
+    assert hub._store.highest_sent_seq() == 1
+    assert hub._store.due(10) == []  # not resent on top of paho's own queue
 
 
 def test_status_telemetry_reports_the_backlog_and_goes_through_the_outbox(hub, mc, monkeypatch):

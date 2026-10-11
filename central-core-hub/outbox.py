@@ -260,40 +260,62 @@ class SqliteOutbox:
                 raise
             return cur.rowcount or 0
 
-    def rotate_outbox_id(self, unambiguous: bool = False) -> Optional[tuple[str, str]]:
-        """Give this outbox a new id and send everything in it again under that id.
+    def start_new_id(self) -> tuple[str, str]:
+        """Start a new outbox id now, unconditionally (the add-on does this at
+        every start); returns (old_id, new_id).
 
-        Nothing is deleted: every kept reading is marked never sent, so the next
-        batches resend it (due() gives each payload the current id) and the
-        vault, which keys duplicates on (outbox_id, seq), stores it as new.
-        `seq` keeps counting up. One short transaction; safe to repeat.
+        A restored Home Assistant backup brings back an old outbox, possibly
+        with nothing in it, whose seqs the vault has already seen under its id:
+        a fresh id per start means the vault never takes new readings for those.
+        Every kept reading is marked never sent and is resent under the new id
+        (nothing is deleted; `seq` keeps counting up). One short transaction.
+        """
+        with self._lock:
+            return self._rekey_locked(count=False)
 
-        Returns (old_id, new_id), or None when a new id was started too
-        recently: ROTATE_MIN_INTERVAL_S, or ROTATE_MIN_INTERVAL_CLEAR_S when
-        `unambiguous`. The attempt counts even if it fails, so a failing disk
-        is not retried on every acknowledgement.
+    def rotation_allowed(self, unambiguous: bool = False) -> bool:
+        """Whether rotate_outbox_id would act now (the rate limit), without acting."""
+        interval = ROTATE_MIN_INTERVAL_CLEAR_S if unambiguous else ROTATE_MIN_INTERVAL_S
+        with self._lock:
+            return self._last_rotation is None or self._monotonic() - self._last_rotation >= interval
+
+    def rotate_outbox_id(self, unambiguous: bool = False, expected_id: Optional[str] = None) -> Optional[tuple[str, str]]:
+        """Give this outbox a new id because an acknowledgement showed the vault is
+        ahead of it (see AckBeyondSent); everything kept is resent under the new id.
+
+        Returns (old_id, new_id), or None when the outbox no longer has
+        `expected_id` (the id the evidence was about: it has moved on already),
+        or a new id was started too recently: ROTATE_MIN_INTERVAL_S, or
+        ROTATE_MIN_INTERVAL_CLEAR_S when `unambiguous`. The attempt counts even
+        if it fails, so a failing disk is not retried on every acknowledgement.
         """
         now = self._monotonic()
         interval = ROTATE_MIN_INTERVAL_CLEAR_S if unambiguous else ROTATE_MIN_INTERVAL_S
         with self._lock:
+            if expected_id is not None and expected_id != self._meta("outbox_id"):
+                return None
             if self._last_rotation is not None and now - self._last_rotation < interval:
                 return None
             self._last_rotation = now
-            old = str(self._meta("outbox_id"))
-            new = "ob-" + secrets.token_hex(8)
-            self._db.execute("BEGIN IMMEDIATE")
-            try:
-                self._db.execute("UPDATE outbox SET sent_count = 0, last_sent = NULL")
-                self._set_meta("outbox_id", new)
-                self._set_meta("last_acked_seq", 0)  # nothing is acknowledged under the new id
+            return self._rekey_locked(count=True)
+
+    def _rekey_locked(self, count: bool) -> tuple[str, str]:
+        old = str(self._meta("outbox_id"))
+        new = "ob-" + secrets.token_hex(8)
+        self._db.execute("BEGIN IMMEDIATE")
+        try:
+            self._db.execute("UPDATE outbox SET sent_count = 0, last_sent = NULL")
+            self._set_meta("outbox_id", new)
+            self._set_meta("last_acked_seq", 0)  # nothing is acknowledged under the new id
+            if count:
                 self._set_meta("rotated_epoch", self._clock())  # for the record only
                 self._set_meta("rotations_total", self._meta_int("rotations_total", 0) + 1)
-                self._db.execute("COMMIT")
-            except Exception:
-                self._db.execute("ROLLBACK")
-                raise
-            self._in_flight.clear()
-            return old, new
+            self._db.execute("COMMIT")
+        except Exception:
+            self._db.execute("ROLLBACK")
+            raise
+        self._in_flight.clear()
+        return old, new
 
     def begin_send(self, seqs) -> None:
         """These seqs are about to be published: an acknowledgement may arrive
