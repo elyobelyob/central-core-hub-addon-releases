@@ -124,12 +124,15 @@ def test_ack_beyond_the_highest_seq_sent_is_refused(ob, tmp_path):
         box.append("system", "t", {}, "2026-10-02T10:00:00Z")
     # nothing sent yet: the vault cannot have stored anything
     assert box.highest_sent_seq() == 0
-    with pytest.raises(ob.AckRefused, match="beyond"):
+    with pytest.raises(ob.AckRefused, match="not sent"):
         box.ack(1, box.outbox_id)
     box.mark_sent([1, 2, 3])
     assert box.highest_sent_seq() == 3
-    for forged in (4, 5, 10**6, 2**63 - 1, 2**200):
-        with pytest.raises(ob.AckRefused, match="beyond"):
+    for forged in (4, 5):  # numbered, never sent
+        with pytest.raises(ob.AckRefused, match="not sent"):
+            box.ack(forged, box.outbox_id)
+    for forged in (6, 10**6, 2**63 - 1, 2**200):  # never even numbered
+        with pytest.raises(ob.AckRefused, match="beyond every seq"):
             box.ack(forged, box.outbox_id)
     assert box.stats()["backlog"] == 5
     assert not box.vault_confirms()
