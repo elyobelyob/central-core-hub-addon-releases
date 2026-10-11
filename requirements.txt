@@ -10,4 +10,4 @@ PyYAML==6.0.3  # required by mqtt_client.py to parse SENSOR_REGISTRY.yaml
 # for environments where the package hasn't been published yet.
 # pinned to the commit of tag v1.1.0 (a tag can be moved)
 # central-core-mqtt-shared v1.1.0 (tag commit); keep all three requirement files on the same commit.
-central-core-mqtt-shared @ git+https://github.com/elyobelyob/central-core-mqtt-shared.git@74ea2072093bcee7f7119a60b704f15877d2a103
+central-core-mqtt-shared @ git+https://github.com/elyobelyob/central-core-mqtt-shared.git@37c51cb247633177234650da16d18e7202db2f63
