@@ -156,7 +156,7 @@ def test_entity_disappearing_between_check_and_install_is_reported():
 
 def test_store_reload_allows_for_a_slow_supervisor():
     # Home Assistant gives supervisor/api calls 10 s unless told otherwise, and
-    # a store reload fetches every add-on repository: on Hollybank it timed out
+    # a store reload fetches every add-on repository: on a hub in Larkspur it timed out
     # (unknown_error) until an explicit timeout was passed.
     fake = FakeListener([_state()])
     au.AddonUpdater(fake).check()
