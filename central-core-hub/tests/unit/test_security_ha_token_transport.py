@@ -75,16 +75,23 @@ def test_refused(url):
     assert reason
 
 
-def test_a_plain_http_address_that_is_not_this_machine_switches_ha_off_at_start(monkeypatch, tmp_path):
+def test_a_plain_http_address_is_judged_at_each_connection_not_at_start(monkeypatch, tmp_path):
+    """Home Assistant's address may only arrive (DHCP) after the add-on starts:
+    an address that is not this machine yet is refused per connection, and
+    used as soon as it is, instead of switching Home Assistant off for good."""
     mc = importlib.import_module("mqtt_client")
     monkeypatch.setattr(mc, "SELECTED_SENSORS_FILE", tmp_path / "sel.json")
+    monkeypatch.setattr(mc, "HA_RESOLVE_CACHE_S", 0)
     lines = []
     monkeypatch.setattr(mc, "_log", lambda m, file=None: lines.append(m))
-    c = mc.CentralCoreClient({"client_id": "hub1", "ha_api_url": "http://203.0.113.5:8123", "ha_api_token": "tok"})
-    assert c.ha_api_token == "" and c.ha_api_url == ""
-    assert c._ha_ws_listener is None
+    c = mc.CentralCoreClient({"client_id": "hub1", "ha_api_url": "http://192.168.1.20:8123", "ha_api_token": "tok"})
+    _made.append(c)
+    assert c.ha_api_token == "tok" and c.ha_api_url == "http://192.168.1.20:8123"
+    assert c._ha_base() == ""  # not this machine (yet): no token sent
     assert any("not sending the Home Assistant token" in m for m in lines)
     assert not any("tok" == m for m in lines)
+    monkeypatch.setattr(ha_safety, "_is_local_address", lambda ip: ip == "192.168.1.20")  # DHCP arrives
+    assert c._ha_base() == "http://192.168.1.20:8123"
 
 
 def test_a_name_that_is_not_this_machine_never_gets_the_token_but_stays_configured(monkeypatch, tmp_path):
@@ -124,7 +131,6 @@ def test_a_name_that_does_not_resolve_at_boot_is_retried_not_switched_off(monkey
         ("ftp://localhost", "unsupported scheme"),
         ("http://localhost:99999", "invalid port"),
         ("http://[fe80::1%25eth0]:8123", "zone"),
-        ("http://203.0.113.5:8123", "not this machine"),
         ("http://", "no host"),
     ],
 )
@@ -134,9 +140,11 @@ def test_the_startup_check_refuses_only_what_no_connection_can_fix(url, reason):
 
 
 @pytest.mark.parametrize("url", ["http://does-not-resolve.example:8123", "http://attacker.example:8123",
-                                 "http://homeassistant.local:8123", "https://anything.example"])
-def test_the_startup_check_does_not_resolve_names(url, monkeypatch):
+                                 "http://homeassistant.local:8123", "https://anything.example",
+                                 "http://203.0.113.5:8123", "http://[2001:db8::1]:8123"])
+def test_the_startup_check_does_not_resolve_or_judge_addresses(url, monkeypatch):
     monkeypatch.setattr(ha_safety, "_resolve_host", lambda host: pytest.fail("resolved at startup"))
+    monkeypatch.setattr(ha_safety, "_is_local_address", lambda ip: pytest.fail("judged at startup"))
     assert ha_safety.check_token_url(url)[0]
 
 

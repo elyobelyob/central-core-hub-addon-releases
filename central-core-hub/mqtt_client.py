@@ -474,6 +474,17 @@ SENSOR_REGISTRY = pathlib.Path(__file__).parent / "SENSOR_REGISTRY.yaml"
 # Inbound commands wait here for the worker. Bounded so a flood of messages
 # cannot grow memory without limit; over the limit, messages are dropped.
 WORK_QUEUE_MAX = 100
+# paho's MQTT_ERR_NO_CONN: a QoS 1 message published while disconnected is queued
+# by paho and sent after the reconnect, so it counts as sent (it is not lost).
+_MQTT_ERR_NO_CONN = 4
+
+
+def _publish_taken(rc):
+    """Whether paho took a QoS 1 publish: sent now, or queued until it reconnects."""
+    no_conn = getattr(mqtt, "MQTT_ERR_NO_CONN", _MQTT_ERR_NO_CONN) if mqtt is not None else _MQTT_ERR_NO_CONN
+    return rc == 0 or rc == no_conn
+
+
 # How long a checked (and pinned) Home Assistant address is reused for REST requests.
 HA_RESOLVE_CACHE_S = 60.0
 # Larger inbound messages are dropped before they are queued (the handlers
@@ -1153,10 +1164,14 @@ def _open_reading_store():
         store = _sibling("outbox").SqliteOutbox(
             path, max_age_s=days * 86400, max_bytes=int(megabytes * 1024 * 1024), log=_log
         )
+        # A new outbox id at every start: a restored Home Assistant backup brings
+        # back an old outbox whose seqs the vault has already seen under its id
+        # (with or without readings in it). Kept readings are resent under the new id.
+        old_id, _new_id = store.start_new_id()
         stats = store.stats()
         _log(
-            f"Outbox {stats['outbox_id']} at {path}: {stats['backlog']} readings waiting for the vault, "
-            f"next seq {stats['next_seq']}"
+            f"Outbox {stats['outbox_id']} at {path} (was {old_id}): {stats['backlog']} readings waiting for the "
+            f"vault, next seq {stats['next_seq']}"
         )
         return store
     except Exception as exc:
@@ -1833,7 +1848,7 @@ class CentralCoreClient:
             _log(f"MQTT ERROR publishing seq {seq} to {topic}: {type(exc).__name__}", sys.stderr)
             return None
         _log(f"MQTT -> {topic} qos=1 seq={seq} rc={rc}")
-        if rc == 0:
+        if _publish_taken(rc):
             # Only under the id it was sent with: after a new outbox id it is resent.
             store.mark_sent([seq], outbox_id=stored.get("outbox_id"))
         else:
@@ -1851,6 +1866,7 @@ class CentralCoreClient:
         if store is None:
             return 0
         upto = None
+        ack = None
         try:
             ack = json.loads(payload_bytes.decode("utf-8") if isinstance(payload_bytes, bytes) else payload_bytes)
             upto = ack.get("upto") if isinstance(ack, dict) else None
@@ -1859,25 +1875,41 @@ class CentralCoreClient:
             deleted = store.ack(upto, ack.get("outbox_id"))
         except Exception as exc:
             if getattr(exc, "outbox_behind", False):
-                # The rewrite is one short transaction, but not on paho's network thread.
-                self._submit(self._start_new_outbox, upto, exc)
+                self._request_new_outbox(store, upto, exc, ack.get("outbox_id") if isinstance(ack, dict) else None)
             self._log_drop(f"ignored store ack: {type(exc).__name__}: {exc}")
             return 0
         _log(f"Vault stored readings up to seq {upto}; removed {deleted} from the outbox")
         return deleted
 
-    def _start_new_outbox(self, upto, why):
+    def _request_new_outbox(self, store, upto, why, outbox_id):
+        """Queue a new outbox id for the worker thread (never on paho's network
+        thread), unless one is already queued or the rate limit says no: a flood
+        of acknowledgements must not flood the work queue."""
+        if getattr(self, "_new_outbox_queued", False):
+            return False
+        allowed = getattr(store, "rotation_allowed", None)
+        if callable(allowed) and not allowed(bool(getattr(why, "unambiguous", False))):
+            return False
+        self._new_outbox_queued = True
+        if not self._submit(self._start_new_outbox, upto, why, outbox_id):
+            self._new_outbox_queued = False
+            return False
+        return True
+
+    def _start_new_outbox(self, upto, why, outbox_id=None):
         """The vault confirmed, under this outbox's own id, seqs this outbox has
         not sent: the outbox is older than the vault's view of it, which is what
         restoring a Home Assistant backup does. Without a new id the vault would
         take new readings for duplicates, so start one; every reading kept here
         is resent under it (nothing is deleted). Runs on the worker thread."""
+        self._new_outbox_queued = False
         store = getattr(self, "_store", None)
         rotate = getattr(store, "rotate_outbox_id", None)
         if rotate is None:
             return None
         try:
-            rotated = rotate(unambiguous=bool(getattr(why, "unambiguous", False)))
+            # Only if the outbox still has the id the evidence was about.
+            rotated = rotate(unambiguous=bool(getattr(why, "unambiguous", False)), expected_id=outbox_id)
         except Exception as exc:
             _log(f"Outbox: could not start a new outbox id ({type(exc).__name__}: {exc})", sys.stderr)
             return None
@@ -1925,7 +1957,7 @@ class CentralCoreClient:
             store.end_send(seqs)
             _log(f"MQTT ERROR sending outbox batch: {type(exc).__name__}", sys.stderr)
             return 0
-        if rc != 0:
+        if not _publish_taken(rc):
             store.end_send(seqs)
             return 0
         store.mark_sent(seqs, when=now, outbox_id=outbox_id)

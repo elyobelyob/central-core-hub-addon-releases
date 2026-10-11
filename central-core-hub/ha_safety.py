@@ -106,12 +106,14 @@ def _assess(url, resolve=True):
         address = str(ipaddress.ip_address(host))
     except ValueError:
         address = None
+    if not resolve:
+        # Whether it is this machine is checked at each connection: Home
+        # Assistant's own address may only arrive (DHCP) after the add-on starts.
+        return True, "checked at each connection", url
     if address is not None:
         if not _is_local_address(address):
             return False, f"{host} is not this machine", url
         return True, "local address", url
-    if not resolve:
-        return True, "host name, checked at each connection", url
     try:
         addresses = _resolve_host(host)
     except OSError:
@@ -142,10 +144,10 @@ def check_token_url(url):
     """(ok, reason): is `url` acceptable at all, without resolving anything?
 
     Refuses only what no later connection can fix: an unparseable URL, a bad
-    port, an unsupported scheme, no host, an IPv6 zone id, or a plain-http
-    address that is not this machine. A host name passes; whether it may
-    receive the token is decided at each connection (pin_token_url), so a
-    name that does not resolve at boot (DNS not up yet after a power cut) is
+    port, an unsupported scheme, no host or an IPv6 zone id. Whether a host
+    name or address may receive the token is decided at each connection
+    (pin_token_url), so a name that does not resolve at boot (DNS not up yet
+    after a power cut), or an address this machine only gets later (DHCP), is
     retried rather than switching Home Assistant off.
     """
     ok, reason, _ = _assess(url, resolve=False)
