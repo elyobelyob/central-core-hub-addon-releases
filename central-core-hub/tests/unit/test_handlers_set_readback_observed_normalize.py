@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -57,7 +58,7 @@ def test_list_observed_timestamp_is_normalized():
     def fetch(url, token):
         return [{"entity_id": "sensor.t", "state": "on", "attributes": {}, "last_changed": "2025-12-17T10:00:00+00:00"}]
 
-    payload = json.dumps({"command_id": "c-time", "payload": {"sensors": ["sensor.t"]}})
+    payload = json.dumps({"command_id": "c-time", "timestamp": time.time(), "payload": {"sensors": ["sensor.t"]}})
     handlers.handle_message(client, Msg(topic), payload, fetch, None, None, requests=req)
     assert req.calls == []
     comp = _secure_final_ack(client.published)

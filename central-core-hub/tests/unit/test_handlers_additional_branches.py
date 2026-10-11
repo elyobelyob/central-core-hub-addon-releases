@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import json
 import sys
@@ -55,7 +56,7 @@ def test_sensors_set_with_missing_entity_and_selection(tmp_path, monkeypatch):
 
     msg = SimpleNamespace()
     msg.topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
-    payload = {"command_id": "c1", "payload": {"sensors": ["sensor.ok", "sensor.missing"]}}
+    payload = {"command_id": "c1", "timestamp": time.time(), "payload": {"sensors": ["sensor.ok", "sensor.missing"]}}
 
     handlers.handle_message(client, msg, json.dumps(payload), fetch_sensors, None, None)
 

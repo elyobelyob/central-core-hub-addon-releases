@@ -1,3 +1,4 @@
+import time
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -99,7 +100,7 @@ def test_set_with_mock_ha_never_writes_and_list_selects():
         c._client = DummyClient()
 
         def send(cid, payload):
-            command = {"command_id": cid, "action": "sensors/set", "payload": payload}
+            command = {"command_id": cid, "timestamp": time.time(), "action": "sensors/set", "payload": payload}
             msg = type(
                 "M",
                 (),

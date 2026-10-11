@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -47,13 +48,13 @@ def test_registry_set_calls_mqtt_reload_and_writes_file(tmp_path, monkeypatch):
     topic = f"hubs/{client.client_id}/v1/cmd/registry/set"
 
     # wrong token: nothing written, no reload
-    bad = json.dumps({"command_id": "c-reg0", "payload": {"token": "nope", "entries": []}})
+    bad = json.dumps({"command_id": "c-reg0", "timestamp": time.time(), "payload": {"token": "nope", "entries": []}})
     handlers.handle_message(client, type("M", (), {"topic": topic})(), bad, None, None, None)
     assert not target.exists()
     assert not getattr(mod, "_reloaded", False)
     assert _secure_final_ack(client.published)["result"]["reason"] == "auth_failed"
 
-    payload = json.dumps({"command_id": "c-reg", "payload": {"token": "hook-token", "entries": []}})
+    payload = json.dumps({"command_id": "c-reg", "timestamp": time.time(), "payload": {"token": "hook-token", "entries": []}})
     handlers.handle_message(client, type("M", (), {"topic": topic})(), payload, None, None, None)
     assert target.exists()
     assert "hook-token" not in target.read_text()
@@ -85,7 +86,7 @@ def test_registry_set_client_reload_hook_exception_handled(tmp_path, monkeypatch
 
     client = ClientWithBadHook()
     topic = f"hubs/{client.client_id}/v1/cmd/registry/set"
-    payload = json.dumps({"command_id": "c-reg2", "payload": {"token": "hook-token", "entries": []}})
+    payload = json.dumps({"command_id": "c-reg2", "timestamp": time.time(), "payload": {"token": "hook-token", "entries": []}})
     target = pathlib.Path(__file__).parents[2] / "SENSOR_REGISTRY_from_mqtt.json"
     try:
         handlers.handle_message(client, type("M", (), {"topic": topic})(), payload, None, None, None)

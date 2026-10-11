@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -34,7 +35,7 @@ class FakeClient:
         return {"success": True}
 
 
-def test_config_ack_fallback_when_build_ack_raises():
+def test_config_update_sends_no_ack_when_build_ack_raises():
     client = FakeClient()
 
     class Updater:
@@ -44,26 +45,15 @@ def test_config_ack_fallback_when_build_ack_raises():
 
     client.addon_updater = lambda: Updater()
     msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/config/update"})
-    payload = {"command_id": "cfg1", "payload": {"version": "1.2.3"}}
+    payload = {"command_id": "cfg1", "timestamp": time.time(), "payload": {"version": "1.2.3"}}
 
     handlers.handle_message(client, msg, json.dumps(payload), None, None, None)
     handlers.wait_for_update_worker(timeout=5)
 
-    # ensure fallback ack topic (config.update) was used and completion published
-    expected_ack = f"hubs/{client.client_id}/v1/ack/config.update/cfg1"
+    # no acknowledgement is sent to a topic nobody checked
     topics = [t for t, _, _ in client.publishes]
-    assert expected_ack in topics
-    # ensure a completion payload with success exists
-    ok = False
-    for _, p, _ in client.publishes:
-        try:
-            obj = json.loads(p)
-        except Exception:
-            continue
-        if obj.get("status") == "completed" and obj.get("result", {}).get("outcome") == "up_to_date":
-            ok = True
-            break
-    assert ok
+    assert not any("/ack/" in t for t in topics)
+    assert client.publishes == []  # nothing at all: there is nowhere checked to send the result
 
 
 def test__is_entity_allowed_denies_on_mqtt_error(monkeypatch):

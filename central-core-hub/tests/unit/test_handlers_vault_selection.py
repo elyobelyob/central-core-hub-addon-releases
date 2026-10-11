@@ -1,3 +1,4 @@
+import time
 import json
 import importlib.util
 from pathlib import Path
@@ -74,6 +75,7 @@ def test_poll_keeps_selection_and_publishes_reminder(monkeypatch):
 
     cmd = {
         "command_id": "abc123",
+        "timestamp": time.time(),
         "action": "sensors/poll",
         "payload": {"sensors": ["sensor.temp", "sensor.hum"]},
     }
@@ -109,7 +111,7 @@ def test_set_write_form_refused_and_keeps_client_selection(monkeypatch):
     c.vault_topic = "vault/unit"
     c.selected_sensors = ["sensor.temp"]
 
-    command = {"command_id": "set123", "action": "sensors/set", "payload": {"sensors": [{"entity_id": "sensor.temp", "state": "22.0"}]}}
+    command = {"command_id": "set123", "timestamp": time.time(), "action": "sensors/set", "payload": {"sensors": [{"entity_id": "sensor.temp", "state": "22.0"}]}}
     c.on_message(None, None, DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(command).encode("utf-8")))
 
     assert req.calls == [], "no HA call for a write form"
@@ -119,7 +121,7 @@ def test_set_write_form_refused_and_keeps_client_selection(monkeypatch):
     assert comp["status"] == "failed" and comp["result"]["reason"] == "invalid_payload"
 
     # the list form replaces the selection and reminds the vault of it
-    command = {"command_id": "set124", "action": "sensors/set", "payload": {"sensors": ["sensor.hum"]}}
+    command = {"command_id": "set124", "timestamp": time.time(), "action": "sensors/set", "payload": {"sensors": ["sensor.hum"]}}
     c.on_message(None, None, DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(command).encode("utf-8")))
     assert c.selected_sensors == ["sensor.hum"]
     reminder = json.loads([p for p in dummy.published if p["topic"] == c.vault_topic][-1]["payload"])

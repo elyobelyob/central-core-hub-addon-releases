@@ -1,3 +1,4 @@
+import time
 import json
 import types
 from pathlib import Path
@@ -56,7 +57,7 @@ def test_set_dict_refused_and_list_selects():
     topic = f"hubs/{c.client_id}/v1/cmd/sensors/set"
     req = _RecordingRequests()
 
-    cmd = {"command_id": "cmd1", "payload": {"sensors": {"sensor.x": "42"}}}
+    cmd = {"command_id": "cmd1", "timestamp": time.time(), "payload": {"sensors": {"sensor.x": "42"}}}
     msg = types.SimpleNamespace(topic=topic, payload=json.dumps(cmd).encode("utf-8"))
     handlers.handle_message(
         c,
@@ -73,7 +74,7 @@ def test_set_dict_refused_and_list_selects():
     assert acks[-1]["status"] == "failed" and acks[-1]["result"]["reason"] == "invalid_payload"
     assert not any(p["topic"] == c.preferred_sensors_topic for p in c.published)
 
-    cmd2 = {"command_id": "cmd2", "payload": {"sensors": ["sensor.x"]}}
+    cmd2 = {"command_id": "cmd2", "timestamp": time.time(), "payload": {"sensors": ["sensor.x"]}}
     handlers.handle_message(
         c,
         types.SimpleNamespace(topic=topic),
@@ -95,7 +96,7 @@ def test_set_with_readback_disabled():
     c = DummyClient()
     c.ha_readback_after_set = False
     topic = f"hubs/{c.client_id}/v1/cmd/sensors/set"
-    cmd = {"command_id": "cmd2", "payload": {"sensors": {"sensor.y": "on"}}}
+    cmd = {"command_id": "cmd2", "timestamp": time.time(), "payload": {"sensors": {"sensor.y": "on"}}}
     msg_payload = json.dumps(cmd)
 
     def post(url, headers=None, json_body=None, timeout=10):

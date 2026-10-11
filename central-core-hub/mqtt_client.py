@@ -232,7 +232,8 @@ def _log(msg, file=None):
 # debug logging is on: the `debug_logging` add-on option or CC_HUB_DEBUG=1.
 _DEBUG_LOGGING = os.environ.get("CC_HUB_DEBUG", "").lower() in ("1", "true", "yes")
 _PREVIEW_CHARS = 300
-_PEM_RE = re.compile(r"-----BEGIN [^-]+-----.*?-----END [^-]+-----", re.DOTALL)
+# A PEM block, also one cut off by the preview limit (no END line left).
+_PEM_RE = re.compile(r"-----BEGIN [^-\n]{1,64}-----.*?(?:-----END [^-\n]{1,64}-----|\Z)", re.DOTALL)
 
 
 def _utc_now_iso():
@@ -244,16 +245,83 @@ def _log_debug(msg):
         _log(msg)
 
 
+# Fields whose values never reach a log line, wherever they sit in a payload:
+# the registry/set `token`, passwords, secrets, private keys, API keys, ...
+_SECRET_KEY_RE = re.compile(r"token|passw|secret|private_?key|api_?key|authorization|credential|bearer", re.I)
+# For text that is not valid JSON (run on the cut preview only). Every part is
+# bounded or consumed once, so it is linear: a quoted key of at most 64
+# characters (its quotes may be escaped, as in JSON inside a JSON string), a
+# colon, then a quoted (possibly escaped or unterminated) or bare value.
+_QUOTED_FIELD_RE = re.compile(
+    r"""(?P<key>(?P<esc>\\{0,8})(?P<q>["'])(?P<name>[^"'\\\n]{1,64})\\{0,8}(?P=q)[ \t]{0,8}:[ \t]{0,8})"""
+    r"""(?P<value>\\{1,8}"(?:[^"\\]|\\+[^"\\])*(?:\\{1,8}")?"""
+    r"""|"(?:[^"\\]|\\.)*"?|'(?:[^'\\]|\\.)*'?|[^,{}\[\]\s"'\\]{1,256})"""
+)
+_REDACTED = "[REDACTED]"
+# A string value this long or shorter is also checked for JSON inside it.
+_NESTED_JSON_MAX = 64 * 1024
+
+
+def _redact_secrets(value, depth=0):
+    """A copy of a decoded JSON value with every secret-looking field blanked,
+    also inside strings that hold JSON themselves (double-encoded payloads)."""
+    if isinstance(value, dict):
+        return {
+            k: (_REDACTED if isinstance(k, str) and _SECRET_KEY_RE.search(k) else _redact_secrets(v, depth))
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_secrets(v, depth) for v in value]
+    if isinstance(value, str) and depth < 4 and len(value) <= _NESTED_JSON_MAX and value[:1] in ("{", "[", '"'):
+        try:
+            inner = json.loads(value)
+        except Exception:
+            return value
+        if isinstance(inner, (dict, list, str)):
+            redacted = _redact_secrets(inner, depth + 1)
+            if redacted != inner:
+                return json.dumps(redacted, separators=(",", ":"))
+    return value
+
+
+def _redact_field(match):
+    if _SECRET_KEY_RE.search(match.group("name")):
+        esc = match.group("esc")  # as many backslashes as the key's quotes had
+        return match.group("key") + f'{esc}"{_REDACTED}{esc}"'
+    return match.group(0)
+
+
 def _preview(payload, limit=_PREVIEW_CHARS):
-    """A short, PEM-redacted rendering of a payload for debug logs."""
+    """A short rendering of a payload for debug logs, with PEM blocks and secret
+    fields (token, password, secret, private_key, ...) redacted.
+
+    JSON is redacted field by field (linear) and then cut to `limit`. Anything
+    else is cut to `limit` first and only the preview is scrubbed, so the work
+    stays small however large the message.
+    """
     if payload is None:
         return "<none>"
     try:
         text = payload.decode("utf-8", errors="replace") if isinstance(payload, (bytes, bytearray)) else str(payload)
     except Exception:
         return "<unprintable>"
+    structured = False
+    try:
+        decoded = json.loads(text)
+        if isinstance(decoded, (dict, list, str)):
+            redacted = _redact_secrets(decoded)
+            if not isinstance(redacted, str) or redacted != decoded:  # a JSON string holding JSON counts
+                text = json.dumps(redacted, separators=(",", ":"))
+                structured = True
+    except Exception:  # not JSON, or nested too deeply to walk
+        pass
+    extra = len(text) - limit
+    if extra > 0:
+        text = text[:limit]
     text = _PEM_RE.sub("[PEM REDACTED]", text)
-    return text if len(text) <= limit else text[:limit] + f"...(+{len(text) - limit} chars)"
+    if not structured:
+        text = _QUOTED_FIELD_RE.sub(_redact_field, text)
+    return text + (f"...(+{extra} chars)" if extra > 0 else "")
 
 
 try:
@@ -277,7 +345,47 @@ class _FallbackTopics:
 
     @staticmethod
     def build_topic(tpl, **kwargs):
-        return tpl.format(**kwargs)
+        return _render_checked_topic(tpl, (), kwargs)
+
+    @staticmethod
+    def build_subscription(tpl, wildcards=(), **kwargs):
+        return _render_checked_topic(tpl, tuple(wildcards), kwargs)
+
+
+# One plain topic word: an action key ("config.update") or a command id.
+_TOPIC_WORD_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+# Anything that ends or reshapes a topic level, or hides in it.
+_BAD_TOPIC_CHARS_RE = re.compile(r"[/+#\x00-\x20\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2028\u2029\ufeff]")
+
+
+def _render_checked_topic(template, wildcards, fields):
+    """str.format for the built-in topic templates, with every value checked as
+    central-core-mqtt-shared v1.2.0 does: the hub id is a valid client id, other
+    levels are non-empty, at most 128 UTF-8 bytes and free of separators,
+    wildcards and control characters; only the levels named in `wildcards`
+    become "+"."""
+    import string
+
+    safe = {}
+    for _literal, name, _spec, _conv in string.Formatter().parse(template):
+        if name is None or name in safe:
+            continue
+        if name in wildcards and name != "hub_id":
+            if fields.get(name, "+") != "+":
+                raise ValueError(f"topic field {name!r} is a wildcard level")
+            safe[name] = "+"
+            continue
+        if name not in fields:
+            raise KeyError(name)
+        value = fields[name]
+        if name == "hub_id":
+            safe[name] = validate_client_id(value)
+            continue
+        text = str(value) if isinstance(value, (str, int)) and not isinstance(value, bool) else ""
+        if not text or len(text.encode("utf-8", "replace")) > 128 or _BAD_TOPIC_CHARS_RE.search(text):
+            raise ValueError(f"topic field {name!r} is not a safe topic level")
+        safe[name] = text
+    return template.format(**safe)
 
 
 def _load_topics_file(spec):
@@ -336,11 +444,49 @@ CLIENT_ID_FILE = pathlib.Path(os.environ.get("CLIENT_ID_FILE") or "/data/client_
 # Shipped as the default in earlier versions, so many hubs may share it.
 SHARED_DEFAULT_CLIENT_ID = "home-assistant"
 _GENERIC_HOSTNAMES = {"", "localhost", "homeassistant", "home-assistant", "hassio", "supervisor"}
+
+# The client id (the vault's hub id) is one MQTT topic level: `hubs/<id>/v1/cmd/+/+`.
+# A "+" or "#" in it would subscribe the hub to every hub's commands, and a "/"
+# would reach into other topics. This is the rule of
+# central_core_mqtt_shared.topics.validate_hub_id; "broadcast" is the broadcast namespace.
+_CLIENT_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+_RESERVED_CLIENT_IDS = frozenset({"broadcast"})
+
+
+class InvalidClientId(ValueError):
+    """The client id (hub id) is not safe to put in an MQTT topic."""
+
+
+def validate_client_id(value):
+    """Return `value` if it is a valid hub id, else raise InvalidClientId."""
+    if isinstance(value, str) and _CLIENT_ID_RE.fullmatch(value) and value not in _RESERVED_CLIENT_IDS:
+        return value
+    shown = repr(value)
+    if len(shown) > 80:
+        shown = shown[:77] + "..."
+    raise InvalidClientId(
+        f"client_id {shown} is not a valid hub id (letters, digits, '-', '_' or '.', starting with a letter or "
+        "digit, at most 64 characters, not 'broadcast')"
+    )
+
 MQTT_OPTIONS_ENV = "MQTT_OPTIONS_PATH"
 SENSOR_REGISTRY = pathlib.Path(__file__).parent / "SENSOR_REGISTRY.yaml"
 # Inbound commands wait here for the worker. Bounded so a flood of messages
 # cannot grow memory without limit; over the limit, messages are dropped.
 WORK_QUEUE_MAX = 100
+# paho's MQTT_ERR_NO_CONN: a QoS 1 message published while disconnected is queued
+# by paho and sent after the reconnect, so it counts as sent (it is not lost).
+_MQTT_ERR_NO_CONN = 4
+
+
+def _publish_taken(rc):
+    """Whether paho took a QoS 1 publish: sent now, or queued until it reconnects."""
+    no_conn = getattr(mqtt, "MQTT_ERR_NO_CONN", _MQTT_ERR_NO_CONN) if mqtt is not None else _MQTT_ERR_NO_CONN
+    return rc == 0 or rc == no_conn
+
+
+# How long a checked (and pinned) Home Assistant address is reused for REST requests.
+HA_RESOLVE_CACHE_S = 60.0
 # Larger inbound messages are dropped before they are queued (the handlers
 # refuse anything this size anyway; see handlers.MAX_COMMAND_BYTES).
 MAX_INBOUND_BYTES = 64 * 1024
@@ -1015,13 +1161,37 @@ def _open_reading_store():
     try:
         days = float(os.environ.get("HUB_OUTBOX_MAX_AGE_DAYS") or OUTBOX_MAX_AGE_DAYS)
         megabytes = float(os.environ.get("HUB_OUTBOX_MAX_MB") or OUTBOX_MAX_MB)
-        store = _sibling("outbox").SqliteOutbox(
-            path, max_age_s=days * 86400, max_bytes=int(megabytes * 1024 * 1024), log=_log
-        )
+
+        def open_store():
+            return _sibling("outbox").SqliteOutbox(
+                path, max_age_s=days * 86400, max_bytes=int(megabytes * 1024 * 1024), log=_log
+            )
+
+        store = open_store()
+        # A new outbox id at every start: a restored Home Assistant backup brings
+        # back an old outbox whose seqs the vault has already seen under its id
+        # (with or without readings in it). Kept readings are resent under the new id.
+        try:
+            old_id, _new_id = store.start_new_id()
+            was = f"was {old_id}"
+        except Exception as exc:
+            # Keep the outbox (and every reading in it) under its old id for this
+            # run rather than switching it off. Reopen it, so a transaction the
+            # failure may have left open cannot block later writes.
+            kept = store.outbox_id
+            _log(f"WARNING: could not start a new outbox id at start ({type(exc).__name__}: {exc}); keeping "
+                 f"{kept} for this run. A restored backup is still caught if the vault confirms readings this "
+                 "outbox never sent.", sys.stderr)
+            try:
+                store.close()
+            except Exception:
+                pass
+            store = open_store()
+            was = "kept: a new id could not be started"
         stats = store.stats()
         _log(
-            f"Outbox {stats['outbox_id']} at {path}: {stats['backlog']} readings waiting for the vault, "
-            f"next seq {stats['next_seq']}"
+            f"Outbox {stats['outbox_id']} at {path} ({was}): {stats['backlog']} readings waiting for the "
+            f"vault, next seq {stats['next_seq']}"
         )
         return store
     except Exception as exc:
@@ -1071,23 +1241,39 @@ class CentralCoreClient:
         # Handle certificate content vs paths
         self._setup_cert_files()
         configured_id = str(options.get("client_id") or "").strip()
-        if configured_id:
-            self.client_id = configured_id
-            if configured_id == SHARED_DEFAULT_CLIENT_ID:
-                _log(
-                    f"WARNING: client_id is the shared default {configured_id!r}; hubs using it receive "
-                    "each other's commands. Set a unique client_id (the vault's hub id)."
-                )
-        else:
-            self.client_id = _derive_client_id(self.mqtt_cert)
+        derived = not configured_id
+        candidate = configured_id or _derive_client_id(self.mqtt_cert)
+        # Fail closed: an id such as "+" would subscribe this hub to every hub's commands.
+        try:
+            self.client_id = validate_client_id(candidate)
+        except InvalidClientId as exc:
+            where = "derived from the certificate or host name" if derived else "set in the add-on options"
+            _log(
+                f"ERROR: {exc} ({where}). Not starting: set client_id to this hub's id from the vault.",
+                sys.stderr,
+            )
+            raise
+        if derived:
             _log(f"client_id not set; using {self.client_id!r}")
+        elif configured_id == SHARED_DEFAULT_CLIENT_ID:
+            _log(
+                f"WARNING: client_id is the shared default {configured_id!r}; hubs using it receive "
+                "each other's commands. Set a unique client_id (the vault's hub id)."
+            )
         cert_cn = _certificate_common_name(self.mqtt_cert)
         if cert_cn and cert_cn != self.client_id:
             _log(f"WARNING: client_id {self.client_id!r} differs from the client certificate CN {cert_cn!r}")
         self.ha_api_url = options.get("ha_api_url") or ""
         self.ha_api_token = options.get("ha_api_token") or ""
         if self.ha_api_url and self.ha_api_token:
-            ok, why = _ha_safety().check_token_transport(self.ha_api_url)
+            # Only the URL itself is checked here: whether a host name may receive
+            # the token is checked, and the address pinned, at every connection
+            # (_ha_base, the websocket's url_guard). A name that does not resolve
+            # yet (DNS not up after a power cut) must not switch Home Assistant off.
+            try:
+                ok, why = _ha_safety().check_token_url(self.ha_api_url)
+            except Exception as exc:  # never stop the hub (MQTT) over a bad HA URL
+                ok, why = False, f"{type(exc).__name__}: {exc}"
             if not ok:
                 _log(
                     f"ERROR: not sending the Home Assistant token over unencrypted {self.ha_api_url!r}: {why}. "
@@ -1137,15 +1323,18 @@ class CentralCoreClient:
             self.preferred_sensors_topic = topics.build_topic(
                 topics.TELEMETRY_SENSORS, hub_id=self.client_id, version=ver
             )
-            # Subscribe to hub command space using the generic command template
-            # with single-level wildcards for domain/action.
-            self.cmd_sub_topic = topics.build_topic(
-                topics.CMD_GENERIC,
-                hub_id=self.client_id,
-                version=ver,
-                domain="+",
-                action="+",
-            )
+            # Subscribe to this hub's command space: the generic command template
+            # with single-level wildcards for domain and action only. The hub id
+            # was validated above, so it is never itself a wildcard.
+            build_subscription = getattr(topics, "build_subscription", None)
+            if build_subscription is not None:  # central-core-mqtt-shared v1.2.0 and later
+                self.cmd_sub_topic = build_subscription(
+                    topics.CMD_GENERIC, wildcards=("domain", "action"), hub_id=self.client_id, version=ver
+                )
+            else:  # earlier versions have only build_topic, which does not check values
+                self.cmd_sub_topic = topics.build_topic(
+                    topics.CMD_GENERIC, hub_id=self.client_id, version=ver, domain="+", action="+"
+                )
             self.status_offline_topic = topics.build_topic(
                 getattr(topics, "STATUS_OFFLINE", "hubs/{hub_id}/v{version}/status/offline"),
                 hub_id=self.client_id,
@@ -1308,6 +1497,9 @@ class CentralCoreClient:
                         except TypeError:
                             # listener without snapshot support: per-entity events only
                             self._ha_ws_listener = cls(self.ha_api_url, self.ha_api_token, **listener_kwargs)
+                        # Each (re)connect re-checks the address and pins it for that
+                        # connection only (Home Assistant's address can change).
+                        self._ha_ws_listener.url_guard = _ha_safety().pin_token_url
                         started = self._ha_ws_listener.start()
                         _log(f"HA WS listener started={started}")
                         # Log which sensors the websocket is currently monitoring
@@ -1435,13 +1627,17 @@ class CentralCoreClient:
         self._update_ha_listener_selectors()
 
     def build_ack_topic(self, action, command_id):
-        """Build a versioned ACK topic for the given action and command_id.
+        """The versioned ACK topic for `action` ("domain/action") and `command_id`.
 
-        Prefer an ACK template from the optional `central_core_mqtt_shared`
-        package (attribute name `ACK_TMPL`) if available; otherwise fall
-        back to the canonical f-string used previously.
+        Both must be plain topic words (letters, digits, "_", ".", "-"),
+        whatever the shared package version checks; otherwise ValueError and
+        the caller sends no acknowledgement.
         """
-        key = action.replace("/", ".") if isinstance(action, str) else str(action)
+        key = action.replace("/", ".") if isinstance(action, str) else ""
+        if not _TOPIC_WORD_RE.fullmatch(key) or not isinstance(command_id, str) or not _TOPIC_WORD_RE.fullmatch(
+            command_id
+        ):
+            raise ValueError("an acknowledgement needs a plain action and command id")
         # Use the shared package ACK template (ACK_GENERIC) via topics.build_topic.
         try:
             return topics.build_topic(
@@ -1588,7 +1784,8 @@ class CentralCoreClient:
         length = len(payload) if payload is not None else 0
         eligible = persist is not False and _should_persist_topic(topic)
         try:
-            _log_debug(f"MQTT -> PUBLISH {topic} qos={qos} len={length} payload={_preview(payload)}")
+            if _DEBUG_LOGGING:  # only then is the payload worth rendering
+                _log_debug(f"MQTT -> PUBLISH {topic} qos={qos} len={length} payload={_preview(payload)}")
             # If not connected, only enqueue when we have a real paho MQTT
             # client (i.e. runtime) and the topic is eligible for persistence.
             # In tests the client is often a dummy shim; allow those publishes
@@ -1662,34 +1859,88 @@ class CentralCoreClient:
             _log_debug(f"MQTT OUTBOX <- {topic} seq={seq} (not connected)")
             return None
         live = dict(stored, oldest_seq=store.oldest_seq() or seq, hub_time=_utc_now_iso())
+        store.begin_send([seq])  # an acknowledgement may arrive before mark_sent
         try:
             result = self._client.publish(topic, json.dumps(live), qos=1)
             rc = getattr(result, "rc", 0)
         except Exception as exc:
+            store.end_send([seq])
             _log(f"MQTT ERROR publishing seq {seq} to {topic}: {type(exc).__name__}", sys.stderr)
             return None
         _log(f"MQTT -> {topic} qos=1 seq={seq} rc={rc}")
-        if rc == 0:
-            store.mark_sent([seq])
+        if _publish_taken(rc):
+            # Only under the id it was sent with: after a new outbox id it is resent.
+            store.mark_sent([seq], outbox_id=stored.get("outbox_id"))
+        else:
+            store.end_send([seq])
         return result
 
     def _handle_store_ack(self, payload_bytes):
-        """The vault stored everything up to `upto`: delete it from the outbox."""
+        """The vault stored everything up to `upto`: delete it from the outbox.
+
+        Refused (nothing deleted, one rate-limited log line) unless the message
+        is JSON with an integer `upto`, names this hub's `outbox_id`, and does
+        not reach past the highest seq the hub has sent.
+        """
         store = getattr(self, "_store", None)
         if store is None:
             return 0
+        upto = None
+        ack = None
         try:
             ack = json.loads(payload_bytes.decode("utf-8") if isinstance(payload_bytes, bytes) else payload_bytes)
             upto = ack.get("upto") if isinstance(ack, dict) else None
             if isinstance(upto, bool) or not isinstance(upto, int) or upto < 0:
                 raise ValueError("upto must be a non-negative integer")
-            outbox_id = ack.get("outbox_id")
+            deleted = store.ack(upto, ack.get("outbox_id"))
         except Exception as exc:
+            if getattr(exc, "outbox_behind", False):
+                self._request_new_outbox(store, upto, exc, ack.get("outbox_id") if isinstance(ack, dict) else None)
             self._log_drop(f"ignored store ack: {type(exc).__name__}: {exc}")
             return 0
-        deleted = store.ack(upto, outbox_id=outbox_id if isinstance(outbox_id, str) else None)
         _log(f"Vault stored readings up to seq {upto}; removed {deleted} from the outbox")
         return deleted
+
+    def _request_new_outbox(self, store, upto, why, outbox_id):
+        """Queue a new outbox id for the worker thread (never on paho's network
+        thread), unless one is already queued or the rate limit says no: a flood
+        of acknowledgements must not flood the work queue."""
+        if getattr(self, "_new_outbox_queued", False):
+            return False
+        allowed = getattr(store, "rotation_allowed", None)
+        if callable(allowed) and not allowed(bool(getattr(why, "unambiguous", False))):
+            return False
+        self._new_outbox_queued = True
+        if not self._submit(self._start_new_outbox, upto, why, outbox_id):
+            self._new_outbox_queued = False
+            return False
+        return True
+
+    def _start_new_outbox(self, upto, why, outbox_id=None):
+        """The vault confirmed, under this outbox's own id, seqs this outbox has
+        not sent: the outbox is older than the vault's view of it, which is what
+        restoring a Home Assistant backup does. Without a new id the vault would
+        take new readings for duplicates, so start one; every reading kept here
+        is resent under it (nothing is deleted). Runs on the worker thread."""
+        self._new_outbox_queued = False
+        store = getattr(self, "_store", None)
+        rotate = getattr(store, "rotate_outbox_id", None)
+        if rotate is None:
+            return None
+        try:
+            # Only if the outbox still has the id the evidence was about.
+            rotated = rotate(unambiguous=bool(getattr(why, "unambiguous", False)), expected_id=outbox_id)
+        except Exception as exc:
+            _log(f"Outbox: could not start a new outbox id ({type(exc).__name__}: {exc})", sys.stderr)
+            return None
+        if rotated:
+            old, new = rotated
+            _log(
+                f"WARNING: the vault confirmed seq {upto} under this outbox's id, but {why}. This happens after a "
+                f"Home Assistant backup is restored. Started a new outbox id ({old} -> {new}); every reading kept "
+                "here is sent again under it."
+            )
+        return rotated
 
     def _send_due_readings(self, now=None):
         """Send one batch of readings the vault has not confirmed, oldest first.
@@ -1705,26 +1956,31 @@ class CentralCoreClient:
         if not store.vault_confirms():
             return 0  # an older vault: keep readings, do not resend them
         now = time.time() if now is None else now
+        outbox_id = store.outbox_id
         rows = store.due(CATCHUP_BATCH_SIZE, sent_before=now - RESEND_AFTER_S)
         if not rows:
             return 0
+        seqs = [r["seq"] for r in rows]
         batch = {
             "hub_time": _utc_now_iso(),
-            "outbox_id": store.outbox_id,
+            "outbox_id": outbox_id,
             "oldest_seq": store.oldest_seq() or rows[0]["seq"],
             "records": [
                 {k: r[k] for k in ("seq", "type", "event_ts", "queued_at", "payload")} for r in rows
             ],
         }
+        store.begin_send(seqs)
         try:
             result = self._client.publish(self.batch_topic, json.dumps(batch), qos=1)
             rc = getattr(result, "rc", 0)
         except Exception as exc:
+            store.end_send(seqs)
             _log(f"MQTT ERROR sending outbox batch: {type(exc).__name__}", sys.stderr)
             return 0
-        if rc != 0:
+        if not _publish_taken(rc):
+            store.end_send(seqs)
             return 0
-        store.mark_sent([r["seq"] for r in rows], when=now)
+        store.mark_sent(seqs, when=now, outbox_id=outbox_id)
         _log(f"Outbox: resent {len(rows)} readings (seq {rows[0]['seq']}-{rows[-1]['seq']})")
         return len(rows)
 
@@ -1983,8 +2239,14 @@ class CentralCoreClient:
             except Exception:
                 payload = "<binary>"
             _log(f"MQTT <- {msg.topic} len={size} retain={getattr(msg, 'retain', False) is True}")
-            _log_debug(f"MQTT <- {msg.topic} payload={_preview(payload)}")
+            if _DEBUG_LOGGING:
+                _log_debug(f"MQTT <- {msg.topic} payload={_preview(payload)}")
             if msg.topic == getattr(self, "store_ack_topic", None):
+                # The vault never retains a store ack, and a retained one would
+                # be replayed to every new session: refuse it.
+                if getattr(msg, "retain", False) is True:
+                    self._log_drop(f"ignored retained store ack on {msg.topic}")
+                    return
                 self._handle_store_ack(msg.payload)
                 return
             # Handlers may call Home Assistant: run them on the worker.
@@ -2152,11 +2414,60 @@ class CentralCoreClient:
                         return hv
         return None
 
+    def _ha_status(self):
+        """{"ha_connected": bool, "ha_last_event_at": UTC ISO or None} from the
+        Home Assistant websocket (False when Home Assistant is not configured)."""
+        listener = getattr(self, "_ha_ws_listener", None)
+        connected = False
+        last = None
+        if listener is not None:
+            try:
+                connected = bool(listener.is_connected())
+            except Exception:
+                connected = False
+            last = getattr(listener, "last_event_at", None)
+            if not isinstance(last, str):
+                last = None
+        return {"ha_connected": connected, "ha_last_event_at": last}
+
+    def _ha_base(self):
+        """The Home Assistant URL for REST requests: checked and, for plain http to
+        a host name, pinned to the address checked then. "" when it may not be
+        used now (logged once per reason). The answer is kept for
+        HA_RESOLVE_CACHE_S only, so a slow resolver costs the main loop at most
+        one look-up a minute and a DHCP change of Home Assistant's address is
+        followed within a minute."""
+        url = getattr(self, "ha_api_url", "") or ""
+        if not url or not getattr(self, "ha_api_token", ""):
+            return url
+        now = time.monotonic()
+        cached = getattr(self, "_ha_base_cache", None)
+        if cached and cached[0] == url and now < cached[1]:
+            return cached[2]
+        try:
+            ok, why, use = _ha_safety().pin_token_url(url)
+        except Exception as exc:
+            ok, why, use = False, f"{type(exc).__name__}", ""
+        result = use if ok else ""
+        self._ha_base_cache = (url, now + HA_RESOLVE_CACHE_S, result)
+        if ok and "ignored" not in why:
+            self._ha_refused_reason = None
+        elif getattr(self, "_ha_refused_reason", None) != why:
+            self._ha_refused_reason = why
+            if ok:
+                _log(f"Home Assistant at {url!r}: {why}")
+            else:
+                _log(f"WARNING: not sending the Home Assistant token to {url!r} now: {why}")
+        return result
+
     def _fetch_ha_version_from_api(self):
         if not self.ha_api_url or not self.ha_api_token or requests is None:
             return None
+        base = self._ha_base()
+        if not base:
+            return None
         try:
-            url = self.ha_api_url.rstrip("/") + "/api/config"
+            url = base.rstrip("/") + "/api/config"
             headers = {
                 "Authorization": f"Bearer {self.ha_api_token}",
                 "Content-Type": "application/json",
@@ -2194,6 +2505,16 @@ class CentralCoreClient:
                 data = json.loads(payload)
                 data["telemetry_interval"] = self.telemetry_interval
                 payload = json.dumps(data)
+        except Exception:
+            pass
+        # Whether Home Assistant is feeding this hub (central-core-mqtt-shared
+        # v1.2.0 SystemTelemetry.ha_connected / ha_last_event_at): without it, a
+        # hub whose websocket is down looks healthy to the vault. Older schemas
+        # ignore unknown keys, so this is safe with a v1.1.0 vault.
+        try:
+            data = json.loads(payload)
+            data.update(self._ha_status())
+            payload = json.dumps(data)
         except Exception:
             pass
         stats = self.outbox_stats()
@@ -2259,7 +2580,7 @@ class CentralCoreClient:
         if not self.ha_api_url or not self.ha_api_token:
             # HA integration not configured
             return
-        sensors = self.privacy_filter(fetch_sensors(self.ha_api_url, self.ha_api_token) or [])
+        sensors = self.privacy_filter(fetch_sensors(self._ha_base(), self.ha_api_token) or [])
         # Filter by safe_device_classes if configured
         filtered = self._filter_sensors_by_device_class(sensors, self.safe_device_classes)
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -2310,7 +2631,7 @@ class CentralCoreClient:
         if not self.ha_api_url or not self.ha_api_token:
             # HA integration not configured
             return
-        sensors = self.privacy_filter(fetch_sensors(self.ha_api_url, self.ha_api_token) or [])
+        sensors = self.privacy_filter(fetch_sensors(self._ha_base(), self.ha_api_token) or [])
         # Note: fetch_sensors already applies SENSOR_REGISTRY filtering
         payload = {
             "schema_version": 1,
@@ -2354,7 +2675,7 @@ class CentralCoreClient:
         if not self.ha_api_url or not self.ha_api_token or requests is None:
             return
         wanted = [e for e in self.selected_sensors if _is_selectable_entity(e)]
-        sensors = fetch_selected_sensors(self.ha_api_url, self.ha_api_token, wanted) or []
+        sensors = fetch_selected_sensors(self._ha_base(), self.ha_api_token, wanted) or []
         self._publish_selected_states(sensors)
 
     def _on_ha_snapshot(self, states):
@@ -2589,7 +2910,10 @@ def main():
         k: ("[REDACTED]" if "token" in k or "password" in k or "cert" in k else v) for k, v in options.items()
     }
     _log(f"Loaded options: {safe_options}")
-    c = CentralCoreClient(options)
+    try:
+        c = CentralCoreClient(options)
+    except InvalidClientId:
+        sys.exit(1)  # already logged; a hub with an unsafe id must not connect
     _log(f"Created client with mqtt_host={c.mqtt_host}, mqtt_port={c.mqtt_port}")
     if not c.mqtt_host:
         _log(

@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import json
 import sys
@@ -36,7 +37,7 @@ def test_registry_auth_failure(monkeypatch):
     msg = SimpleNamespace()
     msg.topic = f"hubs/{client.client_id}/v1/cmd/registry/set"
     # payload missing token
-    payload = {"command_id": "c1", "payload": {"entries": []}}
+    payload = {"command_id": "c1", "timestamp": time.time(), "payload": {"entries": []}}
 
     handlers.handle_message(client, msg, json.dumps(payload), None, None, None)
 
@@ -86,7 +87,7 @@ def test_registry_atomic_write_failure(monkeypatch, tmp_path):
     client = FakeClient()
     msg = SimpleNamespace()
     msg.topic = f"hubs/{client.client_id}/v1/cmd/registry/set"
-    payload = {"command_id": "c2", "payload": {"token": "reg-token", "entries": []}}
+    payload = {"command_id": "c2", "timestamp": time.time(), "payload": {"token": "reg-token", "entries": []}}
 
     handlers.handle_message(client, msg, json.dumps(payload), None, None, None)
 
@@ -117,7 +118,7 @@ def test_registry_without_configured_token_is_refused(monkeypatch, tmp_path):
             published.append(json.loads(payload))
 
     msg = SimpleNamespace(topic="hubs/test-client/v1/cmd/registry/set")
-    handlers.handle_message(FakeClient(), msg, json.dumps({"command_id": "c3", "payload": {"entries": []}}), None, None, None)
+    handlers.handle_message(FakeClient(), msg, json.dumps({"command_id": "c3", "timestamp": time.time(), "payload": {"entries": []}}), None, None, None)
     final = [o for o in published if o.get("status") != "acknowledged"][-1]
     assert final == {"status": "failed", "result": {"success": False, "reason": "registry_updates_disabled"}}
     assert not target.exists()

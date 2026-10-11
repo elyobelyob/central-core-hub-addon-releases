@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -68,7 +69,7 @@ def test_sensors_set_list_reports_attributes_and_timestamps():
             }
         ]
 
-    payload = json.dumps({"command_id": "c1", "payload": {"sensors": ["sensor.a"]}})
+    payload = json.dumps({"command_id": "c1", "timestamp": time.time(), "payload": {"sensors": ["sensor.a"]}})
     handlers.handle_message(client, Msg(topic), payload, fetch, None, None, requests=req)
 
     assert req.calls == []
@@ -81,7 +82,7 @@ def test_sensors_set_list_reports_attributes_and_timestamps():
     assert res["observed"]["sensor.a"]
 
     # the old readback form is refused
-    payload = json.dumps({"command_id": "c1b", "payload": {"sensors": [{"entity_id": "sensor.a", "state": "42"}]}})
+    payload = json.dumps({"command_id": "c1b", "timestamp": time.time(), "payload": {"sensors": [{"entity_id": "sensor.a", "state": "42"}]}})
     handlers.handle_message(client, Msg(topic), payload, fetch, None, None, requests=req)
     assert req.calls == []
     assert _secure_final_ack(client.published)["result"]["reason"] == "invalid_payload"
@@ -92,7 +93,7 @@ def test_sensors_set_no_ha_config_write_form_publishes_failed():
     client.ha_api_url = None
     client.ha_api_token = None
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
-    payload = json.dumps({"command_id": "c2", "payload": {"sensors": [{"entity_id": "sensor.b", "state": "on"}]}})
+    payload = json.dumps({"command_id": "c2", "timestamp": time.time(), "payload": {"sensors": [{"entity_id": "sensor.b", "state": "on"}]}})
     handlers.handle_message(client, Msg(topic), payload, None, None, None, requests=None)
     comp = _secure_final_ack(client.published)
     assert comp["status"] == "failed"

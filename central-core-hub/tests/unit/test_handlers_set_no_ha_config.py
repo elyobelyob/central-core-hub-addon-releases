@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -42,7 +43,7 @@ class Msg:
 def test_sensors_set_write_form_refused_without_ha_config():
     client = DummyClient()
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
-    payload = json.dumps({"command_id": "c-noha", "payload": {"sensors": [{"entity_id": "sensor.x", "state": "on"}]}})
+    payload = json.dumps({"command_id": "c-noha", "timestamp": time.time(), "payload": {"sensors": [{"entity_id": "sensor.x", "state": "on"}]}})
     handlers.handle_message(client, Msg(topic), payload, None, None, None, requests=object())
     comp = _secure_final_ack(client.published)
     assert comp["status"] == "failed"

@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -37,7 +38,7 @@ def test_registry_set_auth_failed():
     client.registry_token = "secret"
 
     msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/registry/set"})
-    payload = {"command_id": "r1", "payload": {"token": "wrong", "entries": []}}
+    payload = {"command_id": "r1", "timestamp": time.time(), "payload": {"token": "wrong", "entries": []}}
 
     handlers.handle_message(client, msg, json.dumps(payload), None, None, None)
 
@@ -71,7 +72,7 @@ def test_registry_set_success_writes_file(tmp_path, monkeypatch):
 
     msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/registry/set"})
     entries = [{"entity_id": "sensor.foo", "provide": True}]
-    payload = {"command_id": "r2", "payload": {"token": "file-token", "entries": entries}}
+    payload = {"command_id": "r2", "timestamp": time.time(), "payload": {"token": "file-token", "entries": entries}}
     handlers.handle_message(client, msg, json.dumps(payload), None, None, None)
 
     assert target.exists()
@@ -90,7 +91,7 @@ def test_registry_set_refused_when_no_token_configured(tmp_path, monkeypatch):
     monkeypatch.delenv("REGISTRY_TOKEN", raising=False)
 
     msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/registry/set"})
-    payload = {"command_id": "r3", "payload": {"entries": [{"entity_id": "sensor.foo", "provide": True}]}}
+    payload = {"command_id": "r3", "timestamp": time.time(), "payload": {"entries": [{"entity_id": "sensor.foo", "provide": True}]}}
     handlers.handle_message(client, msg, json.dumps(payload), None, None, None)
 
     assert not target.exists()

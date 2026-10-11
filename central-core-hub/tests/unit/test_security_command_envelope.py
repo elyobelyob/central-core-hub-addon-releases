@@ -2,13 +2,16 @@
 
 - retained messages are ignored (a retained command would re-run on every reconnect);
 - a command_id seen before is ignored (replays / QoS 1 redelivery);
+- a command without a command_id is ignored (the vault always sends one);
 - commands older than MAX_COMMAND_AGE are refused with a failed ACK;
+- commands without a readable timestamp are refused with a failed ACK (the vault always sends one);
 - command_id must match ^[A-Za-z0-9_.-]{1,64}$ (it becomes part of the ACK topic);
 - the ACK topic uses the action from the command topic, not from the payload;
 - payloads over MAX_COMMAND_BYTES are ignored.
 """
 
 import json
+import time
 import types
 from datetime import datetime, timedelta, timezone
 
@@ -32,7 +35,9 @@ def _send(c, body, action="sensors/poll", retain=False, fetch=None):
 
 
 def _poll(cid="p1", **extra):
-    return dict({"command_id": cid, "action": "sensors/poll", "payload": {"sensors": ["door"]}}, **extra)
+    """A command as the vault sends it: command_id, action, payload and a current timestamp."""
+    base = {"command_id": cid, "action": "sensors/poll", "payload": {"sensors": ["door"]}, "timestamp": time.time()}
+    return dict(base, **extra)
 
 
 def test_retained_commands_are_ignored():
@@ -81,17 +86,65 @@ def test_stale_commands_are_refused(ts):
         (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat(),
         # a hub clock running behind makes vault commands look like they come from the future
         (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-        "not-a-timestamp",
-        None,
+        time.time(),
     ],
 )
-def test_recent_or_undated_commands_run(ts):
+def test_recent_commands_run(ts):
+    c, published = _client()
+    _send(c, _poll(timestamp=ts))
+    assert published and published[0][1]["status"] == "acknowledged"
+
+
+@pytest.mark.parametrize("ts", ["not-a-timestamp", "", None, True, [], {}, "2026-13-45T99:99:99Z"])
+def test_commands_without_a_readable_timestamp_are_refused(ts):
     c, published = _client()
     body = _poll()
-    if ts is not None:
+    if ts is None:
+        del body["timestamp"]
+    else:
         body["timestamp"] = ts
     _send(c, body)
-    assert published and published[0][1]["status"] == "acknowledged"
+    assert [p["status"] for _, p in published] == ["failed"]
+    assert published[0][1]["result"]["reason"] == "bad_timestamp"
+    assert published[0][0] == "hubs/hub1/v1/ack/sensors.poll/p1"
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        "config/update",
+        "config/check_update",
+        "inventory/get",
+        "sensors/poll",
+        "sensors/set",
+        "registry/set",
+    ],
+)
+def test_every_action_needs_a_command_id_and_a_timestamp(action):
+    c, published = _client()
+    # no command_id: dropped silently (there is nothing to acknowledge)
+    body = _poll()
+    del body["command_id"]
+    _send(c, body, action=action)
+    assert published == []
+    # no timestamp: refused with a failed ack for that action
+    body = _poll("nots")
+    del body["timestamp"]
+    _send(c, body, action=action)
+    key = action.replace("/", ".")
+    assert [(t, p["status"], p["result"]["reason"]) for t, p in published] == [
+        (f"hubs/hub1/v1/ack/{key}/nots", "failed", "bad_timestamp")
+    ]
+
+
+def test_a_refused_command_id_cannot_be_replayed_with_a_fresh_timestamp():
+    c, published = _client()
+    body = _poll("again")
+    del body["timestamp"]
+    _send(c, body)
+    assert [p["status"] for _, p in published] == ["failed"]
+    _send(c, _poll("again"))  # same id, now dated: still a repeat
+    assert len(published) == 1
 
 
 @pytest.mark.parametrize("cid", ["a/b", "+", "#", "x" * 65, "../x", "id with space", 5, ["x"]])

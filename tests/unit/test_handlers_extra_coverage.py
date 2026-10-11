@@ -1,3 +1,4 @@
+import time
 import json
 import types
 import sys
@@ -46,7 +47,7 @@ def test_registry_auth_failed_publishes_ack(tmp_path, monkeypatch):
     client = DummyClient("testcli")
     client.registry_token = "expected"
 
-    cmd = {"command_id": "cmd1", "payload": {"entries": [], "token": "wrong"}}
+    cmd = {"command_id": "cmd1", "timestamp": time.time(), "payload": {"entries": [], "token": "wrong"}}
     payload_str = json.dumps(cmd)
     msg = Msg(f"hubs/{client.client_id}/v1/cmd/registry/set")
 
@@ -62,7 +63,7 @@ def test_registry_missing_payload_publishes_failed(tmp_path):
     client = DummyClient("testcli2")
 
     # Send a command with no payload
-    cmd = {"command_id": "cmd2"}
+    cmd = {"command_id": "cmd2", "timestamp": time.time()}
     payload_str = json.dumps(cmd)
     msg = Msg(f"hubs/{client.client_id}/v1/cmd/registry/set")
 
@@ -85,12 +86,12 @@ def test_sensors_set_readback_form_is_refused_and_list_reports(monkeypatch, tmp_
     requests = _RecordingRequests()
     msg = Msg(f"hubs/{client.client_id}/v1/cmd/sensors/set")
 
-    cmd = {"command_id": "set1", "payload": {"sensors": [{"entity_id": "sensor.x", "state": "on"}]}}
+    cmd = {"command_id": "set1", "timestamp": time.time(), "payload": {"sensors": [{"entity_id": "sensor.x", "state": "on"}]}}
     handlers.handle_message(client, msg, json.dumps(cmd), None, None, None, requests=requests)
     assert requests.calls == []
     assert _secure_final_ack(client.publishes)["result"]["reason"] == "invalid_payload"
 
-    cmd = {"command_id": "set2", "payload": {"sensors": ["sensor.x"]}}
+    cmd = {"command_id": "set2", "timestamp": time.time(), "payload": {"sensors": ["sensor.x"]}}
     fetch = lambda url, token: [{"entity_id": "sensor.x", "state": "on", "attributes": {}}]  # noqa: E731
     handlers.handle_message(client, msg, json.dumps(cmd), fetch, None, None, requests=requests)
     comp = _secure_final_ack(client.publishes)

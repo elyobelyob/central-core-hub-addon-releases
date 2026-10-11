@@ -1,3 +1,4 @@
+import time
 import json
 import importlib.util
 from pathlib import Path
@@ -47,7 +48,7 @@ def test_sensors_set_no_ha_write_form_publishes_only_acks():
     mqtt_mod, handlers = _load_modules()
     c = DummyClient()
     topic = f"hubs/{c.client_id}/v1/cmd/sensors/set"
-    cmd = {"command_id": "noha1", "payload": {"sensors": [{"entity_id": "sensor.x", "state": "on"}]}}
+    cmd = {"command_id": "noha1", "timestamp": time.time(), "payload": {"sensors": [{"entity_id": "sensor.x", "state": "on"}]}}
     handlers.handle_message(c, Msg(topic), json.dumps(cmd), None, None, None)
 
     ack_topic = f"hubs/{c.client_id}/v1/ack/sensors.set/noha1"
@@ -61,7 +62,7 @@ def test_sensors_set_no_ha_list_form_still_reminds_vault_and_completes():
     mqtt_mod, handlers = _load_modules()
     c = DummyClient()
     topic = f"hubs/{c.client_id}/v1/cmd/sensors/set"
-    cmd = {"command_id": "noha2", "payload": {"sensors": ["sensor.x"]}}
+    cmd = {"command_id": "noha2", "timestamp": time.time(), "payload": {"sensors": ["sensor.x"]}}
     handlers.handle_message(c, Msg(topic), json.dumps(cmd), None, None, None)
 
     rem = [json.loads(p["payload"]) for p in c.published if p["topic"] == c.vault_topic]

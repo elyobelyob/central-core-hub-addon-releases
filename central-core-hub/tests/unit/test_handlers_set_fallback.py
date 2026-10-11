@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -39,7 +40,7 @@ def test_set_write_form_refused_and_nothing_published():
     client = FakeClient()
     R = _RecordingRequests()
     msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/sensors/set"})
-    payload = {"command_id": "f1", "payload": {"sensors": [{"entity_id": "sensor.z", "state": "x"}]}}
+    payload = {"command_id": "f1", "timestamp": time.time(), "payload": {"sensors": [{"entity_id": "sensor.z", "state": "x"}]}}
     handlers.handle_message(client, msg, json.dumps(payload), None, None, None, requests=R)
 
     assert R.calls == []

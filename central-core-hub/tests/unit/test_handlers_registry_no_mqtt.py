@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -41,12 +42,12 @@ def test_registry_set_writes_local_when_mqtt_missing(tmp_path, monkeypatch):
     try:
         monkeypatch.delenv("REGISTRY_TOKEN", raising=False)
         client = FakeClient()
-        handlers.handle_message(client, msg, json.dumps({"command_id": "rnm0", "payload": {"entries": entries}}), None, None, None)
+        handlers.handle_message(client, msg, json.dumps({"command_id": "rnm0", "timestamp": time.time(), "payload": {"entries": entries}}), None, None, None)
         assert not target.exists()
         assert _secure_final_ack(client.publishes)["result"]["reason"] == "registry_updates_disabled"
 
         monkeypatch.setenv("REGISTRY_TOKEN", "tok-1")
-        payload = {"command_id": "rnm1", "payload": {"token": "tok-1", "entries": entries}}
+        payload = {"command_id": "rnm1", "timestamp": time.time(), "payload": {"token": "tok-1", "entries": entries}}
         handlers.handle_message(FakeClient(), msg, json.dumps(payload), None, None, None)
         assert target.exists()
         data = json.loads(target.read_text())

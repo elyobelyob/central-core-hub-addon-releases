@@ -93,3 +93,16 @@ def test_encrypted_url_without_host_is_refused():
 def test_empty_or_none_url_is_refused():
     assert ha_safety.check_token_transport(None)[0] is False
     assert ha_safety.check_token_transport("")[0] is False
+
+
+@pytest.mark.real_resolver
+def test_resolve_host_returns_each_address_once(monkeypatch):
+    import socket
+
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda host, port: [(2, 1, 6, "", ("192.168.1.10", 0)), (2, 2, 17, "", ("192.168.1.10", 0)),
+                            (10, 1, 6, "", ("::1", 0, 0, 0))],
+    )
+    assert ha_safety._resolve_host("homeassistant.local") == ["192.168.1.10", "::1"]

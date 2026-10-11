@@ -1,3 +1,4 @@
+import time
 import json
 import importlib.util
 import pathlib
@@ -74,7 +75,7 @@ def test_sensors_poll_prints_and_publishes():
     c = DummyClient()
     topic = f"hubs/{c.client_id}/v1/cmd/sensors/poll"
     # request specific device classes
-    cmd = {"payload": {"sensors": ["temperature", "motion"]}}
+    cmd = {"command_id": "pl1", "timestamp": time.time(), "payload": {"sensors": ["temperature", "motion"]}}
     msg = Msg(topic)
 
     handle_message(c, msg, json.dumps(cmd), fetch_sensors_dummy, None, None, None)

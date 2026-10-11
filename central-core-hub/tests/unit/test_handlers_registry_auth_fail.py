@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -59,7 +60,7 @@ def test_registry_set_env_token_auth_fails(monkeypatch, tmp_path):
     try:
         msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/registry/set"})
         payload_obj = {"token": "wrong", "entries": []}
-        payload = {"command_id": "rnf1", "payload": payload_obj}
+        payload = {"command_id": "rnf1", "timestamp": time.time(), "payload": payload_obj}
 
         handlers.handle_message(client, msg, json.dumps(payload), None, None, None)
 
@@ -87,7 +88,7 @@ def test_registry_set_client_token_auth_fails():
     try:
         msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/registry/set"})
         payload_obj = {"token": "nope", "entries": []}
-        payload = {"command_id": "rnf2", "payload": payload_obj}
+        payload = {"command_id": "rnf2", "timestamp": time.time(), "payload": payload_obj}
 
         handlers.handle_message(client, msg, json.dumps(payload), None, None, None)
 

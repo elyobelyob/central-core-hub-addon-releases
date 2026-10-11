@@ -1,3 +1,4 @@
+import time
 import json
 import importlib.util
 from pathlib import Path
@@ -98,7 +99,7 @@ def test_handle_sensors_poll_command_ack_and_completion(monkeypatch):
     dummy = DummyClient()
     c._client = dummy
 
-    command = {"command_id": "abc123", "action": "sensors/poll", "payload": {"sensors": ["temperature"]}}
+    command = {"command_id": "abc123", "timestamp": time.time(), "action": "sensors/poll", "payload": {"sensors": ["temperature"]}}
     topic = f"hubs/{c.client_id}/v1/cmd/sensors/poll"
     msg = DummyMsg(topic, json.dumps(command).encode("utf-8"))
 
@@ -130,6 +131,7 @@ def test_handle_sensors_set_list_of_dicts_is_refused_without_calling_ha(monkeypa
 
     command = {
         "command_id": "set123",
+        "timestamp": time.time(),
         "action": "sensors/set",
         "payload": {
             "sensors": [
@@ -170,7 +172,7 @@ def test_handle_sensors_set_string_list_reports_names_and_enabled(monkeypatch):
     dummy = DummyClient()
     c._client = dummy
 
-    command = {"command_id": "set124", "action": "sensors/set", "payload": {"sensors": ["sensor.temp", "sensor.hum"]}}
+    command = {"command_id": "set124", "timestamp": time.time(), "action": "sensors/set", "payload": {"sensors": ["sensor.temp", "sensor.hum"]}}
     c.on_message(None, None, DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(command).encode("utf-8")))
 
     assert req.calls == []
@@ -198,6 +200,7 @@ def test_handle_sensors_set_single_write_refused_even_without_readback(monkeypat
     c._client = dummy
     command = {
         "command_id": "setno",
+        "timestamp": time.time(),
         "action": "sensors/set",
         "payload": {"sensors": [{"entity_id": "sensor.temp", "state": "22.5"}]},
     }

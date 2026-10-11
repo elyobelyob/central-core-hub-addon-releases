@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -42,7 +43,7 @@ class Msg:
 def test_sensors_set_write_form_reports_failed_without_posting():
     client = DummyClient()
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
-    payload = json.dumps({"command_id": "c-postfail", "payload": {"sensors": [{"entity_id": "sensor.fail", "state": "off"}]}})
+    payload = json.dumps({"command_id": "c-postfail", "timestamp": time.time(), "payload": {"sensors": [{"entity_id": "sensor.fail", "state": "off"}]}})
     req = _RecordingRequests()
     handlers.handle_message(client, Msg(topic), payload, None, None, None, requests=req)
     assert req.calls == []

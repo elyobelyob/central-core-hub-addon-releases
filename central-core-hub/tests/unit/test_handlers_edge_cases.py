@@ -1,3 +1,4 @@
+import time
 import json
 import importlib.util
 from pathlib import Path
@@ -78,7 +79,7 @@ def test_set_with_sensors_as_dict_is_refused(monkeypatch):
     c.selected_sensors = ["sensor.keep"]
 
     payload = {"sensors": {"sensor.a": "10", "sensor.b": "20"}}
-    cmd = {"command_id": "cid", "action": "sensors/set", "payload": payload}
+    cmd = {"command_id": "cid", "timestamp": time.time(), "action": "sensors/set", "payload": payload}
     c.on_message(None, None, DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(cmd).encode("utf-8")))
 
     assert req.calls == []

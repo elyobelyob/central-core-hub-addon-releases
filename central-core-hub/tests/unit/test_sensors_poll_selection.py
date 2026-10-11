@@ -5,6 +5,7 @@ client.selected_sensors, after which the websocket filter and the change
 publisher matched nothing.
 """
 
+import time
 import json
 import types
 
@@ -33,7 +34,7 @@ def _client():
 
 def _poll(c, sensors, cid="p1"):
     msg = types.SimpleNamespace(topic="hubs/hub1/v1/cmd/sensors/poll", retain=False)
-    body = json.dumps({"command_id": cid, "payload": {"sensors": sensors}})
+    body = json.dumps({"command_id": cid, "timestamp": time.time(), "payload": {"sensors": sensors}})
     handlers.handle_message(c, msg, body, lambda u, t: [dict(s) for s in STATES], None, None, None)
 
 

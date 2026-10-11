@@ -32,17 +32,18 @@ class Msg:
         self.topic = topic
 
 
-def test_config_update_build_ack_fallback():
+def test_config_update_sends_no_ack_without_a_checked_topic():
     handlers = load_handlers_module()
     client = BadAckClient("Ccfg")
     cmd = {"command_id": "c1", "payload": {"version": "x"}}
     msg = Msg(f"hubs/{client.client_id}/v1/cmd/config/update")
     handlers.handle_message(client, msg, json.dumps(cmd), None, None, None)
     # Should have attempted to publish completion ack using fallback topic
-    assert any("/v1/ack/" in t[0] for t in client.publishes)
+    # build_ack_topic failed: no acknowledgement goes to a guessed topic
+    assert not any("/v1/ack/" in str(t[0]) for t in client.publishes)
 
 
-def test_sensors_poll_build_ack_fallback():
+def test_sensors_poll_sends_no_ack_without_a_checked_topic():
     handlers = load_handlers_module()
     client = BadAckClient("Cpoll")
     cmd = {"command_id": "c2", "payload": {"sensors": ["opening"]}}
@@ -52,10 +53,11 @@ def test_sensors_poll_build_ack_fallback():
         return [{"entity_id": "sensor.a", "state": "on", "attributes": {"device_class": "opening"}}]
 
     handlers.handle_message(client, msg, json.dumps(cmd), fetch_sensors, None, None)
-    assert any("/v1/ack/" in t[0] for t in client.publishes)
+    # build_ack_topic failed: no acknowledgement goes to a guessed topic
+    assert not any("/v1/ack/" in str(t[0]) for t in client.publishes)
 
 
-def test_sensors_set_build_ack_fallback_for_string_list():
+def test_sensors_set_sends_no_ack_without_a_checked_topic():
     handlers = load_handlers_module()
     client = BadAckClient("Cset")
     cmd = {"command_id": "c3", "payload": {"sensors": ["sensor.a"]}}
@@ -65,4 +67,5 @@ def test_sensors_set_build_ack_fallback_for_string_list():
         return [{"entity_id": "sensor.a", "state": "off", "attributes": {}}]
 
     handlers.handle_message(client, msg, json.dumps(cmd), fetch_sensors, None, None)
-    assert any("/v1/ack/" in t[0] for t in client.publishes)
+    # build_ack_topic failed: no acknowledgement goes to a guessed topic
+    assert not any("/v1/ack/" in str(t[0]) for t in client.publishes)
