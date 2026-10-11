@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import json
 import sys
@@ -34,7 +35,7 @@ def test_registry_auth_failure(monkeypatch):
     client = FakeClient()
     msg = SimpleNamespace()
     msg.topic = f"hubs/{client.client_id}/v1/cmd/registry/set"
-    payload = {"command_id": "c1", "payload": {"entries": []}}
+    payload = {"command_id": "c1", "timestamp": time.time(), "payload": {"entries": []}}
 
     handlers.handle_message(client, msg, json.dumps(payload), None, None, None)
 
@@ -76,7 +77,7 @@ def test_registry_atomic_write_failure(monkeypatch, tmp_path):
 
     msg = SimpleNamespace()
     msg.topic = f"hubs/{client.client_id}/v1/cmd/registry/set"
-    payload = {"command_id": "c2", "payload": {"entries": []}}
+    payload = {"command_id": "c2", "timestamp": time.time(), "payload": {"entries": []}}
 
     handlers.handle_message(client, msg, json.dumps(payload), None, None, None)
 
