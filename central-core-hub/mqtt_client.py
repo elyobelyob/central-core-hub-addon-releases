@@ -244,8 +244,34 @@ def _log_debug(msg):
         _log(msg)
 
 
+# Fields whose values never reach a log line, wherever they sit in a payload:
+# the registry/set `token`, passwords, secrets, private keys, API keys, ...
+_SECRET_KEY_RE = re.compile(r"token|passw|secret|private_?key|api_?key|authorization|credential|bearer", re.I)
+# Fallback for text that is not (or no longer) valid JSON, e.g. cut off by the size limit.
+_SECRET_FIELD_RE = re.compile(
+    r"""(?P<key>["'][^"']*(?:token|passw|secret|private_?key|api_?key|authorization|credential|bearer)[^"']*["']"""
+    r"""\s*:\s*)(?:"(?:[^"\\]|\\.)*"?|'(?:[^'\\]|\\.)*'?|[^,}\]\s]+)""",
+    re.I,
+)
+_REDACTED = "[REDACTED]"
+
+
+def _redact_secrets(value):
+    """A copy of a decoded JSON value with every secret-looking field blanked."""
+    if isinstance(value, dict):
+        return {
+            k: (_REDACTED if isinstance(k, str) and _SECRET_KEY_RE.search(k) else _redact_secrets(v))
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_secrets(v) for v in value]
+    return value
+
+
 def _preview(payload, limit=_PREVIEW_CHARS):
-    """A short, PEM-redacted rendering of a payload for debug logs."""
+    """A short rendering of a payload for debug logs, with PEM blocks and
+    secret fields (token, password, secret, private_key, ...) redacted before
+    the text is cut to `limit`."""
     if payload is None:
         return "<none>"
     try:
@@ -253,6 +279,14 @@ def _preview(payload, limit=_PREVIEW_CHARS):
     except Exception:
         return "<unprintable>"
     text = _PEM_RE.sub("[PEM REDACTED]", text)
+    try:
+        decoded = json.loads(text)
+    except ValueError:
+        decoded = None
+    if isinstance(decoded, (dict, list)):
+        text = json.dumps(_redact_secrets(decoded), separators=(",", ":"))
+    else:
+        text = _SECRET_FIELD_RE.sub(lambda m: m.group("key") + f'"{_REDACTED}"', text)
     return text if len(text) <= limit else text[:limit] + f"...(+{len(text) - limit} chars)"
 
 
@@ -1173,7 +1207,10 @@ class CentralCoreClient:
             )
             # Subscribe to hub command space using the generic command template
             # with single-level wildcards for domain/action.
-            self.cmd_sub_topic = topics.build_topic(
+            # (A newer central_core_mqtt_shared refuses "+" in build_topic and offers
+            # build_subscription for this one place; older ones only have build_topic.)
+            build_subscription = getattr(topics, "build_subscription", topics.build_topic)
+            self.cmd_sub_topic = build_subscription(
                 topics.CMD_GENERIC,
                 hub_id=self.client_id,
                 version=ver,
@@ -1622,7 +1659,8 @@ class CentralCoreClient:
         length = len(payload) if payload is not None else 0
         eligible = persist is not False and _should_persist_topic(topic)
         try:
-            _log_debug(f"MQTT -> PUBLISH {topic} qos={qos} len={length} payload={_preview(payload)}")
+            if _DEBUG_LOGGING:  # only then is the payload worth rendering
+                _log_debug(f"MQTT -> PUBLISH {topic} qos={qos} len={length} payload={_preview(payload)}")
             # If not connected, only enqueue when we have a real paho MQTT
             # client (i.e. runtime) and the topic is eligible for persistence.
             # In tests the client is often a dummy shim; allow those publishes
@@ -2021,7 +2059,8 @@ class CentralCoreClient:
             except Exception:
                 payload = "<binary>"
             _log(f"MQTT <- {msg.topic} len={size} retain={getattr(msg, 'retain', False) is True}")
-            _log_debug(f"MQTT <- {msg.topic} payload={_preview(payload)}")
+            if _DEBUG_LOGGING:
+                _log_debug(f"MQTT <- {msg.topic} payload={_preview(payload)}")
             if msg.topic == getattr(self, "store_ack_topic", None):
                 # The vault never retains a store ack, and a retained one would
                 # be replayed to every new session: refuse it.
