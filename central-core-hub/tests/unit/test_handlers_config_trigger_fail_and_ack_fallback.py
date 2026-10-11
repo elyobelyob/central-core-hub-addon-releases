@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -53,10 +54,10 @@ class Msg:
         self.topic = topic
 
 
-def test_sensors_poll_build_ack_raises_falls_back_to_string_topic():
+def test_sensors_poll_sends_no_ack_when_build_ack_topic_raises():
     client = DummyClientAckBad()
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/poll"
-    payload = json.dumps({"command_id": "c-poll", "payload": {"sensors": ["temperature"]}})
+    payload = json.dumps({"command_id": "c-poll", "timestamp": time.time(), "payload": {"sensors": ["temperature"]}})
 
     # provide one sensor that matches device_class 'temperature'
     def fetch_sensors(url, token):
@@ -70,6 +71,5 @@ def test_sensors_poll_build_ack_raises_falls_back_to_string_topic():
 
     handlers.handle_message(client, Msg(topic), payload, fetch_sensors, None, None)
 
-    # since build_ack_topic raised, code should publish completion to fallback string
-    fallback = f"hubs/{client.client_id}/v1/ack/sensors.poll/c-poll"
-    assert any(t == fallback for t, _p, _q in client.published)
+    # build_ack_topic raised: no acknowledgement is sent to a guessed topic
+    assert not any("/ack/" in str(t) for t, _p, _q in client.published)

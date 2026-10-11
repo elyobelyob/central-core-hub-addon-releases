@@ -328,7 +328,47 @@ class _FallbackTopics:
 
     @staticmethod
     def build_topic(tpl, **kwargs):
-        return tpl.format(**kwargs)
+        return _render_checked_topic(tpl, (), kwargs)
+
+    @staticmethod
+    def build_subscription(tpl, wildcards=(), **kwargs):
+        return _render_checked_topic(tpl, tuple(wildcards), kwargs)
+
+
+# One plain topic word: an action key ("config.update") or a command id.
+_TOPIC_WORD_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+# Anything that ends or reshapes a topic level, or hides in it.
+_BAD_TOPIC_CHARS_RE = re.compile(r"[/+#\x00-\x20\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2028\u2029\ufeff]")
+
+
+def _render_checked_topic(template, wildcards, fields):
+    """str.format for the built-in topic templates, with every value checked as
+    central-core-mqtt-shared v1.2.0 does: the hub id is a valid client id, other
+    levels are non-empty, at most 128 UTF-8 bytes and free of separators,
+    wildcards and control characters; only the levels named in `wildcards`
+    become "+"."""
+    import string
+
+    safe = {}
+    for _literal, name, _spec, _conv in string.Formatter().parse(template):
+        if name is None or name in safe:
+            continue
+        if name in wildcards and name != "hub_id":
+            if fields.get(name, "+") != "+":
+                raise ValueError(f"topic field {name!r} is a wildcard level")
+            safe[name] = "+"
+            continue
+        if name not in fields:
+            raise KeyError(name)
+        value = fields[name]
+        if name == "hub_id":
+            safe[name] = validate_client_id(value)
+            continue
+        text = str(value) if isinstance(value, (str, int)) and not isinstance(value, bool) else ""
+        if not text or len(text.encode("utf-8", "replace")) > 128 or _BAD_TOPIC_CHARS_RE.search(text):
+            raise ValueError(f"topic field {name!r} is not a safe topic level")
+        safe[name] = text
+    return template.format(**safe)
 
 
 def _load_topics_file(spec):
@@ -1227,18 +1267,18 @@ class CentralCoreClient:
             self.preferred_sensors_topic = topics.build_topic(
                 topics.TELEMETRY_SENSORS, hub_id=self.client_id, version=ver
             )
-            # Subscribe to hub command space using the generic command template
-            # with single-level wildcards for domain/action.
-            # (A newer central_core_mqtt_shared refuses "+" in build_topic and offers
-            # build_subscription for this one place; older ones only have build_topic.)
-            build_subscription = getattr(topics, "build_subscription", topics.build_topic)
-            self.cmd_sub_topic = build_subscription(
-                topics.CMD_GENERIC,
-                hub_id=self.client_id,
-                version=ver,
-                domain="+",
-                action="+",
-            )
+            # Subscribe to this hub's command space: the generic command template
+            # with single-level wildcards for domain and action only. The hub id
+            # was validated above, so it is never itself a wildcard.
+            build_subscription = getattr(topics, "build_subscription", None)
+            if build_subscription is not None:  # central-core-mqtt-shared v1.2.0 and later
+                self.cmd_sub_topic = build_subscription(
+                    topics.CMD_GENERIC, wildcards=("domain", "action"), hub_id=self.client_id, version=ver
+                )
+            else:  # earlier versions have only build_topic, which does not check values
+                self.cmd_sub_topic = topics.build_topic(
+                    topics.CMD_GENERIC, hub_id=self.client_id, version=ver, domain="+", action="+"
+                )
             self.status_offline_topic = topics.build_topic(
                 getattr(topics, "STATUS_OFFLINE", "hubs/{hub_id}/v{version}/status/offline"),
                 hub_id=self.client_id,
@@ -1531,13 +1571,17 @@ class CentralCoreClient:
         self._update_ha_listener_selectors()
 
     def build_ack_topic(self, action, command_id):
-        """Build a versioned ACK topic for the given action and command_id.
+        """The versioned ACK topic for `action` ("domain/action") and `command_id`.
 
-        Prefer an ACK template from the optional `central_core_mqtt_shared`
-        package (attribute name `ACK_TMPL`) if available; otherwise fall
-        back to the canonical f-string used previously.
+        Both must be plain topic words (letters, digits, "_", ".", "-"),
+        whatever the shared package version checks; otherwise ValueError and
+        the caller sends no acknowledgement.
         """
-        key = action.replace("/", ".") if isinstance(action, str) else str(action)
+        key = action.replace("/", ".") if isinstance(action, str) else ""
+        if not _TOPIC_WORD_RE.fullmatch(key) or not isinstance(command_id, str) or not _TOPIC_WORD_RE.fullmatch(
+            command_id
+        ):
+            raise ValueError("an acknowledgement needs a plain action and command id")
         # Use the shared package ACK template (ACK_GENERIC) via topics.build_topic.
         try:
             return topics.build_topic(
