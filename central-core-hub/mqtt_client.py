@@ -1161,16 +1161,36 @@ def _open_reading_store():
     try:
         days = float(os.environ.get("HUB_OUTBOX_MAX_AGE_DAYS") or OUTBOX_MAX_AGE_DAYS)
         megabytes = float(os.environ.get("HUB_OUTBOX_MAX_MB") or OUTBOX_MAX_MB)
-        store = _sibling("outbox").SqliteOutbox(
-            path, max_age_s=days * 86400, max_bytes=int(megabytes * 1024 * 1024), log=_log
-        )
+
+        def open_store():
+            return _sibling("outbox").SqliteOutbox(
+                path, max_age_s=days * 86400, max_bytes=int(megabytes * 1024 * 1024), log=_log
+            )
+
+        store = open_store()
         # A new outbox id at every start: a restored Home Assistant backup brings
         # back an old outbox whose seqs the vault has already seen under its id
         # (with or without readings in it). Kept readings are resent under the new id.
-        old_id, _new_id = store.start_new_id()
+        try:
+            old_id, _new_id = store.start_new_id()
+            was = f"was {old_id}"
+        except Exception as exc:
+            # Keep the outbox (and every reading in it) under its old id for this
+            # run rather than switching it off. Reopen it, so a transaction the
+            # failure may have left open cannot block later writes.
+            kept = store.outbox_id
+            _log(f"WARNING: could not start a new outbox id at start ({type(exc).__name__}: {exc}); keeping "
+                 f"{kept} for this run. A restored backup is still caught if the vault confirms readings this "
+                 "outbox never sent.", sys.stderr)
+            try:
+                store.close()
+            except Exception:
+                pass
+            store = open_store()
+            was = "kept: a new id could not be started"
         stats = store.stats()
         _log(
-            f"Outbox {stats['outbox_id']} at {path} (was {old_id}): {stats['backlog']} readings waiting for the "
+            f"Outbox {stats['outbox_id']} at {path} ({was}): {stats['backlog']} readings waiting for the "
             f"vault, next seq {stats['next_seq']}"
         )
         return store

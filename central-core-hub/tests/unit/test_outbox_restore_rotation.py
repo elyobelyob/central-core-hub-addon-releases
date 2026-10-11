@@ -478,3 +478,101 @@ def test_a_batch_queued_by_paho_while_disconnected_counts_as_sent(mc, monkeypatc
     _door(hub, "off", "2026-10-02T07:00:01Z")  # live: failed, left for the resend
     assert hub._store.highest_sent_seq() == 1
     hub.close()
+
+
+# --------------------------------------------------------------------------- a start that cannot re-key
+
+
+def test_a_failed_new_id_at_start_keeps_the_outbox_under_its_old_id(mc, monkeypatch, tmp_path):
+    ob = importlib.import_module("outbox")
+    db = tmp_path / "outbox.db"
+    hub = _hub(mc, monkeypatch, db)
+    hub._connected = False
+    _door(hub, "on", "2026-10-02T07:00:00Z")  # one reading waiting
+    kept_id = hub._store.outbox_id
+    hub._store.close()
+
+    lines = []
+    monkeypatch.setattr(mc, "_log", lambda m, file=None: lines.append(m))
+
+    def disk_full(self):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(ob.SqliteOutbox, "start_new_id", disk_full)
+    hub = _hub(mc, monkeypatch, db)
+    assert hub._store is not None  # not switched off
+    assert hub._store.outbox_id == kept_id
+    assert hub._store.stats()["backlog"] == 1  # the waiting reading is still there
+    assert any(m.startswith("WARNING: could not start a new outbox id") and kept_id in m for m in lines)
+    _door(hub, "off", "2026-10-02T07:01:00Z")  # and it keeps working
+    assert hub._client.published[-1]["payload"]["outbox_id"] == kept_id
+    assert hub._store.stats()["backlog"] == 2
+    hub.close()
+
+
+def test_a_failure_that_leaves_a_transaction_open_is_cleaned_up_by_reopening(mc, monkeypatch, tmp_path):
+    ob = importlib.import_module("outbox")
+    db = tmp_path / "outbox.db"
+    ob.SqliteOutbox(db).close()
+
+    def fail_mid_transaction(self):
+        self._db.execute("BEGIN IMMEDIATE")  # left open, as a failed ROLLBACK would
+        raise OSError("I/O error")
+
+    monkeypatch.setattr(ob.SqliteOutbox, "start_new_id", fail_mid_transaction)
+    monkeypatch.setattr(mc, "_log", lambda m, file=None: None)
+    hub = _hub(mc, monkeypatch, db)
+    assert hub._store is not None
+    hub._store.append("system", "t", {}, "2026-10-02T07:00:00Z")  # writes are not blocked
+    assert hub._store.stats()["backlog"] == 1
+    hub.close()
+
+
+def test_if_the_outbox_cannot_even_reopen_the_hub_publishes_without_it(mc, monkeypatch, tmp_path):
+    ob = importlib.import_module("outbox")
+    real_init = ob.SqliteOutbox.__init__
+    opened = []
+
+    def init_once(self, *a, **k):
+        if opened:
+            raise OSError("gone")
+        opened.append(1)
+        real_init(self, *a, **k)
+
+    def fail(self):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(ob.SqliteOutbox, "__init__", init_once)
+    monkeypatch.setattr(ob.SqliteOutbox, "start_new_id", fail)
+    monkeypatch.setattr(mc, "_log", lambda m, file=None: None)
+    monkeypatch.setenv("HUB_OUTBOX_DB", str(tmp_path / "outbox.db"))
+    assert mc._open_reading_store() is None
+
+
+# --------------------------------------------------------------------------- end to end
+
+
+def test_a_reading_paho_queued_before_a_restart_is_resent_under_the_new_id(mc, monkeypatch, tmp_path):
+    """MQTT_ERR_NO_CONN marks a reading sent (paho queued it). If the add-on
+    restarts before paho delivers it, paho's queue is gone: the reading must be
+    resent from the outbox under the new id."""
+    db = tmp_path / "outbox.db"
+    hub = _hub(mc, monkeypatch, db)
+    first = hub._store.outbox_id
+    _ack(hub, 0, first)  # this vault confirms outboxes
+    hub._client.publish = lambda topic, payload, qos=0: types.SimpleNamespace(rc=4)  # queued by paho
+    _door(hub, "on", "2026-10-02T07:00:00Z")
+    assert hub._store.highest_sent_seq() == 1 and hub._store.due(10) == []
+    hub._store.close()  # the add-on restarts; paho's queue is lost
+
+    hub = _hub(mc, monkeypatch, db)
+    second = hub._store.outbox_id
+    assert second != first
+    assert hub._send_due_readings() == 1
+    [batch] = [m for m in hub._client.published if m["topic"] == hub.batch_topic]
+    assert batch["payload"]["outbox_id"] == second
+    assert [r["seq"] for r in batch["payload"]["records"]] == [1]
+    assert batch["payload"]["records"][0]["payload"]["outbox_id"] == second
+    _ack(hub, 1, second)
+    assert hub._store.stats()["backlog"] == 0
+    hub.close()
