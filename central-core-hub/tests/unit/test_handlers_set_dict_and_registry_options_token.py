@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -55,7 +56,7 @@ class _FakeResp:
 def test_sensors_set_refuses_dict_mapping():
     client = DummyClient("unit-dict")
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
-    payload = json.dumps({"command_id": "d1", "payload": {"sensors": {"sensor.a": "on"}}})
+    payload = json.dumps({"command_id": "d1", "timestamp": time.time(), "payload": {"sensors": {"sensor.a": "on"}}})
     req = _RecordingRequests()
     handlers.handle_message(client, Msg(topic), payload, None, None, None, requests=req)
     assert req.calls == []
@@ -84,7 +85,7 @@ def test_registry_set_with_options_registryToken_writes_file_and_reloads(tmp_pat
         client.options = {"registryToken": "opt-secret"}
 
         topic = f"hubs/{client.client_id}/v1/cmd/registry/set"
-        payload = json.dumps({"command_id": "r2", "payload": {"token": "opt-secret", "entries": []}})
+        payload = json.dumps({"command_id": "r2", "timestamp": time.time(), "payload": {"token": "opt-secret", "entries": []}})
 
         handlers.handle_message(client, Msg(topic), payload, None, None, None)
 

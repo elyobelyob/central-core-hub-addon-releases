@@ -1,6 +1,7 @@
 """handlers: a failure in one step is reported to the vault, and never stops
 the steps after it or crashes the MQTT thread."""
 
+import time
 import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -56,7 +57,7 @@ class _ExplodingUpdater:
 @pytest.mark.parametrize("action", ["config/update", "config/check_update"])
 def test_updater_crash_is_reported_as_failed_with_its_message(action):
     client = _Client(updater=_ExplodingUpdater())
-    _send(client, action, {"command_id": "u1"})
+    _send(client, action, {"command_id": "u1", "timestamp": time.time()})
     handlers.wait_for_update_worker(timeout=5)
     final = client.acks("u1")[-1]
     assert final["status"] == "failed"
@@ -80,7 +81,7 @@ def test_check_update_without_ack_topic_still_runs(monkeypatch):
         return real(action, cid)
 
     monkeypatch.setattr(client, "build_ack_topic", flaky)
-    _send(client, "config/check_update", {"command_id": "k1"})
+    _send(client, "config/check_update", {"command_id": "k1", "timestamp": time.time()})
     handlers.wait_for_update_worker(timeout=5)
     assert [a["status"] for a in client.acks("k1")] == ["completed"]
 
@@ -114,7 +115,7 @@ STATES = [
 
 def test_poll_keeps_going_when_telemetry_and_reminder_publishes_fail():
     client = _Client(fail_topics=("hubs/hub-x/v1/telemetry", "hubs/hub-x/v1/vault"))
-    _send(client, "sensors/poll", {"command_id": "p1", "payload": {"sensors": ["door"]}},
+    _send(client, "sensors/poll", {"command_id": "p1", "timestamp": time.time(), "payload": {"sensors": ["door"]}},
           fetch=lambda url, tok: [dict(s) for s in STATES])
     done = [a for a in client.acks("p1") if a["status"] == "completed"]
     assert done and done[-1]["result"]["sensors_reported"] == ["binary_sensor.front_door"]
@@ -122,7 +123,7 @@ def test_poll_keeps_going_when_telemetry_and_reminder_publishes_fail():
 
 def test_poll_survives_a_broker_that_refuses_everything():
     client = _Client(fail_topics=("hubs/",))
-    _send(client, "sensors/poll", {"command_id": "p2", "payload": {"sensors": ["door"]}},
+    _send(client, "sensors/poll", {"command_id": "p2", "timestamp": time.time(), "payload": {"sensors": ["door"]}},
           fetch=lambda url, tok: [dict(s) for s in STATES])
     assert client.published == []  # nothing sent, and no exception escaped
 
@@ -136,7 +137,7 @@ def test_inventory_unexpected_error_is_reported_generically(monkeypatch):
 
     monkeypatch.setattr(inventory, "answer", boom)
     client = _Client()
-    handlers._handle_inventory(client, json.dumps({"command_id": "i1"}))
+    handlers._handle_inventory(client, json.dumps({"command_id": "i1", "timestamp": time.time()}))
     final = client.acks("i1")[-1]
     assert final["status"] == "failed"
     assert final["result"] == {"reason": "inventory_failed"}  # no internal detail leaks
@@ -162,5 +163,5 @@ def test_inventory_with_unreadable_body_sends_nothing(body, monkeypatch):
 def test_inventory_publish_failure_is_swallowed(monkeypatch):
     monkeypatch.setattr(inventory, "answer", lambda *a, **k: {"run": "r", "part": 1, "parts": 1, "data": ""})
     client = _Client(fail_topics=("hubs/",))
-    handlers._handle_inventory(client, json.dumps({"command_id": "i2"}))
+    handlers._handle_inventory(client, json.dumps({"command_id": "i2", "timestamp": time.time()}))
     assert client.published == []

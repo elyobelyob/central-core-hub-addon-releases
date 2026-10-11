@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -51,7 +52,7 @@ class Msg:
 def test_handle_config_update_ack_and_completion():
     client = DummyClient()
     topic = f"hubs/{client.client_id}/v1/cmd/config/update"
-    payload = json.dumps({"command_id": "cid1", "payload": {"version": "1.2.3"}})
+    payload = json.dumps({"command_id": "cid1", "timestamp": time.time(), "payload": {"version": "1.2.3"}})
     handlers.handle_message(client, Msg(topic), payload, None, None, None)
     # two publishes: ack and completion (ack uses fallback string since build_ack_topic raised)
     assert any("ack" in t for t, _, _ in client.published)
@@ -61,7 +62,7 @@ def test_handle_sensors_poll_filters_and_publish():
     client = DummyClient()
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/poll"
     # payload requesting device class 'opening'
-    payload = json.dumps({"command_id": "c2", "payload": {"sensors": ["opening"]}})
+    payload = json.dumps({"command_id": "c2", "timestamp": time.time(), "payload": {"sensors": ["opening"]}})
 
     def fetch_sensors(url, token):
         return [
@@ -91,7 +92,7 @@ def test_handle_sensors_poll_filters_and_publish():
 def test_handle_sensors_set_selection_list_persistence(tmp_path, monkeypatch):
     client = DummyClient()
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
-    payload = json.dumps({"command_id": "c3", "payload": {"sensors": ["sensor.x", "sensor.y"]}})
+    payload = json.dumps({"command_id": "c3", "timestamp": time.time(), "payload": {"sensors": ["sensor.x", "sensor.y"]}})
 
     # create a fake mqtt_client module with SELECTED_SENSORS_FILE pointing to tmp
     fake_mqtt = type(sys)("mqtt_client")

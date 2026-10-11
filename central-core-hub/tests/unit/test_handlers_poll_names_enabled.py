@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -41,7 +42,7 @@ class Msg:
 def test_sensors_poll_names_and_enabled_maps():
     client = DummyClient()
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/poll"
-    payload = json.dumps({"command_id": "c-names", "payload": {"sensors": ["humidity"]}})
+    payload = json.dumps({"command_id": "c-names", "timestamp": time.time(), "payload": {"sensors": ["humidity"]}})
 
     # sensor missing friendly_name and disabled_by set -> names_map should use entity_id and enabled False
     def fetch_sensors(url, token):

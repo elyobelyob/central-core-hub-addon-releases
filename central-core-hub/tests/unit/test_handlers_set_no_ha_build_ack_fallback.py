@@ -1,3 +1,4 @@
+import time
 import json
 import importlib.util
 from pathlib import Path
@@ -50,7 +51,7 @@ def test_sensors_set_completion_ack_fallback_when_build_ack_fails():
     mqtt_mod, handlers = _load_modules()
     c = DummyClient()
     topic = f"hubs/{c.client_id}/v1/cmd/sensors/set"
-    cmd = {"command_id": "s1", "payload": {"sensors": [{"entity_id": "sensor.x", "state": "on"}]}}
+    cmd = {"command_id": "s1", "timestamp": time.time(), "payload": {"sensors": [{"entity_id": "sensor.x", "state": "on"}]}}
     payload = json.dumps(cmd)
     msg = Msg(topic)
 

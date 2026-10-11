@@ -1,3 +1,4 @@
+import time
 import json
 from pathlib import Path
 import importlib.util
@@ -61,7 +62,7 @@ def test_handle_sensors_poll_no_ha():
     handlers.handle_message(
         c,
         msg,
-        '{"payload": {"sensors": ["temperature"]}}',
+        json.dumps({"command_id": "np1", "timestamp": time.time(), "payload": {"sensors": ["temperature"]}}),
         fetch_sensors=lambda a, b: [],
         build_telemetry=mqtt_mod.build_telemetry,
         build_vault_payload=mqtt_mod.build_vault_payload,
@@ -75,7 +76,7 @@ def test_handle_sensors_set_no_ha_fails():
     mqtt_mod, handlers = _load_modules()
     c = DummyClient()
     topic = f"hubs/{c.client_id}/v1/cmd/sensors/set"
-    cmd = {"command_id": "cmd1", "payload": {"sensors": {"sensor.x": "on"}}}
+    cmd = {"command_id": "cmd1", "timestamp": time.time(), "payload": {"sensors": {"sensor.x": "on"}}}
     msg = DummyMsg(topic, json.dumps(cmd).encode("utf-8"))
     handlers.handle_message(
         c,

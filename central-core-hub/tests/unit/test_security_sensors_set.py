@@ -5,6 +5,7 @@ other shape used to be turned into POST /api/states/<id> calls with the admin
 token, and `<id>` could be `../services/...`.
 """
 
+import time
 import json
 import types
 
@@ -81,7 +82,7 @@ def _states_fetcher(req):
 
 def _send(c, payload, req):
     msg = types.SimpleNamespace(topic="hubs/hub1/v1/cmd/sensors/set", retain=False)
-    body = json.dumps({"command_id": "c1", "action": "sensors/set", "payload": payload})
+    body = json.dumps({"command_id": "c1", "timestamp": time.time(), "action": "sensors/set", "payload": payload})
     handlers.handle_message(c, msg, body, _states_fetcher(req), None, None, req)
 
 

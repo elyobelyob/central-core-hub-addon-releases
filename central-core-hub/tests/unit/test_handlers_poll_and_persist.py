@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -56,7 +57,7 @@ def test_poll_with_no_matching_device_classes():
 
     # request device_class 'temperature' which none of the sensors have
     msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/sensors/poll"})
-    payload = {"command_id": "p1", "payload": {"sensors": ["temperature"]}}
+    payload = {"command_id": "p1", "timestamp": time.time(), "payload": {"sensors": ["temperature"]}}
 
     handlers.handle_message(client, msg, json.dumps(payload), fetch_sensors, None, None)
 
@@ -86,7 +87,7 @@ def test_set_string_list_persists_selected(tmp_path):
 
     try:
         msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/sensors/set"})
-        payload = {"command_id": "s1", "payload": {"sensors": ["sensor.x", "sensor.y"]}}
+        payload = {"command_id": "s1", "timestamp": time.time(), "payload": {"sensors": ["sensor.x", "sensor.y"]}}
 
         # fetch_sensors returns matching entities so monitor_telemetry constructed
         def fetch_sensors(url, token):

@@ -1,3 +1,4 @@
+import time
 import json
 import importlib.util
 import pathlib
@@ -66,7 +67,7 @@ def test_ack_includes_names(tmp_path):
     c = DummyClient()
     topic = f"hubs/{c.client_id}/v1/cmd/sensors/set"
     selected = ["sensor.x", "sensor.y"]
-    cmd = {"command_id": "cmd-xyz", "payload": {"sensors": selected}}
+    cmd = {"command_id": "cmd-xyz", "timestamp": time.time(), "payload": {"sensors": selected}}
     msg = Msg(topic)
 
     # Ensure no pre-existing file

@@ -1,3 +1,4 @@
+import time
 import json
 import importlib.util
 from pathlib import Path
@@ -46,7 +47,7 @@ def test_registry_set_auth_failure_publishes_failed_ack():
     c = DummyClient()
     topic = f"hubs/{c.client_id}/v1/cmd/registry/set"
     # payload has wrong token
-    cmd = {"command_id": "r1", "payload": {"entries": [], "token": "wrong"}}
+    cmd = {"command_id": "r1", "timestamp": time.time(), "payload": {"entries": [], "token": "wrong"}}
     payload = json.dumps(cmd)
     msg = Msg(topic)
 

@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -44,7 +45,7 @@ def test_config_ack_fallback_when_build_ack_raises():
 
     client.addon_updater = lambda: Updater()
     msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/config/update"})
-    payload = {"command_id": "cfg1", "payload": {"version": "1.2.3"}}
+    payload = {"command_id": "cfg1", "timestamp": time.time(), "payload": {"version": "1.2.3"}}
 
     handlers.handle_message(client, msg, json.dumps(payload), None, None, None)
     handlers.wait_for_update_worker(timeout=5)

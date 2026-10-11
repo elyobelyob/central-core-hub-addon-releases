@@ -1,3 +1,4 @@
+import time
 import json
 import importlib.util
 import os
@@ -73,7 +74,7 @@ def test_ack_publish_raises_but_processing_continues(monkeypatch):
     c = RecordingClient()
     # make _publish raise for ack_topic only
     # ack topic will be the v1 ack topic
-    cmd = {"command_id": "ack1", "action": "sensors/poll", "payload": {"sensors": ["temperature"]}}
+    cmd = {"command_id": "ack1", "timestamp": time.time(), "action": "sensors/poll", "payload": {"sensors": ["temperature"]}}
     # ack topic will be the v1 ack topic; compute via shared helper
     ack_topic = build_ack_for_client_id(c.client_id, cmd["action"], cmd["command_id"])
     c.raise_on = [ack_topic]
@@ -105,7 +106,7 @@ def test_set_write_form_without_ha_config_reports_failed(monkeypatch):
     c = RecordingClient()
     c.ha_api_url = None
     c.ha_api_token = None
-    cmd = {"command_id": "set1", "action": "sensors/set", "payload": {"sensors": [{"entity_id": "sensor.x", "state": "2"}]}}
+    cmd = {"command_id": "set1", "timestamp": time.time(), "action": "sensors/set", "payload": {"sensors": [{"entity_id": "sensor.x", "state": "2"}]}}
     msg = DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(cmd).encode("utf-8"))
     handlers.handle_message(c, msg, msg.payload.decode("utf-8"), lambda u, t: [], None, None, None)
 
@@ -120,7 +121,7 @@ def test_set_write_form_never_reaches_requests(monkeypatch):
     handlers = _load_handlers()
     c = RecordingClient()
     requests = _RecordingRequests()
-    cmd = {"command_id": "set2", "action": "sensors/set", "payload": {"sensors": [{"entity_id": "sensor.y", "state": "3"}]}}
+    cmd = {"command_id": "set2", "timestamp": time.time(), "action": "sensors/set", "payload": {"sensors": [{"entity_id": "sensor.y", "state": "3"}]}}
     msg = DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(cmd).encode("utf-8"))
     handlers.handle_message(c, msg, msg.payload.decode("utf-8"), lambda u, t: [], None, None, requests)
 

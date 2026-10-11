@@ -1,3 +1,4 @@
+import time
 import json
 import importlib.util
 from pathlib import Path
@@ -70,6 +71,7 @@ def test_set_accepts_string_list_and_publishes_reminder(monkeypatch):
 
     command = {
         "command_id": "set123",
+        "timestamp": time.time(),
         "action": "sensors/set",
         "payload": {
             "sensors": [

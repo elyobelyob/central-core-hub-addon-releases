@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -40,7 +41,7 @@ class Msg:
 def test_sensors_set_persist_tempfile_raises(monkeypatch):
     client = DummyClient()
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
-    payload = json.dumps({"command_id": "c-persistfail", "payload": {"sensors": ["sensor.a"]}})
+    payload = json.dumps({"command_id": "c-persistfail", "timestamp": time.time(), "payload": {"sensors": ["sensor.a"]}})
 
     # Provide fetch_sensors so monitor telemetry is built
     def fetch_sensors(url, token):
