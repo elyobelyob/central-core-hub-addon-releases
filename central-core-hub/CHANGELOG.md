@@ -1,5 +1,32 @@
 # Changelog
 
+## [2.4.0] - 2026-10-11
+
+Security and reliability hardening. No configuration changes are needed.
+
+- Store and confirm: retained acknowledgements are ignored, and an acknowledgement must name this
+  hub's outbox and can only confirm readings the hub has actually sent. The outbox starts a new id
+  each time the add-on starts (readings still waiting are kept and sent again under it; nothing is
+  deleted), so restoring a Home Assistant backup can no longer make the vault drop new readings as
+  duplicates. A restored backup is also detected while running. A reading paho queued while the
+  connection was down now counts as sent.
+- Commands from the vault must carry a command id and a timestamp (the vault already sends both),
+  so old or repeated commands are refused. Reply topics are always validated.
+- A client id that isn't a safe MQTT topic level now stops the add-on with a clear log message,
+  instead of subscribing to other hubs' commands.
+- Home Assistant connection: the address is checked on every connection rather than once at start,
+  so a changed address (DHCP) is followed, and a name that doesn't resolve yet at boot (after a power
+  cut) is retried instead of switching Home Assistant off until the next restart. IPv4 is preferred.
+  A bad port in `ha_api_url` now only switches the Home Assistant link off; MQTT keeps running.
+- Status telemetry now includes `ha_connected` and `ha_last_event_at`, so the vault can tell when a
+  hub is online but no longer hearing from Home Assistant.
+- Tokens, passwords and keys are blanked from debug-log previews.
+- Smaller image: tools not used at run time are no longer installed.
+
+Upgrade notes: no vault change is needed first; the vault already sends command ids and timestamps
+and names the outbox in its acknowledgements. After updating, the vault logs one "new outbox" line
+per hub restart; that is expected.
+
 ## [2.3.0] - 2026-10-02
 
 Store and confirm: the hub keeps every reading until the vault confirms it stored it
