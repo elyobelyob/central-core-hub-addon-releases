@@ -142,3 +142,23 @@ def test_main_exits_instead_of_connecting_with_an_unsafe_id(mc, monkeypatch):
         mc.main()
     assert stop.value.code == 1
     assert ran == []
+
+
+def test_a_newer_shared_package_builds_the_wildcard_subscription_with_build_subscription(mc, monkeypatch):
+    """central_core_mqtt_shared after this release refuses "+" in build_topic."""
+    real = mc.topics
+
+    def strict(template, **kw):
+        assert "+" not in kw.values(), "build_topic must not be given a wildcard"
+        return real.build_topic(template, **kw)
+
+    class Newer:
+        build_topic = staticmethod(strict)
+        build_subscription = staticmethod(real.build_topic)
+
+        def __getattr__(self, name):
+            return getattr(real, name)
+
+    monkeypatch.setattr(mc, "topics", Newer())
+    c = mc.CentralCoreClient({"client_id": "demo-home-001"})
+    assert c.cmd_sub_topic == "hubs/demo-home-001/v1/cmd/+/+"
