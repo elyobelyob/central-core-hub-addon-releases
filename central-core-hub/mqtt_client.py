@@ -336,6 +336,31 @@ CLIENT_ID_FILE = pathlib.Path(os.environ.get("CLIENT_ID_FILE") or "/data/client_
 # Shipped as the default in earlier versions, so many hubs may share it.
 SHARED_DEFAULT_CLIENT_ID = "home-assistant"
 _GENERIC_HOSTNAMES = {"", "localhost", "homeassistant", "home-assistant", "hassio", "supervisor"}
+
+# The client id (the vault's hub id) is one MQTT topic level: `hubs/<id>/v1/cmd/+/+`.
+# A "+" or "#" in it would subscribe the hub to every hub's commands, and a "/"
+# would reach into other topics. This is the rule of
+# central_core_mqtt_shared.topics.validate_hub_id; "broadcast" is the broadcast namespace.
+_CLIENT_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+_RESERVED_CLIENT_IDS = frozenset({"broadcast"})
+
+
+class InvalidClientId(ValueError):
+    """The client id (hub id) is not safe to put in an MQTT topic."""
+
+
+def validate_client_id(value):
+    """Return `value` if it is a valid hub id, else raise InvalidClientId."""
+    if isinstance(value, str) and _CLIENT_ID_RE.fullmatch(value) and value not in _RESERVED_CLIENT_IDS:
+        return value
+    shown = repr(value)
+    if len(shown) > 80:
+        shown = shown[:77] + "..."
+    raise InvalidClientId(
+        f"client_id {shown} is not a valid hub id (letters, digits, '-', '_' or '.', starting with a letter or "
+        "digit, at most 64 characters, not 'broadcast')"
+    )
+
 MQTT_OPTIONS_ENV = "MQTT_OPTIONS_PATH"
 SENSOR_REGISTRY = pathlib.Path(__file__).parent / "SENSOR_REGISTRY.yaml"
 # Inbound commands wait here for the worker. Bounded so a flood of messages
@@ -1071,16 +1096,25 @@ class CentralCoreClient:
         # Handle certificate content vs paths
         self._setup_cert_files()
         configured_id = str(options.get("client_id") or "").strip()
-        if configured_id:
-            self.client_id = configured_id
-            if configured_id == SHARED_DEFAULT_CLIENT_ID:
-                _log(
-                    f"WARNING: client_id is the shared default {configured_id!r}; hubs using it receive "
-                    "each other's commands. Set a unique client_id (the vault's hub id)."
-                )
-        else:
-            self.client_id = _derive_client_id(self.mqtt_cert)
+        derived = not configured_id
+        candidate = configured_id or _derive_client_id(self.mqtt_cert)
+        # Fail closed: an id such as "+" would subscribe this hub to every hub's commands.
+        try:
+            self.client_id = validate_client_id(candidate)
+        except InvalidClientId as exc:
+            where = "derived from the certificate or host name" if derived else "set in the add-on options"
+            _log(
+                f"ERROR: {exc} ({where}). Not starting: set client_id to this hub's id from the vault.",
+                sys.stderr,
+            )
+            raise
+        if derived:
             _log(f"client_id not set; using {self.client_id!r}")
+        elif configured_id == SHARED_DEFAULT_CLIENT_ID:
+            _log(
+                f"WARNING: client_id is the shared default {configured_id!r}; hubs using it receive "
+                "each other's commands. Set a unique client_id (the vault's hub id)."
+            )
         cert_cn = _certificate_common_name(self.mqtt_cert)
         if cert_cn and cert_cn != self.client_id:
             _log(f"WARNING: client_id {self.client_id!r} differs from the client certificate CN {cert_cn!r}")
@@ -2598,7 +2632,10 @@ def main():
         k: ("[REDACTED]" if "token" in k or "password" in k or "cert" in k else v) for k, v in options.items()
     }
     _log(f"Loaded options: {safe_options}")
-    c = CentralCoreClient(options)
+    try:
+        c = CentralCoreClient(options)
+    except InvalidClientId:
+        sys.exit(1)  # already logged; a hub with an unsafe id must not connect
     _log(f"Created client with mqtt_host={c.mqtt_host}, mqtt_port={c.mqtt_port}")
     if not c.mqtt_host:
         _log(
