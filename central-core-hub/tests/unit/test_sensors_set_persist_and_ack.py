@@ -1,3 +1,4 @@
+import time
 import json
 import importlib.util
 import pathlib
@@ -67,7 +68,7 @@ def test_sensors_set_persists_and_returns_ack(tmp_path):
     c = DummyClient()
     topic = f"hubs/{c.client_id}/v1/cmd/sensors/set"
     selected = ["sensor.x", "sensor.y"]
-    cmd = {"command_id": "cmd-123", "payload": {"sensors": selected}}
+    cmd = {"command_id": "cmd-123", "timestamp": time.time(), "payload": {"sensors": selected}}
     msg = Msg(topic)
 
     # Ensure no pre-existing file

@@ -2,6 +2,8 @@ import argparse
 import time
 import sys
 import json
+import uuid
+from datetime import datetime, timezone
 import paho.mqtt.client as mqtt
 
 
@@ -31,10 +33,16 @@ def trigger_update(broker, port, username, password, client_id, version):
         time.sleep(1)  # wait for connection
 
         topic = f"hubs/{client_id}/v1/cmd/config/update"
-        payload = {"version": version} if version else {}
+        # The hub refuses a command without a command_id and a fresh timestamp.
+        command = {
+            "command_id": f"manual-{uuid.uuid4().hex[:16]}",
+            "action": "config/update",
+            "payload": {"version": version} if version and version != "latest" else {},
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
 
-        print(f"Publishing update command to {topic} with payload {payload}")
-        msg_info = client.publish(topic, json.dumps(payload), qos=1)
+        print(f"Publishing update command to {topic}: {command}")
+        msg_info = client.publish(topic, json.dumps(command), qos=1)
         msg_info.wait_for_publish()
 
         time.sleep(1)  # ensure sent

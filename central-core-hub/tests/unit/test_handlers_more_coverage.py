@@ -1,3 +1,4 @@
+import time
 import json
 import importlib.util
 from types import SimpleNamespace
@@ -252,14 +253,14 @@ def test_set_dict_with_off_state_is_refused_and_list_reports_raw_state():
     requests = _RecordingRequests()
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
 
-    payload = json.dumps({"command_id": "off1", "payload": {"sensors": {"sensor.off": "off"}}})
+    payload = json.dumps({"command_id": "off1", "timestamp": time.time(), "payload": {"sensors": {"sensor.off": "off"}}})
     handlers.handle_message(client, make_msg(topic), payload, None, None, None, requests)
     assert requests.calls == []
     assert _secure_final_ack(client.publishes)["result"]["reason"] == "invalid_payload"
     assert not any(t == client.preferred_sensors_topic for t, _, _ in client.publishes)
 
     # the list form reports HA's raw state unchanged ("off" stays "off")
-    payload = json.dumps({"command_id": "off2", "payload": {"sensors": ["sensor.off"]}})
+    payload = json.dumps({"command_id": "off2", "timestamp": time.time(), "payload": {"sensors": ["sensor.off"]}})
     handlers.handle_message(
         client,
         make_msg(topic),

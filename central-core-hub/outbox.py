@@ -6,8 +6,9 @@ Store and confirm (central-core-mqtt-shared protocol 1.1):
    SQLite transaction, with the next sequence number (`seq`), the time the
    reading happened (`event_ts`, Home Assistant's `last_changed` in UTC) and
    the time the hub queued it (`queued_at`). Then it is sent at QoS 1.
-2. The vault publishes `hubs/<id>/v1/ack {"upto": N}` once it has committed
-   everything up to N; `ack()` deletes those rows.
+2. The vault publishes `hubs/<id>/v1/ack {"upto": N, "outbox_id": ...}` once it
+   has committed everything up to N; `ack()` deletes those rows, but only for
+   this outbox's id and never past the highest `seq` the hub has sent.
 3. On (re)connect everything still here is resent, oldest first, in batches
    (`due()` / `mark_sent()`); the caller rate-limits.
 
@@ -35,6 +36,14 @@ from typing import Any, Callable, Optional
 
 DEFAULT_MAX_AGE_S = 7 * 24 * 3600
 DEFAULT_MAX_BYTES = 50 * 1024 * 1024
+# How often a new outbox id may be started (see rotate_outbox_id), so a forged
+# acknowledgement cannot make the hub resend its backlog over and over: once an
+# hour on ambiguous evidence (an acknowledgement covering readings this outbox
+# has not sent), once a minute on clear evidence (one past every seq it has
+# ever numbered). Measured on a monotonic clock, so a corrected wall clock
+# cannot block it.
+ROTATE_MIN_INTERVAL_S = 3600
+ROTATE_MIN_INTERVAL_CLEAR_S = 60
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -51,6 +60,31 @@ CREATE TABLE IF NOT EXISTS outbox (
     last_sent REAL
 );
 """
+
+
+class AckRefused(ValueError):
+    """A store acknowledgement that cannot be believed; it deletes nothing."""
+
+    outbox_behind = False
+    unambiguous = False
+
+
+class AckBeyondSent(AckRefused):
+    """The acknowledgement names this outbox but covers readings it has not sent.
+
+    `outbox_behind` is set when the vault confirms seqs this outbox has numbered
+    but never sent (other than ones being sent right now), or seqs past every
+    one it has ever numbered (`unambiguous`). The usual cause is a restored Home
+    Assistant backup: it brings back an old outbox (same id, lower seqs) while
+    the vault has already stored those seqs under that id, so the vault would
+    take new readings for duplicates and the hub would delete them unsent. The
+    cure is a new outbox id (rotate_outbox_id).
+    """
+
+    def __init__(self, message, outbox_behind=False, unambiguous=False):
+        super().__init__(message)
+        self.outbox_behind = outbox_behind
+        self.unambiguous = unambiguous
 
 
 def utc_iso(value: Any = None) -> str:
@@ -81,13 +115,19 @@ class SqliteOutbox:
         max_bytes: int = DEFAULT_MAX_BYTES,
         log: Optional[Callable[[str], None]] = None,
         clock: Callable[[], float] = time.time,
+        monotonic: Callable[[], float] = time.monotonic,
     ):
         self.path = Path(path)
         self.max_age_s = float(max_age_s)
         self.max_bytes = int(max_bytes)
         self._log = log or (lambda _msg: None)
         self._clock = clock
+        self._monotonic = monotonic
         self._lock = threading.Lock()
+        # Seqs published but not yet marked sent: an acknowledgement may race them.
+        self._in_flight: set[int] = set()
+        # When the last new outbox id was started (monotonic; this process only).
+        self._last_rotation: Optional[float] = None
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(self.path), check_same_thread=False, isolation_level=None)
         self._db.execute("PRAGMA journal_mode=WAL")
@@ -162,19 +202,52 @@ class SqliteOutbox:
         self.enforce_caps(now)
         return seq, stored
 
-    def ack(self, upto: int, outbox_id: Optional[str] = None) -> int:
+    def highest_sent_seq(self) -> int:
+        """The highest `seq` this hub has actually sent (0 if none), counting
+        readings already deleted: the vault cannot have stored a reading that
+        was never sent, so no acknowledgement can reach past this."""
+        with self._lock:
+            return self._highest_sent_locked()
+
+    def _highest_sent_locked(self) -> int:
+        row = self._db.execute("SELECT MAX(seq) FROM outbox WHERE sent_count > 0").fetchone()
+        return max(row[0] or 0, self._meta_int("last_acked_seq", 0))
+
+    def ack(self, upto: int, outbox_id: str) -> int:
         """Delete every reading up to and including `upto`; returns how many.
 
-        An acknowledgement naming another outbox (the vault answering for a
-        database this hub no longer has) is ignored.
+        An acknowledgement is believed only if it names this outbox (`outbox_id`
+        is required) and covers only readings this hub has sent (or is sending
+        right now). Anything else raises `AckRefused` and deletes nothing, so a
+        forged or stale message cannot delete readings the vault never got.
         """
-        try:
-            upto = int(upto)
-        except (TypeError, ValueError):
-            return 0
+        if isinstance(upto, bool) or not isinstance(upto, int) or upto < 0:
+            raise AckRefused("upto must be a non-negative integer")
+        if not isinstance(outbox_id, str) or not outbox_id:
+            raise AckRefused("no outbox_id")
         with self._lock:
-            if outbox_id is not None and str(outbox_id) != self._meta("outbox_id"):
-                return 0
+            if outbox_id != self._meta("outbox_id"):
+                raise AckRefused("it is for another outbox")
+            numbered = self._meta_int("next_seq", 1) - 1
+            if upto > numbered:
+                raise AckBeyondSent(
+                    f"upto {upto} is beyond every seq this outbox has numbered ({numbered})",
+                    outbox_behind=True,
+                    unambiguous=True,
+                )
+            flying = sorted(self._in_flight)
+            query = "SELECT COUNT(*), MIN(seq), MAX(seq) FROM outbox WHERE seq <= ? AND sent_count = 0"
+            if flying:
+                query += f" AND seq NOT IN ({','.join('?' * len(flying))})"
+            count, low, high = self._db.execute(query, [upto, *flying]).fetchone()
+            if count:
+                raise AckBeyondSent(
+                    f"upto {upto} covers {count} readings this outbox has not sent (seq {low}-{high})",
+                    outbox_behind=True,
+                )
+            sent = max(self._highest_sent_locked(), flying[-1] if flying else 0)
+            if upto > sent:  # only seqs that were dropped (caps) before they were sent
+                raise AckBeyondSent(f"upto {upto} is beyond the highest seq sent ({sent})")
             self._db.execute("BEGIN IMMEDIATE")
             try:
                 cur = self._db.execute("DELETE FROM outbox WHERE seq <= ?", (upto,))
@@ -187,16 +260,91 @@ class SqliteOutbox:
                 raise
             return cur.rowcount or 0
 
-    def mark_sent(self, seqs, when: Optional[float] = None) -> None:
+    def start_new_id(self) -> tuple[str, str]:
+        """Start a new outbox id now, unconditionally (the add-on does this at
+        every start); returns (old_id, new_id).
+
+        A restored Home Assistant backup brings back an old outbox, possibly
+        with nothing in it, whose seqs the vault has already seen under its id:
+        a fresh id per start means the vault never takes new readings for those.
+        Every kept reading is marked never sent and is resent under the new id
+        (nothing is deleted; `seq` keeps counting up). One short transaction.
+        """
+        with self._lock:
+            return self._rekey_locked(count=False)
+
+    def rotation_allowed(self, unambiguous: bool = False) -> bool:
+        """Whether rotate_outbox_id would act now (the rate limit), without acting."""
+        interval = ROTATE_MIN_INTERVAL_CLEAR_S if unambiguous else ROTATE_MIN_INTERVAL_S
+        with self._lock:
+            return self._last_rotation is None or self._monotonic() - self._last_rotation >= interval
+
+    def rotate_outbox_id(self, unambiguous: bool = False, expected_id: Optional[str] = None) -> Optional[tuple[str, str]]:
+        """Give this outbox a new id because an acknowledgement showed the vault is
+        ahead of it (see AckBeyondSent); everything kept is resent under the new id.
+
+        Returns (old_id, new_id), or None when the outbox no longer has
+        `expected_id` (the id the evidence was about: it has moved on already),
+        or a new id was started too recently: ROTATE_MIN_INTERVAL_S, or
+        ROTATE_MIN_INTERVAL_CLEAR_S when `unambiguous`. The attempt counts even
+        if it fails, so a failing disk is not retried on every acknowledgement.
+        """
+        now = self._monotonic()
+        interval = ROTATE_MIN_INTERVAL_CLEAR_S if unambiguous else ROTATE_MIN_INTERVAL_S
+        with self._lock:
+            if expected_id is not None and expected_id != self._meta("outbox_id"):
+                return None
+            if self._last_rotation is not None and now - self._last_rotation < interval:
+                return None
+            self._last_rotation = now
+            return self._rekey_locked(count=True)
+
+    def _rekey_locked(self, count: bool) -> tuple[str, str]:
+        old = str(self._meta("outbox_id"))
+        new = "ob-" + secrets.token_hex(8)
+        self._db.execute("BEGIN IMMEDIATE")
+        try:
+            self._db.execute("UPDATE outbox SET sent_count = 0, last_sent = NULL")
+            self._set_meta("outbox_id", new)
+            self._set_meta("last_acked_seq", 0)  # nothing is acknowledged under the new id
+            if count:
+                self._set_meta("rotated_epoch", self._clock())  # for the record only
+                self._set_meta("rotations_total", self._meta_int("rotations_total", 0) + 1)
+            self._db.execute("COMMIT")
+        except Exception:
+            self._db.execute("ROLLBACK")
+            raise
+        self._in_flight.clear()
+        return old, new
+
+    def begin_send(self, seqs) -> None:
+        """These seqs are about to be published: an acknowledgement may arrive
+        before mark_sent, and must not be taken for one covering unsent rows."""
+        with self._lock:
+            self._in_flight.update(int(s) for s in seqs)
+
+    def end_send(self, seqs) -> None:
+        """The publish of these seqs failed: they were not sent."""
+        with self._lock:
+            self._in_flight.difference_update(int(s) for s in seqs)
+
+    def mark_sent(self, seqs, when: Optional[float] = None, outbox_id: Optional[str] = None) -> bool:
+        """Record that `seqs` were sent. With `outbox_id` (the id they were sent
+        under), nothing is recorded if the outbox has had a new id since: they
+        were sent under the old one and must be sent again."""
         seqs = [int(s) for s in seqs]
         if not seqs:
-            return
+            return False
         when = self._clock() if when is None else when
         with self._lock:
+            self._in_flight.difference_update(seqs)
+            if outbox_id is not None and outbox_id != self._meta("outbox_id"):
+                return False
             self._db.executemany(
                 "UPDATE outbox SET sent_count = sent_count + 1, last_sent = ? WHERE seq = ?",
                 [(when, s) for s in seqs],
             )
+            return True
 
     def mark_unsent(self) -> None:
         """Make every reading due again (after a reconnect: resend them all)."""
@@ -265,12 +413,15 @@ class SqliteOutbox:
                     "WHERE last_sent IS NULL OR last_sent < ? ORDER BY seq LIMIT ?",
                     (sent_before, int(limit)),
                 ).fetchall()
+            current = self._meta("outbox_id")
         out = []
         for seq, rtype, topic, event_ts, queued_at, payload in rows:
             try:
                 body = json.loads(payload)
             except ValueError:
                 body = {}
+            if isinstance(body, dict) and "outbox_id" in body:
+                body["outbox_id"] = current  # a reading kept from before a new id is resent under it
             out.append({"seq": seq, "type": rtype, "topic": topic, "event_ts": event_ts,
                         "queued_at": queued_at, "payload": body})
         return out
@@ -301,6 +452,7 @@ class SqliteOutbox:
                 "last_acked_seq": self._meta_int("last_acked_seq", 0),
                 "next_seq": self._meta_int("next_seq", 1),
                 "dropped_total": self._meta_int("dropped_total", 0),
+                "rotations_total": self._meta_int("rotations_total", 0),
                 "outbox_id": self._meta("outbox_id"),
             }
 

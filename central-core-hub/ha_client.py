@@ -238,6 +238,12 @@ class HAWebSocketListener:
     ):
         self.ha_api_url = ha_api_url
         self.ha_api_token = ha_api_token
+        # (ok, reason, url) for one connection; the client sets it to
+        # ha_safety.pin_token_url so every (re)connect is checked and pinned anew.
+        self.url_guard = None
+        self._refused_reason = None
+        # UTC ISO time of the last event Home Assistant sent (None: none yet).
+        self.last_event_at = None
         self.on_event = on_event
         self.on_ha_version = on_ha_version
         # Called with the list of current states when a subscription starts
@@ -592,6 +598,25 @@ class HAWebSocketListener:
             ws_url = self._ws_url()
             if not ws_url:
                 return
+            guard = getattr(self, "url_guard", None)
+            if guard is not None:
+                try:
+                    ok, why, ws_url = guard(ws_url)
+                except Exception as exc:
+                    ok, why = False, type(exc).__name__
+                if not ok:
+                    # Not now (for example Home Assistant's name does not resolve to
+                    # this machine at the moment): log once, keep trying.
+                    if why != self._refused_reason:
+                        self._refused_reason = why
+                        self._log(f"WARNING: HA WS not connecting: {why}")
+                    if self._stop.wait(backoff):
+                        break
+                    backoff = min(backoff * 2, max_backoff)
+                    continue
+                if "ignored" in why and why != self._refused_reason:
+                    self._log(f"HA WS: {why}")  # some answers were not this machine: said once
+                self._refused_reason = why if "ignored" in why else None
             self._log(f"HA WS connecting to {ws_url}")
             if websocket is None or getattr(websocket, "create_connection", None) is None:
                 self._log("websocket client not available")
@@ -705,6 +730,8 @@ class HAWebSocketListener:
                         continue
                     if msg.get("type") != "event":
                         continue
+                    # Home Assistant is alive and sending: for the hub's status telemetry.
+                    self.last_event_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                     event = msg.get("event") or {}
                     if "data" not in event:
                         # subscribe_entities: only the live subscription counts

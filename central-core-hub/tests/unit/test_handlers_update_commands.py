@@ -41,7 +41,7 @@ class FakeClient:
 
 def _send(client, action, payload=None, wait=True):
     msg = SimpleNamespace(topic=f"hubs/hub-x/v1/cmd/{action}")
-    body = json.dumps({"command_id": "c1", "action": action, "payload": payload or {}})
+    body = json.dumps({"command_id": "c1", "timestamp": time.time(), "action": action, "payload": payload or {}})
     handlers.handle_message(client, msg, body, None, None, None, requests=None)
     if wait:
         handlers.wait_for_update_worker(timeout=5)
@@ -85,7 +85,7 @@ def test_no_home_assistant_listener():
 
 
 def test_started_reply_is_delivered_before_the_install_runs():
-    # Live on Hollybank, Home Assistant stopped the add-on for the install
+    # On a live hub (Larkspur), Home Assistant stopped the add-on for the install
     # before its "started" reply left the machine.
     events = []
 
@@ -149,7 +149,7 @@ def test_second_order_while_one_runs_is_refused_not_run():
     client = FakeClient(updater)
     _send(client, "config/update", wait=False)
     msg = SimpleNamespace(topic="hubs/hub-x/v1/cmd/config/update")
-    handlers.handle_message(client, msg, json.dumps({"command_id": "c2", "action": "config/update"}),
+    handlers.handle_message(client, msg, json.dumps({"command_id": "c2", "timestamp": time.time(), "action": "config/update"}),
                             None, None, None, requests=None)
     second = [p for t, p in client.published if t.endswith("/c2") and p["status"] != "acknowledged"]
     assert second and second[-1]["status"] == "failed"

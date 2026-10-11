@@ -11,6 +11,10 @@ on:
       - 'docs/**'
   workflow_dispatch:
 
+# The checks only read the code.
+permissions:
+  contents: read
+
 # A newer push to the same PR cancels the run for the older one.
 concurrency:
   group: ci-${{ github.head_ref || github.ref }}

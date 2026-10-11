@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -51,7 +52,7 @@ def test_is_entity_allowed_exception_fails_closed(monkeypatch):
 
     client = DummyClient()
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/poll"
-    payload = json.dumps({"command_id": "c-allow", "payload": {"sensors": ["temperature"]}})
+    payload = json.dumps({"command_id": "c-allow", "timestamp": time.time(), "payload": {"sensors": ["temperature"]}})
 
     def fetch_sensors(url, token):
         return [{"entity_id": "sensor.x", "state": "9", "attributes": {"device_class": "temperature"}}]

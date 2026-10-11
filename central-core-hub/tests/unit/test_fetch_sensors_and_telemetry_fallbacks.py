@@ -1,3 +1,5 @@
+import json
+import time
 import importlib.util
 from pathlib import Path
 from typing import Any, cast
@@ -104,7 +106,10 @@ def test_on_message_falls_back_to_file_load(monkeypatch):
 
     # call on_message which should import handlers via file and call handle_message
     msg = types.SimpleNamespace(
-        topic=f"hubs/{c.client_id}/v1/cmd/sensors/poll", payload=b'{"payload": {"sensors": ["temperature"]}}'
+        topic=f"hubs/{c.client_id}/v1/cmd/sensors/poll",
+        payload=json.dumps(
+            {"command_id": "fb1", "timestamp": time.time(), "payload": {"sensors": ["temperature"]}}
+        ).encode(),
     )
     c.on_message(None, None, msg)
 

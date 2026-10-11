@@ -200,6 +200,27 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "phone_guard: use the real phone guard (no Home Assistant registry means nothing is sent)"
     )
+    config.addinivalue_line("markers", "real_resolver: let ha_safety._resolve_host call getaddrinfo")
+
+
+@_pytest.fixture(autouse=True)
+def _no_real_dns(request, monkeypatch):
+    """Unit tests never look names up (a .local name can take seconds over mDNS):
+    every Home Assistant host name is unresolvable unless a test says otherwise."""
+    if request.node.get_closest_marker("real_resolver"):
+        yield
+        return
+    try:
+        import ha_safety
+    except Exception:
+        yield
+        return
+
+    def no_dns(host):
+        raise OSError(f"no DNS in unit tests ({host})")
+
+    monkeypatch.setattr(ha_safety, "_resolve_host", no_dns)
+    yield
 
 
 @_pytest.fixture(autouse=True)

@@ -1,3 +1,4 @@
+import time
 import json
 from pathlib import Path
 import importlib.util
@@ -39,7 +40,7 @@ def test_poll_with_requested_sensors_filters(monkeypatch):
         {"entity_id": "sensor.c", "state": "3", "attributes": {"device_class": "temperature"}},
     ]
     # Request only door device class
-    cmd = {"command_id": "cmdx", "payload": {"sensors": ["door"]}}
+    cmd = {"command_id": "cmdx", "timestamp": time.time(), "payload": {"sensors": ["door"]}}
     msg_payload = json.dumps(cmd)
     msg = type(
         "M",
@@ -76,7 +77,7 @@ def test_set_handles_post_error_and_records_failed(monkeypatch):
     handlers = _load_handlers()
     c = DummyClient()
     # simulate one sensor to set
-    cmd = {"command_id": "cmdfail", "payload": {"sensors": {"sensor.bad": "0"}}}
+    cmd = {"command_id": "cmdfail", "timestamp": time.time(), "payload": {"sensors": {"sensor.bad": "0"}}}
     msg_payload = json.dumps(cmd)
     msg = type(
         "M",
@@ -123,7 +124,7 @@ def test_set_list_includes_attributes_and_dict_form_is_refused(monkeypatch):
     msg = type("M", (), {"topic": topic})
     req = _RecordingRequests()
 
-    dict_cmd = json.dumps({"command_id": "cmdattr", "payload": {"sensors": {"sensor.attr": "on"}}})
+    dict_cmd = json.dumps({"command_id": "cmdattr", "timestamp": time.time(), "payload": {"sensors": {"sensor.attr": "on"}}})
     handlers.handle_message(c, msg, dict_cmd, lambda a, b: [], lambda x: "{}", lambda x: None, requests=req)
     assert req.calls == []
     assert _secure_final_ack(c.published)["result"]["reason"] == "invalid_payload"
@@ -131,7 +132,7 @@ def test_set_list_includes_attributes_and_dict_form_is_refused(monkeypatch):
     def fetch(a, b):
         return [{"entity_id": "sensor.attr", "state": "on", "attributes": {"friendly_name": "Attr", "access_token": "t"}}]
 
-    list_cmd = json.dumps({"command_id": "cmdattr2", "payload": {"sensors": ["sensor.attr"]}})
+    list_cmd = json.dumps({"command_id": "cmdattr2", "timestamp": time.time(), "payload": {"sensors": ["sensor.attr"]}})
     handlers.handle_message(c, msg, list_cmd, fetch, lambda x: "{}", lambda x: None, requests=req)
     assert req.calls == []
     res = _secure_final_ack(c.published)["result"]

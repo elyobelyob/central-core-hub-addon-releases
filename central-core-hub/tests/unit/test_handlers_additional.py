@@ -1,3 +1,4 @@
+import time
 import json
 from pathlib import Path
 import importlib.util
@@ -72,7 +73,7 @@ def test_handle_set_with_dict_payload_and_readback(monkeypatch):
         def get(self, url, headers=None, timeout=10):
             return R()
 
-    cmd = {"command_id": "d1", "payload": {"sensors": {"sensor.x": "on"}}}
+    cmd = {"command_id": "d1", "timestamp": time.time(), "payload": {"sensors": {"sensor.x": "on"}}}
     msg = type(
         "M",
         (),
@@ -106,7 +107,7 @@ def test_handle_poll_boolean_and_numeric_coercion():
         {"entity_id": "sensor.e", "state": "3.14", "attributes": {"device_class": "temperature"}},
         {"entity_id": "sensor.f", "state": "7", "attributes": {"device_class": "temperature"}},
     ]
-    cmd = {"command_id": "cb", "payload": {"sensors": ["temperature"]}}
+    cmd = {"command_id": "cb", "timestamp": time.time(), "payload": {"sensors": ["temperature"]}}
     msg = type(
         "M",
         (),

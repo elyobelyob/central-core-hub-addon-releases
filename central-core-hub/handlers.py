@@ -75,10 +75,9 @@ def _run_update_command(client, action, command_id, run):
             "result": result,
             "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         }
-        try:
-            topic = client.build_ack_topic(action, command_id)
-        except Exception:
-            topic = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
+        topic = _ack_topic(client, action, command_id)
+        if topic is None:
+            return
         try:
             info = client._publish(topic, json.dumps(payload), qos=1)
             sent["done"] = True
@@ -181,18 +180,48 @@ def _utc_now_iso():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+_ACK_HUB_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+_ACK_WORD_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+
+
+def _checked_ack_topic(client_id, action, command_id):
+    """hubs/<id>/v1/ack/<action>/<command_id>, every level checked, for a
+    client without build_ack_topic."""
+    key = action.replace("/", ".") if isinstance(action, str) else ""
+    ok = (
+        isinstance(client_id, str)
+        and _ACK_HUB_ID_RE.fullmatch(client_id)
+        and client_id != "broadcast"
+        and _ACK_WORD_RE.fullmatch(key)
+        and isinstance(command_id, str)
+        and _ACK_WORD_RE.fullmatch(command_id)
+    )
+    if not ok:
+        raise ValueError("not a safe acknowledgement topic")
+    return f"hubs/{client_id}/v1/ack/{key}/{command_id}"
+
+
 def _ack_topic(client, action, command_id):
+    """The ACK topic for this command, or None (logged): an acknowledgement is
+    never sent to a topic nobody checked."""
     try:
-        return client.build_ack_topic(action, command_id)
-    except Exception:
-        return f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
+        builder = getattr(client, "build_ack_topic", None)
+        if callable(builder):
+            return builder(action, command_id)
+        return _checked_ack_topic(getattr(client, "client_id", None), action, command_id)
+    except Exception as exc:
+        _log(f"Not acknowledging command {str(command_id)[:64]!r} on {action!r}: {type(exc).__name__}")
+        return None
 
 
 def _send_ack(client, action, command_id, payload):
     if not command_id:
         return
+    topic = _ack_topic(client, action, command_id)
+    if topic is None:
+        return
     try:
-        client._publish(_ack_topic(client, action, command_id), json.dumps(payload), qos=1)
+        client._publish(topic, json.dumps(payload), qos=1)
     except Exception:
         pass
 
@@ -303,7 +332,7 @@ def _handle_sensors_set(client, cmd, fetch_sensors):
         wanted = set(accepted)
         states = [
             s
-            for s in (fetch_sensors(getattr(client, "ha_api_url", None), getattr(client, "ha_api_token", None)) or [])
+            for s in (fetch_sensors(_ha_url(client), getattr(client, "ha_api_token", None)) or [])
             if s.get("entity_id") in wanted and _is_entity_allowed(s.get("entity_id"))
         ]
         states = _privacy_filter(client, states)
@@ -454,11 +483,13 @@ def _accept_command(client, msg, payload_str):
     """Decide whether an inbound command message is acted on at all.
 
     Commands are not signed, so these checks only limit what a retained or
-    replayed message can do: retained messages, repeated command ids, commands
-    older than MAX_COMMAND_AGE_SECONDS (refused with a failed ACK), malformed
-    command ids and oversized payloads are dropped. A command without a
-    readable timestamp is accepted, and one from the "future" too, since a
-    hub clock can run behind.
+    replayed message can do. Dropped: retained messages, oversized payloads,
+    commands without a well-formed `command_id` and repeated command ids.
+    Refused with a failed ACK: commands without a readable `timestamp`
+    (`bad_timestamp`) and commands older than MAX_COMMAND_AGE_SECONDS
+    (`stale_command`). The vault puts both fields on every command, so every
+    action needs both; a command from the "future" is accepted, since a hub
+    clock can run behind.
     """
     topic = getattr(msg, "topic", "") or ""
     prefix = f"hubs/{client.client_id}/v1/cmd/"
@@ -479,26 +510,33 @@ def _accept_command(client, msg, payload_str):
     if not isinstance(cmd, dict):
         cmd = {}
     command_id = cmd.get("command_id")
-    if command_id is not None and (not isinstance(command_id, str) or not _COMMAND_ID_RE.fullmatch(command_id)):
+    if command_id is None:
+        _log(f"Ignoring command on {topic}: no command_id")
+        return False
+    if not isinstance(command_id, str) or not _COMMAND_ID_RE.fullmatch(command_id):
         _log(f"Ignoring command on {topic}: malformed command_id")
         return False
-    if command_id:
-        seen = getattr(client, "_seen_command_ids", None)
-        if seen is None:
-            seen = collections.OrderedDict()
-            try:
-                client._seen_command_ids = seen
-            except Exception:
-                pass
-        if command_id in seen:
-            _log(f"Ignoring repeated command {command_id} on {topic}")
-            return False
-        seen[command_id] = True
-        while len(seen) > SEEN_COMMAND_IDS_MAX:
-            seen.popitem(last=False)
+    seen = getattr(client, "_seen_command_ids", None)
+    if seen is None:
+        seen = collections.OrderedDict()
+        try:
+            client._seen_command_ids = seen
+        except Exception:
+            pass
+    if command_id in seen:
+        _log(f"Ignoring repeated command {command_id} on {topic}")
+        return False
+    seen[command_id] = True
+    while len(seen) > SEEN_COMMAND_IDS_MAX:
+        seen.popitem(last=False)
     age = _command_age_seconds(cmd.get("timestamp"))
-    if age is not None and age > MAX_COMMAND_AGE_SECONDS:
-        _log(f"Refusing stale command {command_id or ''} on {topic} ({int(age)}s old)")
+    if age is None:
+        _log(f"Refusing command {command_id} on {topic}: no readable timestamp")
+        _send_ack(client, action, command_id, {"status": "failed", "result": {"reason": "bad_timestamp"},
+                                               "timestamp": _utc_now_iso()})
+        return False
+    if age > MAX_COMMAND_AGE_SECONDS:
+        _log(f"Refusing stale command {command_id} on {topic} ({int(age)}s old)")
         _send_ack(client, action, command_id, {"status": "failed", "result": {"reason": "stale_command"},
                                                "timestamp": _utc_now_iso()})
         return False
@@ -544,16 +582,14 @@ def handle_message(
             command_id = cmd.get("command_id")
             action = "config/update"
             if command_id:
-                try:
-                    v1_ack = client.build_ack_topic(action, command_id)
-                except Exception:
-                    v1_ack = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
+                v1_ack = _ack_topic(client, action, command_id)
                 ack_payload = {
                     "status": "acknowledged",
                     "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 }
                 try:
-                    client._publish(v1_ack, json.dumps(ack_payload), qos=1)
+                    if v1_ack:
+                        client._publish(v1_ack, json.dumps(ack_payload), qos=1)
                 except Exception:
                     pass
             version = None
@@ -575,11 +611,7 @@ def handle_message(
             command_id = cmd.get("command_id")
             action = "config/check_update"
             if command_id:
-                try:
-                    client._publish(client.build_ack_topic(action, command_id),
-                                    json.dumps({"status": "acknowledged"}), qos=1)
-                except Exception:
-                    pass
+                _send_ack(client, action, command_id, {"status": "acknowledged"})
             _run_update_command(client, action, command_id, lambda updater, send: updater.check())
             return
 
@@ -598,16 +630,14 @@ def handle_message(
             action = "sensors/poll"
             if command_id:
                 # ACK topic: publish versioned ack only (remove legacy response)
-                try:
-                    v1_ack = client.build_ack_topic(action, command_id)
-                except Exception:
-                    v1_ack = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
+                v1_ack = _ack_topic(client, action, command_id)
                 ack_payload = {
                     "status": "acknowledged",
                     "timestamp": datetime.now().astimezone().isoformat().replace("+00:00", "Z"),
                 }
                 try:
-                    client._publish(v1_ack, json.dumps(ack_payload), qos=1)
+                    if v1_ack:
+                        client._publish(v1_ack, json.dumps(ack_payload), qos=1)
                 except Exception:
                     pass
 
@@ -626,7 +656,7 @@ def handle_message(
             if not sensors_requested:
                 return
 
-            sensors = fetch_sensors(client.ha_api_url, client.ha_api_token) or []
+            sensors = fetch_sensors(_ha_url(client), client.ha_api_token) or []
             # Always apply SENSOR_REGISTRY filtering at minimum; phones and
             # location never leave the home.
             sensors = [s for s in sensors if _is_entity_allowed(s.get("entity_id"))]
@@ -730,10 +760,7 @@ def handle_message(
 
             if command_id:
                 # Publish versioned completion response only; remove legacy response
-                try:
-                    v1_comp = client.build_ack_topic(action, command_id)
-                except Exception:
-                    v1_comp = f"hubs/{client.client_id}/v1/ack/{action.replace('/', '.')}/{command_id}"
+                v1_comp = _ack_topic(client, action, command_id)
                 comp_payload = {
                     "status": "completed",
                     "result": {
@@ -744,7 +771,8 @@ def handle_message(
                     "timestamp": now_iso,
                 }
                 try:
-                    client._publish(v1_comp, json.dumps(comp_payload), qos=1)
+                    if v1_comp:
+                        client._publish(v1_comp, json.dumps(comp_payload), qos=1)
                 except Exception:
                     pass
             return
@@ -774,6 +802,15 @@ def handle_message(
             return
     except Exception:
         traceback.print_exc()
+
+
+def _ha_url(client):
+    """The Home Assistant URL for one request: the client's per-request checked
+    and pinned URL (CentralCoreClient._ha_base), else its configured URL."""
+    base = getattr(client, "_ha_base", None)
+    if callable(base):
+        return base()
+    return getattr(client, "ha_api_url", None)
 
 
 def _registry_allows():
@@ -822,8 +859,11 @@ def _handle_inventory(client, payload_str):
         payload = {"status": "failed", "result": {"reason": "inventory_failed"}, "timestamp": _utc_now_iso()}
     if not command_id:
         return
+    topic = _ack_topic(client, action, command_id)
+    if topic is None:
+        return
     try:
         # Pages are not kept for resending: the vault asks again if one is lost.
-        client._publish(_ack_topic(client, action, command_id), json.dumps(payload), qos=1, persist=False)
+        client._publish(topic, json.dumps(payload), qos=1, persist=False)
     except Exception:
         pass

@@ -57,7 +57,8 @@ def test_seq_never_goes_back_across_restarts_even_when_everything_was_acknowledg
     box = _open(ob, path)
     seqs = [box.append("system", "t", {}, "2026-10-02T10:00:00Z")[0] for _ in range(3)]
     assert seqs == [1, 2, 3]
-    box.ack(3)
+    box.mark_sent(seqs)
+    box.ack(3, box.outbox_id)
     assert box.stats()["backlog"] == 0
     box.close()
 
@@ -76,29 +77,86 @@ def test_ack_deletes_up_to_and_including_upto(ob, tmp_path):
     box = _open(ob, tmp_path / "o.db")
     for _ in range(5):
         box.append("system", "t", {}, "2026-10-02T10:00:00Z")
-    assert box.ack(3) == 3
-    assert [r["seq"] for r in box.due(10)] == [4, 5]
+    box.mark_sent([1, 2, 3, 4, 5])
+    assert box.ack(3, box.outbox_id) == 3
+    assert [r["seq"] for r in box.due(10, sent_before=float("inf"))] == [4, 5]
     assert box.stats()["last_acked_seq"] == 3
     assert box.oldest_seq() == 4
     # an older ack changes nothing and does not lower the high-water mark
-    assert box.ack(2) == 0
+    assert box.ack(2, box.outbox_id) == 0
     assert box.stats()["last_acked_seq"] == 3
 
 
-def test_ack_for_another_outbox_is_ignored(ob, tmp_path):
+def test_ack_for_another_outbox_is_refused(ob, tmp_path):
     box = _open(ob, tmp_path / "o.db")
     box.append("system", "t", {}, "2026-10-02T10:00:00Z")
-    assert box.ack(1, outbox_id="ob-someone-else") == 0
+    box.mark_sent([1])
+    with pytest.raises(ob.AckRefused, match="another outbox"):
+        box.ack(1, "ob-someone-else")
     assert box.stats()["backlog"] == 1
-    assert box.ack(1, outbox_id=box.outbox_id) == 1
+    assert box.ack(1, box.outbox_id) == 1
+
+
+@pytest.mark.parametrize("missing", [None, "", 7])
+def test_ack_without_an_outbox_id_is_refused(ob, tmp_path, missing):
+    box = _open(ob, tmp_path / "o.db")
+    box.append("system", "t", {}, "2026-10-02T10:00:00Z")
+    box.mark_sent([1])
+    with pytest.raises(ob.AckRefused, match="outbox_id"):
+        box.ack(1, missing)
+    assert box.stats()["backlog"] == 1
+    assert not box.vault_confirms()
 
 
 def test_bad_ack_values_delete_nothing(ob, tmp_path):
     box = _open(ob, tmp_path / "o.db")
     box.append("system", "t", {}, "2026-10-02T10:00:00Z")
-    assert box.ack("lots") == 0
-    assert box.ack(None) == 0
+    box.mark_sent([1])
+    for bad in ("lots", None, True, -1, 1.5):
+        with pytest.raises(ob.AckRefused, match="non-negative integer"):
+            box.ack(bad, box.outbox_id)
     assert box.stats()["backlog"] == 1
+
+
+def test_ack_beyond_the_highest_seq_sent_is_refused(ob, tmp_path):
+    box = _open(ob, tmp_path / "o.db")
+    for _ in range(5):
+        box.append("system", "t", {}, "2026-10-02T10:00:00Z")
+    # nothing sent yet: the vault cannot have stored anything
+    assert box.highest_sent_seq() == 0
+    with pytest.raises(ob.AckRefused, match="not sent"):
+        box.ack(1, box.outbox_id)
+    box.mark_sent([1, 2, 3])
+    assert box.highest_sent_seq() == 3
+    for forged in (4, 5):  # numbered, never sent
+        with pytest.raises(ob.AckRefused, match="not sent"):
+            box.ack(forged, box.outbox_id)
+    for forged in (6, 10**6, 2**63 - 1, 2**200):  # never even numbered
+        with pytest.raises(ob.AckRefused, match="beyond every seq"):
+            box.ack(forged, box.outbox_id)
+    assert box.stats()["backlog"] == 5
+    assert not box.vault_confirms()
+    assert box.ack(3, box.outbox_id) == 3  # what was really sent can be confirmed
+    assert box.stats()["backlog"] == 2
+
+
+def test_highest_sent_survives_deleting_what_was_acknowledged(ob, tmp_path):
+    box = _open(ob, tmp_path / "o.db")
+    box.append("system", "t", {}, "2026-10-02T10:00:00Z")
+    box.mark_sent([1])
+    assert box.ack(1, box.outbox_id) == 1
+    assert box.highest_sent_seq() == 1  # the row is gone, the high-water mark is not
+    box.append("system", "t", {}, "2026-10-02T10:00:01Z")  # seq 2, not sent yet
+    with pytest.raises(ob.AckRefused):
+        box.ack(2, box.outbox_id)
+    assert box.ack(0, box.outbox_id) == 0  # a zero ack is always believable
+    assert box.stats()["backlog"] == 1
+
+
+def test_ack_zero_marks_the_vault_as_confirming(ob, tmp_path):
+    box = _open(ob, tmp_path / "o.db")
+    assert box.ack(0, box.outbox_id) == 0
+    assert box.vault_confirms()
 
 
 def test_event_ts_is_stored_in_utc_and_queue_time_is_separate(ob, tmp_path):
@@ -269,10 +327,20 @@ def test_a_state_change_while_offline_is_kept_and_not_sent(hub):
     assert hub._store.stats()["backlog"] == 1
 
 
-def test_store_ack_message_deletes_confirmed_readings(hub):
+def _ack_msg(hub, body, retain=False):
+    return types.SimpleNamespace(
+        topic=hub.store_ack_topic, payload=json.dumps(body).encode(), retain=retain
+    )
+
+
+def _three_readings(hub):
     for i, state in enumerate(["on", "off", "on"]):
         hub._on_ha_state_event("binary_sensor.front_door", _door(state, f"2026-10-02T07:15:0{i}Z"))
-    msg = types.SimpleNamespace(topic=hub.store_ack_topic, payload=json.dumps({"upto": 2, "stored": 2}).encode())
+
+
+def test_store_ack_message_deletes_confirmed_readings(hub):
+    _three_readings(hub)
+    msg = _ack_msg(hub, {"upto": 2, "stored": 2, "outbox_id": hub._store.outbox_id})
     dispatched = []
     hub._submit = lambda fn, *a: dispatched.append(fn)
     hub.on_message(None, None, msg)
@@ -280,7 +348,48 @@ def test_store_ack_message_deletes_confirmed_readings(hub):
     assert [r["seq"] for r in hub._store.due(10, sent_before=float("inf"))] == [3]
 
 
-@pytest.mark.parametrize("payload", [b"not json", b'{"upto": -1}', b'{"upto": "3"}', b'{"upto": true}', b"[]"])
+def test_a_retained_store_ack_is_refused(hub):
+    _three_readings(hub)
+    msg = _ack_msg(hub, {"upto": 3, "outbox_id": hub._store.outbox_id}, retain=True)
+    hub._submit = lambda fn, *a: pytest.fail("a store ack is never a command")
+    hub.on_message(None, None, msg)
+    assert hub._store.stats()["backlog"] == 3
+    assert not hub._store.vault_confirms()
+
+
+def test_a_store_ack_without_an_outbox_id_is_refused(hub):
+    _three_readings(hub)
+    hub.on_message(None, None, _ack_msg(hub, {"upto": 3, "stored": 3}))
+    assert hub._store.stats()["backlog"] == 3
+    assert hub._handle_store_ack(b'{"upto": 3, "outbox_id": ""}') == 0
+    assert hub._handle_store_ack(b'{"upto": 3, "outbox_id": 5}') == 0
+    assert hub._store.stats()["backlog"] == 3
+
+
+def test_a_store_ack_for_another_outbox_is_refused(hub):
+    _three_readings(hub)
+    hub.on_message(None, None, _ack_msg(hub, {"upto": 3, "outbox_id": "ob-someone-else"}))
+    assert hub._store.stats()["backlog"] == 3
+
+
+@pytest.mark.parametrize("upto", [4, 1000, 2**63 - 1, 2**70])
+def test_a_forged_store_ack_beyond_what_was_sent_deletes_nothing(hub, upto):
+    _three_readings(hub)
+    hub.on_message(None, None, _ack_msg(hub, {"upto": upto, "outbox_id": hub._store.outbox_id}))
+    assert hub._store.stats()["backlog"] == 3
+    assert not hub._store.vault_confirms()
+
+
+def test_readings_queued_but_not_yet_sent_cannot_be_acknowledged(hub):
+    hub._connected = False
+    _three_readings(hub)  # kept, never sent
+    hub.on_message(None, None, _ack_msg(hub, {"upto": 3, "outbox_id": hub._store.outbox_id}))
+    assert hub._store.stats()["backlog"] == 3
+
+
+@pytest.mark.parametrize(
+    "payload", [b"not json", b'{"upto": -1}', b'{"upto": "3"}', b'{"upto": true}', b"[]", b"{}"]
+)
 def test_malformed_store_acks_delete_nothing(hub, payload):
     hub._on_ha_state_event("binary_sensor.front_door", _door("on", "2026-10-02T07:15:00Z"))
     assert hub._handle_store_ack(payload) == 0
@@ -301,13 +410,14 @@ def test_nothing_is_resent_until_the_vault_has_acknowledged_once(hub):
     hub._on_ha_state_event("binary_sensor.front_door", _door("on", "2026-10-02T07:15:00Z"))
     hub._connected = True
     assert hub._send_due_readings() == 0  # an older vault: it would never confirm
-    assert hub._handle_store_ack(b'{"upto": 0, "stored": 0}') == 0
+    ack = json.dumps({"upto": 0, "stored": 0, "outbox_id": hub._store.outbox_id}).encode()
+    assert hub._handle_store_ack(ack) == 0
     assert hub._store.vault_confirms()
     assert hub._send_due_readings() == 1
 
 
 def test_catch_up_resends_oldest_first_in_rate_limited_batches_with_the_hub_clock(hub, mc):
-    hub._store.ack(0)
+    hub._store.ack(0, hub._store.outbox_id)
     hub._connected = False
     times = [f"2026-10-02T0{h}:00:00Z" for h in range(1, 6)]
     for _ in range(9):  # 45 readings queued while offline
@@ -335,7 +445,7 @@ def test_catch_up_resends_oldest_first_in_rate_limited_batches_with_the_hub_cloc
 
 
 def test_unconfirmed_readings_are_resent_after_five_minutes(hub, mc):
-    hub._store.ack(0)  # the vault has confirmed this outbox before
+    hub._store.ack(0, hub._store.outbox_id)  # the vault has confirmed this outbox before
     hub._on_ha_state_event("binary_sensor.front_door", _door("on", "2026-10-02T07:15:00Z"))
     import time as _time
 
@@ -352,9 +462,19 @@ def test_nothing_is_resent_while_disconnected(hub):
 
 
 def test_a_failed_live_publish_is_left_for_the_resend(hub):
-    hub._client.rc = 4
+    hub._client.rc = 1  # MQTT_ERR_NOMEM: paho did not take it
     hub._on_ha_state_event("binary_sensor.front_door", _door("on", "2026-10-02T07:15:00Z"))
     assert [r["seq"] for r in hub._store.due(10)] == [1]
+    assert hub._store.highest_sent_seq() == 0
+
+
+def test_a_publish_paho_queued_while_disconnected_counts_as_sent(hub):
+    """For QoS 1, MQTT_ERR_NO_CONN means paho keeps the message and sends it
+    after the reconnect: it is in flight, not failed."""
+    hub._client.rc = 4
+    hub._on_ha_state_event("binary_sensor.front_door", _door("on", "2026-10-02T07:15:00Z"))
+    assert hub._store.highest_sent_seq() == 1
+    assert hub._store.due(10) == []  # not resent on top of paho's own queue
 
 
 def test_status_telemetry_reports_the_backlog_and_goes_through_the_outbox(hub, mc, monkeypatch):
@@ -417,7 +537,7 @@ def _real_shared_schemas(monkeypatch):
 
 
 def test_batches_match_the_shared_protocol_when_it_is_installed(hub, monkeypatch):
-    hub._store.ack(0)  # the vault has confirmed this outbox before
+    hub._store.ack(0, hub._store.outbox_id)  # the vault has confirmed this outbox before
     schemas = _real_shared_schemas(monkeypatch)
     if not hasattr(schemas, "TelemetryBatch"):
         pytest.skip("installed central-core-mqtt-shared predates protocol 1.1")

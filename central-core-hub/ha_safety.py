@@ -58,40 +58,112 @@ def _is_local_address(ip):
         return False
 
 
-def check_token_transport(url):
-    """(ok, reason): may the Home Assistant token be sent to `url`?"""
+def _pick_address(addresses):
+    """The address to connect to: IPv4 first (Home Assistant always listens on it),
+    then IPv6. Link-local IPv6 with a zone id (fe80::1%eth0) cannot be put in a
+    URL safely, so it is never picked."""
+    v4 = [a for a in addresses if ":" not in a]
+    v6 = [a for a in addresses if ":" in a and "%" not in a]
+    return (v4 or v6 or [None])[0]
+
+
+def _assess(url, resolve=True):
+    """(ok, reason, url_to_use) for sending the token to `url`; resolves a host name at most once.
+
+    Over plain http/ws to a host *name* (not a fixed local name, not an
+    address), the name is resolved and the first answer that is this machine
+    (IPv4 first) replaces it in `url_to_use`, so the checked address is the one
+    that is used; answers that are not this machine are ignored and named in
+    the reason. Call it for every connection: the answer is for this
+    connection only (a DHCP change moves Home Assistant's address, so a pin
+    must never be kept). With `resolve=False` only the URL itself is checked
+    and a host name is accepted as is (it is checked at each connection).
+    """
     from urllib.parse import urlsplit
 
     try:
         parts = urlsplit((url or "").strip())
         host = (parts.hostname or "").lower()
     except ValueError:
-        return False, "unparseable URL"
+        return False, "unparseable URL", url
+    try:
+        port = parts.port  # raises ValueError for a port out of range, e.g. :99999
+    except ValueError:
+        return False, "invalid port", url
     if parts.scheme in ("https", "wss"):
-        return (True, "encrypted") if host else (False, "no host")
+        return (True, "encrypted", url) if host else (False, "no host", url)
     if parts.scheme not in ("http", "ws"):
-        return False, f"unsupported scheme {parts.scheme!r}"
+        return False, f"unsupported scheme {parts.scheme!r}", url
     if not host:
-        return False, "no host"
+        return False, "no host", url
+    if "%" in host:
+        return False, "IPv6 zone ids are not supported; use another address or https", url
     if host in _LOCAL_HA_HOSTNAMES:
-        return True, "local name"
+        return True, "local name", url
     import ipaddress
 
     try:
-        addresses = [str(ipaddress.ip_address(host))]
+        address = str(ipaddress.ip_address(host))
     except ValueError:
-        addresses = None
+        address = None
+    if not resolve:
+        # Whether it is this machine is checked at each connection: Home
+        # Assistant's own address may only arrive (DHCP) after the add-on starts.
+        return True, "checked at each connection", url
+    if address is not None:
+        if not _is_local_address(address):
+            return False, f"{host} is not this machine", url
+        return True, "local address", url
     try:
-        if addresses is None:
-            addresses = _resolve_host(host)
+        addresses = _resolve_host(host)
     except OSError:
-        # Fail closed: a name that does not resolve now cannot be checked, and
-        # may later resolve to another machine (DNS change, rebinding).
-        return False, f"{host} does not resolve, so it cannot be checked to be this machine"
-    remote = [a for a in addresses if not _is_local_address(a)]
-    if remote:
-        return False, f"{host} is not this machine ({', '.join(remote)})"
-    return True, "local address"
+        # Fail closed for this connection: a name that does not resolve now cannot
+        # be checked. The next connection tries again.
+        return False, f"{host} does not resolve, so it cannot be checked to be this machine", url
+    local = [a for a in addresses if _is_local_address(a)]
+    ignored = [a for a in addresses if a not in local]
+    if not local:
+        return False, f"{host} is not this machine ({', '.join(addresses) or 'no address'})", url
+    address = _pick_address(local)
+    if address is None:
+        return False, f"{host} has only link-local IPv6 addresses with a zone id; use another address", url
+    shown = f"[{address}]" if ":" in address else address
+    userinfo = parts.netloc.rpartition("@")[0]
+    netloc = (userinfo + "@" if userinfo else "") + shown + (f":{port}" if port else "")
+    note = f"; ignored {', '.join(ignored)}, not this machine" if ignored else ""
+    return True, f"local address ({host} pinned to {address}{note})", parts._replace(netloc=netloc).geturl()
+
+
+def check_token_transport(url):
+    """(ok, reason): may the Home Assistant token be sent to `url` now?"""
+    ok, reason, _ = _assess(url)
+    return ok, reason
+
+
+def check_token_url(url):
+    """(ok, reason): is `url` acceptable at all, without resolving anything?
+
+    Refuses only what no later connection can fix: an unparseable URL, a bad
+    port, an unsupported scheme, no host or an IPv6 zone id. Whether a host
+    name or address may receive the token is decided at each connection
+    (pin_token_url), so a name that does not resolve at boot (DNS not up yet
+    after a power cut), or an address this machine only gets later (DHCP), is
+    retried rather than switching Home Assistant off.
+    """
+    ok, reason, _ = _assess(url, resolve=False)
+    return ok, reason
+
+
+def pin_token_url(url):
+    """(ok, reason, url_to_use) for ONE connection or request.
+
+    A host name in a plain http/ws URL is resolved here, checked, and the checked
+    address replaces it in `url_to_use`, so this connection goes to the address
+    that was checked and cannot be steered elsewhere by a DNS or mDNS answer in
+    between. Call it again for the next connection; never keep the result.
+    Every other URL comes back unchanged.
+    """
+    return _assess(url)
 
 
 # The vault only watches sensors (its kept set is selected sensors plus their

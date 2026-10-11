@@ -1,3 +1,4 @@
+import time
 import importlib.util
 from pathlib import Path
 import types
@@ -132,10 +133,11 @@ def test_handlers_poll_with_disabled_and_names(monkeypatch):
     msg = types.SimpleNamespace(
         topic="hubs/hub1/v1/cmd/sensors/poll", payload=b'{"payload": {"sensors": ["temperature"]}}'
     )
+    poll = json.dumps({"command_id": "tp1", "timestamp": time.time(), "payload": {"sensors": ["temperature"]}})
     handlers.handle_message(
         client,
         msg,
-        '{"payload": {"sensors": ["temperature"]}}',
+        poll,
         fetch_sensors,
         lambda cid: "{}",
         lambda raw: None,
@@ -167,7 +169,7 @@ def test_handlers_set_no_ha_config_causes_failed(monkeypatch):
     client = C()
 
     # build a set command payload with sensors to set
-    payload = json.dumps({"command_id": "c1", "payload": {"sensors": {"sensor.x": "1"}}})
+    payload = json.dumps({"command_id": "c1", "timestamp": time.time(), "payload": {"sensors": {"sensor.x": "1"}}})
     msg = types.SimpleNamespace(topic="hubs/hub2/v1/cmd/sensors/set", payload=payload.encode("utf-8"))
     # requests is None, so should mark as failed due to no_ha_config
     handlers.handle_message(client, msg, payload, lambda u, t: [], lambda cid: "{}", lambda raw: None, None)

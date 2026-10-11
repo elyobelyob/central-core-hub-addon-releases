@@ -1,5 +1,6 @@
 """F4: the selection covers sensors only, and sensitive attributes never leave the hub."""
 
+import time
 import json
 import types
 
@@ -81,6 +82,7 @@ def test_sensors_set_refuses_non_sensor_domains(tmp_path, monkeypatch):
     body = json.dumps(
         {
             "command_id": "c1",
+            "timestamp": time.time(),
             "payload": {"sensors": ["sensor.a", "camera.front_door", "device_tracker.phone", "binary_sensor.b"]},
         }
     )
@@ -93,7 +95,7 @@ def test_sensors_set_refuses_non_sensor_domains(tmp_path, monkeypatch):
 def test_sensors_set_ack_has_no_secret_attributes(tmp_path, monkeypatch):
     c, published = _client(tmp_path, monkeypatch)
     msg = types.SimpleNamespace(topic="hubs/hub1/v1/cmd/sensors/set", retain=False)
-    body = json.dumps({"command_id": "c1", "payload": {"sensors": ["sensor.a"]}})
+    body = json.dumps({"command_id": "c1", "timestamp": time.time(), "payload": {"sensors": ["sensor.a"]}})
 
     def fetch(url, token):
         return [{"entity_id": "sensor.a", "state": "1", "attributes": dict(ENTITY_ATTRS)}]
@@ -115,7 +117,7 @@ def test_sensors_poll_publishes_no_secret_attributes():
     c.build_ack_topic = lambda action, cid: f"hubs/hub1/v1/ack/{action.replace('/', '.')}/{cid}"
     c._publish = lambda topic, payload, qos=0: published.append((topic, json.loads(payload)))
     msg = types.SimpleNamespace(topic="hubs/hub1/v1/cmd/sensors/poll", retain=False)
-    body = json.dumps({"command_id": "p1", "payload": {"sensors": ["door"]}})
+    body = json.dumps({"command_id": "p1", "timestamp": time.time(), "payload": {"sensors": ["door"]}})
 
     def fetch(url, token):
         return [{"entity_id": "sensor.a", "state": "1", "attributes": dict(ENTITY_ATTRS)}]

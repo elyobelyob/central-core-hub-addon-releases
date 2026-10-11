@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -49,7 +50,7 @@ def test_set_string_list_includes_monitor_telemetry_and_completion(tmp_path):
 
     try:
         topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
-        payload = json.dumps({"command_id": "m1", "payload": {"sensors": ["sensor.x"]}})
+        payload = json.dumps({"command_id": "m1", "timestamp": time.time(), "payload": {"sensors": ["sensor.x"]}})
 
         # fetch_sensors returns data so monitor_telemetry is constructed
         def fetch_sensors(url, token):
@@ -98,7 +99,7 @@ def test_registry_set_atomic_write_failure_reports_error(tmp_path, monkeypatch):
     try:
         client = DummyClient("unit-reg")
         topic = f"hubs/{client.client_id}/v1/cmd/registry/set"
-        payload = json.dumps({"command_id": "r1", "payload": {"entries": []}})
+        payload = json.dumps({"command_id": "r1", "timestamp": time.time(), "payload": {"entries": []}})
 
         # Force pathlib.Path.replace to raise to simulate rename failure
         def bad_replace(self, target):
