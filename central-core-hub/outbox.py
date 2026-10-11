@@ -36,6 +36,9 @@ from typing import Any, Callable, Optional
 
 DEFAULT_MAX_AGE_S = 7 * 24 * 3600
 DEFAULT_MAX_BYTES = 50 * 1024 * 1024
+# At most one new outbox id per hour (see rotate_outbox_id), so a forged
+# acknowledgement cannot make the hub resend its backlog over and over.
+ROTATE_MIN_INTERVAL_S = 3600
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -56,6 +59,24 @@ CREATE TABLE IF NOT EXISTS outbox (
 
 class AckRefused(ValueError):
     """A store acknowledgement that cannot be believed; it deletes nothing."""
+
+    outbox_behind = False
+
+
+class AckBeyondSent(AckRefused):
+    """The acknowledgement names this outbox but reaches past anything it sent.
+
+    `outbox_behind` is set when it reaches past every seq this outbox has ever
+    numbered, not just past what it has sent so far (an acknowledgement racing
+    a reading that is being sent). The usual cause is a restored Home Assistant
+    backup: it brings back an old outbox (same id, lower seqs) while the vault
+    has already stored higher seqs under that id, so the vault would take every
+    new reading for a duplicate. The cure is a new outbox id (rotate_outbox_id).
+    """
+
+    def __init__(self, message, outbox_behind=False):
+        super().__init__(message)
+        self.outbox_behind = outbox_behind
 
 
 def utc_iso(value: Any = None) -> str:
@@ -195,7 +216,8 @@ class SqliteOutbox:
                 raise AckRefused("it is for another outbox")
             sent = self._highest_sent_locked()
             if upto > sent:
-                raise AckRefused(f"upto {upto} is beyond the highest seq sent ({sent})")
+                numbered = self._meta_int("next_seq", 1) - 1
+                raise AckBeyondSent(f"upto {upto} is beyond the highest seq sent ({sent})", upto > numbered)
             self._db.execute("BEGIN IMMEDIATE")
             try:
                 cur = self._db.execute("DELETE FROM outbox WHERE seq <= ?", (upto,))
@@ -207,6 +229,52 @@ class SqliteOutbox:
                 self._db.execute("ROLLBACK")
                 raise
             return cur.rowcount or 0
+
+    def rotate_outbox_id(self, min_interval_s: float = ROTATE_MIN_INTERVAL_S) -> Optional[tuple[str, str]]:
+        """Give this outbox a new id and send everything in it again under that id.
+
+        Nothing is deleted: every kept reading is re-keyed (its stored payload
+        carries the new id) and marked never sent, so the next batches resend
+        it and the vault, which keys duplicates on (outbox_id, seq), stores it
+        as new. `seq` keeps counting up. Returns (old_id, new_id), or None when
+        an id was already started within `min_interval_s` (a forged
+        acknowledgement must not make the hub resend over and over).
+        """
+        now = self._clock()
+        with self._lock:
+            last = self._meta("rotated_epoch")
+            try:
+                if last is not None and now - float(last) < min_interval_s:
+                    return None
+            except ValueError:
+                pass
+            old = str(self._meta("outbox_id"))
+            new = "ob-" + secrets.token_hex(8)
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                rows = self._db.execute("SELECT seq, payload FROM outbox").fetchall()
+                for seq, text in rows:
+                    try:
+                        body = json.loads(text)
+                    except ValueError:
+                        continue
+                    if isinstance(body, dict) and "outbox_id" in body:
+                        body["outbox_id"] = new
+                        text = json.dumps(body, separators=(",", ":"))
+                        self._db.execute(
+                            "UPDATE outbox SET payload = ?, size = ? WHERE seq = ?",
+                            (text, len(text.encode("utf-8")), seq),
+                        )
+                self._db.execute("UPDATE outbox SET sent_count = 0, last_sent = NULL")
+                self._set_meta("outbox_id", new)
+                self._set_meta("last_acked_seq", 0)  # nothing is acknowledged under the new id
+                self._set_meta("rotated_epoch", now)
+                self._set_meta("rotations_total", self._meta_int("rotations_total", 0) + 1)
+                self._db.execute("COMMIT")
+            except Exception:
+                self._db.execute("ROLLBACK")
+                raise
+            return old, new
 
     def mark_sent(self, seqs, when: Optional[float] = None) -> None:
         seqs = [int(s) for s in seqs]
@@ -322,6 +390,7 @@ class SqliteOutbox:
                 "last_acked_seq": self._meta_int("last_acked_seq", 0),
                 "next_seq": self._meta_int("next_seq", 1),
                 "dropped_total": self._meta_int("dropped_total", 0),
+                "rotations_total": self._meta_int("rotations_total", 0),
                 "outbox_id": self._meta("outbox_id"),
             }
 

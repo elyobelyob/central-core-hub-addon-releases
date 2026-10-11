@@ -1780,6 +1780,7 @@ class CentralCoreClient:
         store = getattr(self, "_store", None)
         if store is None:
             return 0
+        upto = None
         try:
             ack = json.loads(payload_bytes.decode("utf-8") if isinstance(payload_bytes, bytes) else payload_bytes)
             upto = ack.get("upto") if isinstance(ack, dict) else None
@@ -1787,10 +1788,36 @@ class CentralCoreClient:
                 raise ValueError("upto must be a non-negative integer")
             deleted = store.ack(upto, ack.get("outbox_id"))
         except Exception as exc:
+            if getattr(exc, "outbox_behind", False):
+                self._start_new_outbox(upto, exc)
             self._log_drop(f"ignored store ack: {type(exc).__name__}: {exc}")
             return 0
         _log(f"Vault stored readings up to seq {upto}; removed {deleted} from the outbox")
         return deleted
+
+    def _start_new_outbox(self, upto, why):
+        """The vault confirmed seqs this outbox has never even numbered, under this
+        outbox's own id: the outbox is older than the vault's view of it, which is what
+        restoring a Home Assistant backup does. Without a new id the vault would
+        drop every new reading as a duplicate until the seqs caught up, so start
+        one; every reading kept here is resent under it (nothing is deleted)."""
+        store = getattr(self, "_store", None)
+        rotate = getattr(store, "rotate_outbox_id", None)
+        if rotate is None:
+            return None
+        try:
+            rotated = rotate()
+        except Exception as exc:
+            _log(f"Outbox: could not start a new outbox id ({type(exc).__name__}: {exc})", sys.stderr)
+            return None
+        if rotated:
+            old, new = rotated
+            _log(
+                f"WARNING: the vault confirmed seq {upto} under this outbox's id, but {why}. This happens after a "
+                f"Home Assistant backup is restored. Started a new outbox id ({old} -> {new}); every reading kept "
+                "here is sent again under it."
+            )
+        return rotated
 
     def _send_due_readings(self, now=None):
         """Send one batch of readings the vault has not confirmed, oldest first.
