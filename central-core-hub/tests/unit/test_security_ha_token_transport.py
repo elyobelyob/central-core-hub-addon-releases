@@ -75,28 +75,69 @@ def test_refused(url):
     assert reason
 
 
-def test_client_disables_ha_integration_for_remote_plaintext(monkeypatch, tmp_path):
+def test_a_plain_http_address_that_is_not_this_machine_switches_ha_off_at_start(monkeypatch, tmp_path):
     mc = importlib.import_module("mqtt_client")
     monkeypatch.setattr(mc, "SELECTED_SENSORS_FILE", tmp_path / "sel.json")
     lines = []
     monkeypatch.setattr(mc, "_log", lambda m, file=None: lines.append(m))
-    c = mc.CentralCoreClient({"client_id": "hub1", "ha_api_url": "http://attacker.example:8123", "ha_api_token": "tok"})
-    assert c.ha_api_token == ""
-    assert c.ha_api_url == ""
+    c = mc.CentralCoreClient({"client_id": "hub1", "ha_api_url": "http://203.0.113.5:8123", "ha_api_token": "tok"})
+    assert c.ha_api_token == "" and c.ha_api_url == ""
     assert c._ha_ws_listener is None
     assert any("not sending the Home Assistant token" in m for m in lines)
     assert not any("tok" == m for m in lines)
 
 
-def test_client_disables_ha_integration_for_unresolvable_plaintext_host(monkeypatch, tmp_path):
+def test_a_name_that_is_not_this_machine_never_gets_the_token_but_stays_configured(monkeypatch, tmp_path):
     mc = importlib.import_module("mqtt_client")
     monkeypatch.setattr(mc, "SELECTED_SENSORS_FILE", tmp_path / "sel.json")
     lines = []
     monkeypatch.setattr(mc, "_log", lambda m, file=None: lines.append(m))
-    c = mc.CentralCoreClient({"client_id": "hub1", "ha_api_url": "http://does-not-resolve.example:8123",
+    c = mc.CentralCoreClient({"client_id": "hub1", "ha_api_url": "http://attacker.example:8123", "ha_api_token": "tok"})
+    _made.append(c)
+    assert c.ha_api_url == "http://attacker.example:8123" and c.ha_api_token == "tok"
+    assert c._ha_base() == ""  # refused for every request while it points elsewhere
+    assert any("not sending the Home Assistant token" in m and "203.0.113.5" in m for m in lines)
+
+
+def test_a_name_that_does_not_resolve_at_boot_is_retried_not_switched_off(monkeypatch, tmp_path):
+    """After a power cut the hub can start before DNS is up: Home Assistant must
+    come back by itself, or night-door alerts stop while heartbeats look fine."""
+    mc = importlib.import_module("mqtt_client")
+    monkeypatch.setattr(mc, "SELECTED_SENSORS_FILE", tmp_path / "sel.json")
+    monkeypatch.setattr(mc, "HA_RESOLVE_CACHE_S", 0)
+    lines = []
+    monkeypatch.setattr(mc, "_log", lambda m, file=None: lines.append(m))
+    monkeypatch.setattr(ha_safety, "_resolve_host", _resolver({}))  # nothing resolves yet
+    c = mc.CentralCoreClient({"client_id": "hub1", "ha_api_url": "http://homeassistant.local:8123",
                               "ha_api_token": "tok"})
-    assert c.ha_api_token == "" and c.ha_api_url == ""
+    _made.append(c)
+    assert c.ha_api_token == "tok" and c._ha_ws_listener is not None
+    assert c._ha_base() == ""
     assert any("does not resolve" in m for m in lines)
+    monkeypatch.setattr(ha_safety, "_resolve_host", _resolver({"homeassistant.local": ["192.168.1.10"]}))
+    assert c._ha_base() == "http://192.168.1.10:8123"  # DNS is up: back by itself
+
+
+@pytest.mark.parametrize(
+    "url,reason",
+    [
+        ("ftp://localhost", "unsupported scheme"),
+        ("http://localhost:99999", "invalid port"),
+        ("http://[fe80::1%25eth0]:8123", "zone"),
+        ("http://203.0.113.5:8123", "not this machine"),
+        ("http://", "no host"),
+    ],
+)
+def test_the_startup_check_refuses_only_what_no_connection_can_fix(url, reason):
+    ok, why = ha_safety.check_token_url(url)
+    assert not ok and reason in why
+
+
+@pytest.mark.parametrize("url", ["http://does-not-resolve.example:8123", "http://attacker.example:8123",
+                                 "http://homeassistant.local:8123", "https://anything.example"])
+def test_the_startup_check_does_not_resolve_names(url, monkeypatch):
+    monkeypatch.setattr(ha_safety, "_resolve_host", lambda host: pytest.fail("resolved at startup"))
+    assert ha_safety.check_token_url(url)[0]
 
 
 def test_client_keeps_local_config(monkeypatch, tmp_path):
@@ -210,6 +251,7 @@ def test_each_request_checks_and_pins_anew(monkeypatch, tmp_path):
     Assistant's address changes (DHCP), the next request follows it; when the
     name points elsewhere, that request is refused."""
     lines = []
+    monkeypatch.setattr(importlib.import_module("mqtt_client"), "HA_RESOLVE_CACHE_S", 0)
     c = _client(monkeypatch, tmp_path, "http://homeassistant.local:8123", lines)
     assert c.ha_api_url == "http://homeassistant.local:8123"  # the configured URL is kept
     assert c._ha_base() == "http://192.168.1.10:8123"
@@ -230,6 +272,7 @@ def test_each_request_checks_and_pins_anew(monkeypatch, tmp_path):
 
 def test_requests_use_the_address_pinned_for_them(monkeypatch, tmp_path):
     mc = importlib.import_module("mqtt_client")
+    monkeypatch.setattr(mc, "HA_RESOLVE_CACHE_S", 0)
     c = _client(monkeypatch, tmp_path, "http://homeassistant.local:8123")
     seen = []
 
@@ -333,8 +376,44 @@ def test_zone_scoped_addresses_are_skipped_when_another_exists(monkeypatch):
     assert ok and use == "http://[::1]:8123"
 
 
-def test_a_name_with_one_remote_address_is_refused_even_if_another_is_local(monkeypatch):
-    monkeypatch.setattr(ha_safety, "_resolve_host", _resolver({"mixed.local": ["192.168.1.10", "203.0.113.5"]}))
+def test_a_name_with_a_remote_answer_uses_its_local_address(monkeypatch):
+    """The token only ever goes to the pinned local address, so an extra answer
+    that is not this machine is ignored (and named) rather than refusing for
+    good where earlier versions connected."""
+    monkeypatch.setattr(ha_safety, "_resolve_host", _resolver({"mixed.local": ["203.0.113.5", "192.168.1.10"]}))
     ok, reason, use = ha_safety.pin_token_url("http://mixed.local:8123")
-    assert not ok and "203.0.113.5" in reason
-    assert use == "http://mixed.local:8123"
+    assert ok and use == "http://192.168.1.10:8123"
+    assert "ignored 203.0.113.5" in reason
+
+
+def test_ignored_answers_are_logged_once(monkeypatch, tmp_path):
+    mc = importlib.import_module("mqtt_client")
+    monkeypatch.setattr(mc, "HA_RESOLVE_CACHE_S", 0)
+    monkeypatch.setattr(ha_safety, "_resolve_host", _resolver({"mixed.local": ["203.0.113.5", "192.168.1.10"]}))
+    lines = []
+    c = _client(monkeypatch, tmp_path, "http://mixed.local:8123", lines)
+    for _ in range(3):
+        assert c._ha_base() == "http://192.168.1.10:8123"
+    assert len([m for m in lines if "ignored 203.0.113.5" in m]) == 1
+
+
+def test_the_rest_address_is_reused_for_a_minute(monkeypatch, tmp_path):
+    mc = importlib.import_module("mqtt_client")
+    calls = []
+
+    def resolve(host):
+        calls.append(host)
+        return ["192.168.1.10"]
+
+    monkeypatch.setattr(ha_safety, "_resolve_host", resolve)
+    c = _client(monkeypatch, tmp_path, "http://homeassistant.local:8123")
+    calls.clear()  # the websocket listener may have looked it up already
+    now = [1000.0]
+    monkeypatch.setattr(mc.time, "monotonic", lambda: now[0])
+    assert c._ha_base() == "http://192.168.1.10:8123"
+    now[0] += 59
+    assert c._ha_base() == "http://192.168.1.10:8123"
+    assert calls == ["homeassistant.local"]
+    now[0] += 2
+    c._ha_base()
+    assert calls == ["homeassistant.local", "homeassistant.local"]

@@ -67,14 +67,17 @@ def _pick_address(addresses):
     return (v4 or v6 or [None])[0]
 
 
-def _assess(url):
+def _assess(url, resolve=True):
     """(ok, reason, url_to_use) for sending the token to `url`; resolves a host name at most once.
 
     Over plain http/ws to a host *name* (not a fixed local name, not an
-    address), the address that was checked replaces the name in `url_to_use`,
-    so the checked address is the one that is used. Call it for every
-    connection: the answer is for this connection only (a DHCP change moves
-    Home Assistant's address, so a pin must never be kept).
+    address), the name is resolved and the first answer that is this machine
+    (IPv4 first) replaces it in `url_to_use`, so the checked address is the one
+    that is used; answers that are not this machine are ignored and named in
+    the reason. Call it for every connection: the answer is for this
+    connection only (a DHCP change moves Home Assistant's address, so a pin
+    must never be kept). With `resolve=False` only the URL itself is checked
+    and a host name is accepted as is (it is checked at each connection).
     """
     from urllib.parse import urlsplit
 
@@ -100,33 +103,52 @@ def _assess(url):
     import ipaddress
 
     try:
-        addresses = [str(ipaddress.ip_address(host))]
-        is_name = False
+        address = str(ipaddress.ip_address(host))
     except ValueError:
-        is_name = True
-        try:
-            addresses = _resolve_host(host)
-        except OSError:
-            # Fail closed: a name that does not resolve now cannot be checked, and
-            # may later resolve to another machine (DNS change, rebinding).
-            return False, f"{host} does not resolve, so it cannot be checked to be this machine", url
-    remote = [a for a in addresses if not _is_local_address(a)]
-    if remote:
-        return False, f"{host} is not this machine ({', '.join(remote)})", url
-    if not is_name:
+        address = None
+    if address is not None:
+        if not _is_local_address(address):
+            return False, f"{host} is not this machine", url
         return True, "local address", url
-    address = _pick_address(addresses)
+    if not resolve:
+        return True, "host name, checked at each connection", url
+    try:
+        addresses = _resolve_host(host)
+    except OSError:
+        # Fail closed for this connection: a name that does not resolve now cannot
+        # be checked. The next connection tries again.
+        return False, f"{host} does not resolve, so it cannot be checked to be this machine", url
+    local = [a for a in addresses if _is_local_address(a)]
+    ignored = [a for a in addresses if a not in local]
+    if not local:
+        return False, f"{host} is not this machine ({', '.join(addresses) or 'no address'})", url
+    address = _pick_address(local)
     if address is None:
         return False, f"{host} has only link-local IPv6 addresses with a zone id; use another address", url
     shown = f"[{address}]" if ":" in address else address
     userinfo = parts.netloc.rpartition("@")[0]
     netloc = (userinfo + "@" if userinfo else "") + shown + (f":{port}" if port else "")
-    return True, f"local address ({host} pinned to {address})", parts._replace(netloc=netloc).geturl()
+    note = f"; ignored {', '.join(ignored)}, not this machine" if ignored else ""
+    return True, f"local address ({host} pinned to {address}{note})", parts._replace(netloc=netloc).geturl()
 
 
 def check_token_transport(url):
-    """(ok, reason): may the Home Assistant token be sent to `url`?"""
+    """(ok, reason): may the Home Assistant token be sent to `url` now?"""
     ok, reason, _ = _assess(url)
+    return ok, reason
+
+
+def check_token_url(url):
+    """(ok, reason): is `url` acceptable at all, without resolving anything?
+
+    Refuses only what no later connection can fix: an unparseable URL, a bad
+    port, an unsupported scheme, no host, an IPv6 zone id, or a plain-http
+    address that is not this machine. A host name passes; whether it may
+    receive the token is decided at each connection (pin_token_url), so a
+    name that does not resolve at boot (DNS not up yet after a power cut) is
+    retried rather than switching Home Assistant off.
+    """
+    ok, reason, _ = _assess(url, resolve=False)
     return ok, reason
 
 

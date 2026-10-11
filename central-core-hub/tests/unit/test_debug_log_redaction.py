@@ -139,3 +139,60 @@ def test_deeply_nested_json_does_not_break_the_preview(mc):
     deep = "[" * 100_000 + "]" * 100_000
     out = mc._preview(deep, limit=50)
     assert out.startswith("[[[[") and "chars)" in out
+
+
+# --- JSON inside JSON (a payload that is itself a JSON-encoded string) ---
+
+
+def test_double_encoded_json_is_redacted(mc):
+    inner = json.dumps({"token": SECRET, "entries": []})
+    out = mc._preview(json.dumps(inner))  # "{\"token\": \"...\"}"
+    assert SECRET not in out
+    assert "[REDACTED]" in out and "entries" in out
+
+
+def test_a_field_holding_json_is_redacted(mc):
+    body = json.dumps({"command_id": "r1", "payload": json.dumps({"password": SECRET, "x": 1})})
+    out = mc._preview(body)
+    assert SECRET not in out and "[REDACTED]" in out and "r1" in out
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '"{\\"token\\": \\"%s\\", \\"entries\\": [' % SECRET,  # double-encoded and cut off
+        '{\\"api_key\\":\\"%s\\"}' % SECRET,  # escaped quotes, not valid JSON
+        '{\\"token\\": \\"%s' % SECRET,  # escaped and cut inside the secret
+        '"{\\"secret\\": \\"a\\\\\\\\%s\\"}' % SECRET,  # a backslash inside the escaped value
+    ],
+)
+def test_escaped_quotes_in_broken_text_are_scrubbed(mc, text):
+    out = mc._preview(text)
+    assert SECRET not in out
+    assert "[REDACTED]" in out
+
+
+def test_ordinary_strings_are_left_alone(mc):
+    assert mc._preview(json.dumps("just text")) == '"just text"'
+    assert mc._preview(json.dumps("[not json")) == '"[not json"'
+
+
+def test_json_nested_three_deep_stops_unwrapping_safely(mc):
+    level3 = json.dumps(json.dumps(json.dumps({"token": SECRET})))
+    out = mc._preview(level3)
+    assert SECRET not in out  # the text pass still catches the escaped key
+
+
+def test_triple_escaped_broken_text_is_scrubbed(mc):
+    text = json.dumps(json.dumps(json.dumps({"token": SECRET, "more": "x" * 50})))[:-20]  # not valid JSON
+    out = mc._preview(text, limit=10_000)
+    assert SECRET not in out and "[REDACTED]" in out
+
+
+def test_long_runs_of_backslashes_stay_cheap(mc):
+    import time as _t
+
+    nasty = ('\\\\' * 50 + '"tok' + '\\\\' * 50 + '": ') * 300
+    start = _t.perf_counter()
+    mc._QUOTED_FIELD_RE.sub(mc._redact_field, nasty)
+    assert _t.perf_counter() - start < 0.5

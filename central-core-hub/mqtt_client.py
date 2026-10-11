@@ -250,29 +250,44 @@ def _log_debug(msg):
 _SECRET_KEY_RE = re.compile(r"token|passw|secret|private_?key|api_?key|authorization|credential|bearer", re.I)
 # For text that is not valid JSON (run on the cut preview only). Every part is
 # bounded or consumed once, so it is linear: a quoted key of at most 64
-# characters, a colon, then a quoted (possibly unterminated) or bare value.
+# characters (its quotes may be escaped, as in JSON inside a JSON string), a
+# colon, then a quoted (possibly escaped or unterminated) or bare value.
 _QUOTED_FIELD_RE = re.compile(
-    r"""(?P<key>(?P<q>["'])(?P<name>[^"'\\\n]{1,64})(?P=q)[ \t]{0,8}:[ \t]{0,8})"""
-    r"""(?P<value>"(?:[^"\\]|\\.)*"?|'(?:[^'\\]|\\.)*'?|[^,{}\[\]\s"']{1,256})"""
+    r"""(?P<key>(?P<esc>\\{0,8})(?P<q>["'])(?P<name>[^"'\\\n]{1,64})\\{0,8}(?P=q)[ \t]{0,8}:[ \t]{0,8})"""
+    r"""(?P<value>\\{1,8}"(?:[^"\\]|\\+[^"\\])*(?:\\{1,8}")?"""
+    r"""|"(?:[^"\\]|\\.)*"?|'(?:[^'\\]|\\.)*'?|[^,{}\[\]\s"'\\]{1,256})"""
 )
 _REDACTED = "[REDACTED]"
+# A string value this long or shorter is also checked for JSON inside it.
+_NESTED_JSON_MAX = 64 * 1024
 
 
-def _redact_secrets(value):
-    """A copy of a decoded JSON value with every secret-looking field blanked."""
+def _redact_secrets(value, depth=0):
+    """A copy of a decoded JSON value with every secret-looking field blanked,
+    also inside strings that hold JSON themselves (double-encoded payloads)."""
     if isinstance(value, dict):
         return {
-            k: (_REDACTED if isinstance(k, str) and _SECRET_KEY_RE.search(k) else _redact_secrets(v))
+            k: (_REDACTED if isinstance(k, str) and _SECRET_KEY_RE.search(k) else _redact_secrets(v, depth))
             for k, v in value.items()
         }
     if isinstance(value, list):
-        return [_redact_secrets(v) for v in value]
+        return [_redact_secrets(v, depth) for v in value]
+    if isinstance(value, str) and depth < 4 and len(value) <= _NESTED_JSON_MAX and value[:1] in ("{", "[", '"'):
+        try:
+            inner = json.loads(value)
+        except Exception:
+            return value
+        if isinstance(inner, (dict, list, str)):
+            redacted = _redact_secrets(inner, depth + 1)
+            if redacted != inner:
+                return json.dumps(redacted, separators=(",", ":"))
     return value
 
 
 def _redact_field(match):
     if _SECRET_KEY_RE.search(match.group("name")):
-        return match.group("key") + f'"{_REDACTED}"'
+        esc = match.group("esc")  # as many backslashes as the key's quotes had
+        return match.group("key") + f'{esc}"{_REDACTED}{esc}"'
     return match.group(0)
 
 
@@ -293,9 +308,11 @@ def _preview(payload, limit=_PREVIEW_CHARS):
     structured = False
     try:
         decoded = json.loads(text)
-        if isinstance(decoded, (dict, list)):
-            text = json.dumps(_redact_secrets(decoded), separators=(",", ":"))
-            structured = True
+        if isinstance(decoded, (dict, list, str)):
+            redacted = _redact_secrets(decoded)
+            if not isinstance(redacted, str) or redacted != decoded:  # a JSON string holding JSON counts
+                text = json.dumps(redacted, separators=(",", ":"))
+                structured = True
     except Exception:  # not JSON, or nested too deeply to walk
         pass
     extra = len(text) - limit
@@ -457,6 +474,8 @@ SENSOR_REGISTRY = pathlib.Path(__file__).parent / "SENSOR_REGISTRY.yaml"
 # Inbound commands wait here for the worker. Bounded so a flood of messages
 # cannot grow memory without limit; over the limit, messages are dropped.
 WORK_QUEUE_MAX = 100
+# How long a checked (and pinned) Home Assistant address is reused for REST requests.
+HA_RESOLVE_CACHE_S = 60.0
 # Larger inbound messages are dropped before they are queued (the handlers
 # refuse anything this size anyway; see handlers.MAX_COMMAND_BYTES).
 MAX_INBOUND_BYTES = 64 * 1024
@@ -1212,10 +1231,12 @@ class CentralCoreClient:
         self.ha_api_url = options.get("ha_api_url") or ""
         self.ha_api_token = options.get("ha_api_token") or ""
         if self.ha_api_url and self.ha_api_token:
-            # Checked again, and pinned, for every connection (_ha_base); this
-            # only decides whether the Home Assistant integration runs at all.
+            # Only the URL itself is checked here: whether a host name may receive
+            # the token is checked, and the address pinned, at every connection
+            # (_ha_base, the websocket's url_guard). A name that does not resolve
+            # yet (DNS not up after a power cut) must not switch Home Assistant off.
             try:
-                ok, why = _ha_safety().check_token_transport(self.ha_api_url)
+                ok, why = _ha_safety().check_token_url(self.ha_api_url)
             except Exception as exc:  # never stop the hub (MQTT) over a bad HA URL
                 ok, why = False, f"{type(exc).__name__}: {exc}"
             if not ok:
@@ -1803,15 +1824,20 @@ class CentralCoreClient:
             _log_debug(f"MQTT OUTBOX <- {topic} seq={seq} (not connected)")
             return None
         live = dict(stored, oldest_seq=store.oldest_seq() or seq, hub_time=_utc_now_iso())
+        store.begin_send([seq])  # an acknowledgement may arrive before mark_sent
         try:
             result = self._client.publish(topic, json.dumps(live), qos=1)
             rc = getattr(result, "rc", 0)
         except Exception as exc:
+            store.end_send([seq])
             _log(f"MQTT ERROR publishing seq {seq} to {topic}: {type(exc).__name__}", sys.stderr)
             return None
         _log(f"MQTT -> {topic} qos=1 seq={seq} rc={rc}")
         if rc == 0:
-            store.mark_sent([seq])
+            # Only under the id it was sent with: after a new outbox id it is resent.
+            store.mark_sent([seq], outbox_id=stored.get("outbox_id"))
+        else:
+            store.end_send([seq])
         return result
 
     def _handle_store_ack(self, payload_bytes):
@@ -1833,24 +1859,25 @@ class CentralCoreClient:
             deleted = store.ack(upto, ack.get("outbox_id"))
         except Exception as exc:
             if getattr(exc, "outbox_behind", False):
-                self._start_new_outbox(upto, exc)
+                # The rewrite is one short transaction, but not on paho's network thread.
+                self._submit(self._start_new_outbox, upto, exc)
             self._log_drop(f"ignored store ack: {type(exc).__name__}: {exc}")
             return 0
         _log(f"Vault stored readings up to seq {upto}; removed {deleted} from the outbox")
         return deleted
 
     def _start_new_outbox(self, upto, why):
-        """The vault confirmed seqs this outbox has never even numbered, under this
-        outbox's own id: the outbox is older than the vault's view of it, which is what
+        """The vault confirmed, under this outbox's own id, seqs this outbox has
+        not sent: the outbox is older than the vault's view of it, which is what
         restoring a Home Assistant backup does. Without a new id the vault would
-        drop every new reading as a duplicate until the seqs caught up, so start
-        one; every reading kept here is resent under it (nothing is deleted)."""
+        take new readings for duplicates, so start one; every reading kept here
+        is resent under it (nothing is deleted). Runs on the worker thread."""
         store = getattr(self, "_store", None)
         rotate = getattr(store, "rotate_outbox_id", None)
         if rotate is None:
             return None
         try:
-            rotated = rotate()
+            rotated = rotate(unambiguous=bool(getattr(why, "unambiguous", False)))
         except Exception as exc:
             _log(f"Outbox: could not start a new outbox id ({type(exc).__name__}: {exc})", sys.stderr)
             return None
@@ -1877,26 +1904,31 @@ class CentralCoreClient:
         if not store.vault_confirms():
             return 0  # an older vault: keep readings, do not resend them
         now = time.time() if now is None else now
+        outbox_id = store.outbox_id
         rows = store.due(CATCHUP_BATCH_SIZE, sent_before=now - RESEND_AFTER_S)
         if not rows:
             return 0
+        seqs = [r["seq"] for r in rows]
         batch = {
             "hub_time": _utc_now_iso(),
-            "outbox_id": store.outbox_id,
+            "outbox_id": outbox_id,
             "oldest_seq": store.oldest_seq() or rows[0]["seq"],
             "records": [
                 {k: r[k] for k in ("seq", "type", "event_ts", "queued_at", "payload")} for r in rows
             ],
         }
+        store.begin_send(seqs)
         try:
             result = self._client.publish(self.batch_topic, json.dumps(batch), qos=1)
             rc = getattr(result, "rc", 0)
         except Exception as exc:
+            store.end_send(seqs)
             _log(f"MQTT ERROR sending outbox batch: {type(exc).__name__}", sys.stderr)
             return 0
         if rc != 0:
+            store.end_send(seqs)
             return 0
-        store.mark_sent([r["seq"] for r in rows], when=now)
+        store.mark_sent(seqs, when=now, outbox_id=outbox_id)
         _log(f"Outbox: resent {len(rows)} readings (seq {rows[0]['seq']}-{rows[-1]['seq']})")
         return len(rows)
 
@@ -2330,25 +2362,51 @@ class CentralCoreClient:
                         return hv
         return None
 
+    def _ha_status(self):
+        """{"ha_connected": bool, "ha_last_event_at": UTC ISO or None} from the
+        Home Assistant websocket (False when Home Assistant is not configured)."""
+        listener = getattr(self, "_ha_ws_listener", None)
+        connected = False
+        last = None
+        if listener is not None:
+            try:
+                connected = bool(listener.is_connected())
+            except Exception:
+                connected = False
+            last = getattr(listener, "last_event_at", None)
+            if not isinstance(last, str):
+                last = None
+        return {"ha_connected": connected, "ha_last_event_at": last}
+
     def _ha_base(self):
-        """The Home Assistant URL for one request: checked now and, for plain http
-        to a host name, pinned to the address checked now. "" when it may not be
-        used now (logged once per reason). Never stored: the next request checks
-        again, so a DHCP change of Home Assistant's address is followed."""
+        """The Home Assistant URL for REST requests: checked and, for plain http to
+        a host name, pinned to the address checked then. "" when it may not be
+        used now (logged once per reason). The answer is kept for
+        HA_RESOLVE_CACHE_S only, so a slow resolver costs the main loop at most
+        one look-up a minute and a DHCP change of Home Assistant's address is
+        followed within a minute."""
         url = getattr(self, "ha_api_url", "") or ""
         if not url or not getattr(self, "ha_api_token", ""):
             return url
+        now = time.monotonic()
+        cached = getattr(self, "_ha_base_cache", None)
+        if cached and cached[0] == url and now < cached[1]:
+            return cached[2]
         try:
             ok, why, use = _ha_safety().pin_token_url(url)
         except Exception as exc:
             ok, why, use = False, f"{type(exc).__name__}", ""
-        if ok:
+        result = use if ok else ""
+        self._ha_base_cache = (url, now + HA_RESOLVE_CACHE_S, result)
+        if ok and "ignored" not in why:
             self._ha_refused_reason = None
-            return use
-        if getattr(self, "_ha_refused_reason", None) != why:
+        elif getattr(self, "_ha_refused_reason", None) != why:
             self._ha_refused_reason = why
-            _log(f"WARNING: not sending the Home Assistant token to {url!r} now: {why}")
-        return ""
+            if ok:
+                _log(f"Home Assistant at {url!r}: {why}")
+            else:
+                _log(f"WARNING: not sending the Home Assistant token to {url!r} now: {why}")
+        return result
 
     def _fetch_ha_version_from_api(self):
         if not self.ha_api_url or not self.ha_api_token or requests is None:
@@ -2395,6 +2453,16 @@ class CentralCoreClient:
                 data = json.loads(payload)
                 data["telemetry_interval"] = self.telemetry_interval
                 payload = json.dumps(data)
+        except Exception:
+            pass
+        # Whether Home Assistant is feeding this hub (central-core-mqtt-shared
+        # v1.2.0 SystemTelemetry.ha_connected / ha_last_event_at): without it, a
+        # hub whose websocket is down looks healthy to the vault. Older schemas
+        # ignore unknown keys, so this is safe with a v1.1.0 vault.
+        try:
+            data = json.loads(payload)
+            data.update(self._ha_status())
+            payload = json.dumps(data)
         except Exception:
             pass
         stats = self.outbox_stats()

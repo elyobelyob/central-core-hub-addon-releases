@@ -42,19 +42,40 @@ def _sent_box(ob, path, n, clock=None):
 # --------------------------------------------------------------------------- outbox
 
 
-def test_an_ack_racing_a_send_is_refused_but_does_not_start_a_new_outbox(ob, tmp_path):
+def test_an_ack_racing_a_send_is_believed(ob, tmp_path):
     box = _sent_box(ob, tmp_path / "o.db", 3)
-    box.append("system", "t", {}, "2026-10-02T10:00:10Z")  # seq 4 numbered, not yet marked sent
+    box.append("system", "t", {}, "2026-10-02T10:00:10Z")  # seq 4
+    box.begin_send([4])  # published, mark_sent not yet run
+    assert box.ack(4, box.outbox_id) == 4  # the vault really has it
+    assert box.mark_sent([4]) is True  # and the late mark_sent is harmless
+
+
+def test_an_ack_covering_readings_that_were_never_sent_says_the_outbox_is_behind(ob, tmp_path):
+    box = _sent_box(ob, tmp_path / "o.db", 3)
+    box.append("system", "t", {}, "2026-10-02T10:00:10Z")  # seq 4, never sent
+    box.append("system", "t", {}, "2026-10-02T10:00:11Z")  # seq 5, being sent
+    box.begin_send([5])
     with pytest.raises(ob.AckBeyondSent) as err:
-        box.ack(4, box.outbox_id)
-    assert err.value.outbox_behind is False
+        box.ack(5, box.outbox_id)
+    assert err.value.outbox_behind is True and err.value.unambiguous is False
+    assert "seq 4-4" in str(err.value)
+    assert box.stats()["backlog"] == 5
+
+
+def test_a_failed_publish_is_not_in_flight(ob, tmp_path):
+    box = _sent_box(ob, tmp_path / "o.db", 1)
+    box.append("system", "t", {}, "2026-10-02T10:00:10Z")
+    box.begin_send([2])
+    box.end_send([2])
+    with pytest.raises(ob.AckBeyondSent):
+        box.ack(2, box.outbox_id)
 
 
 def test_an_ack_past_every_numbered_seq_says_the_outbox_is_behind(ob, tmp_path):
     box = _sent_box(ob, tmp_path / "o.db", 3)
     with pytest.raises(ob.AckBeyondSent) as err:
         box.ack(10, box.outbox_id)
-    assert err.value.outbox_behind is True
+    assert err.value.outbox_behind is True and err.value.unambiguous is True
     assert isinstance(err.value, ob.AckRefused)
 
 
@@ -91,17 +112,37 @@ def test_after_rotation_the_old_id_is_refused_and_the_new_one_works(ob, tmp_path
     assert [r["seq"] for r in box.due(10)] == [3]
 
 
-def test_rotation_happens_at_most_once_an_hour(ob, tmp_path):
-    clock = Clock()
-    box = _sent_box(ob, tmp_path / "o.db", 2, clock=clock)
+def test_rotation_on_ambiguous_evidence_happens_at_most_once_an_hour(ob, tmp_path):
+    mono = Clock(500.0)
+    box = ob.SqliteOutbox(tmp_path / "o.db", monotonic=mono)
     first = box.rotate_outbox_id()
     assert first is not None
-    clock.t += 3599
+    mono.t += 3599
     assert box.rotate_outbox_id() is None
     assert box.outbox_id == first[1]
-    clock.t += 2
+    mono.t += 2
     assert box.rotate_outbox_id() is not None
     assert box.stats()["rotations_total"] == 2
+
+
+def test_clear_evidence_may_rotate_again_after_a_minute(ob, tmp_path):
+    mono = Clock(500.0)
+    box = ob.SqliteOutbox(tmp_path / "o.db", monotonic=mono)
+    assert box.rotate_outbox_id() is not None
+    mono.t += 59
+    assert box.rotate_outbox_id(unambiguous=True) is None
+    mono.t += 2
+    assert box.rotate_outbox_id(unambiguous=True) is not None
+    assert box.rotate_outbox_id() is None  # ambiguous evidence still waits an hour
+
+
+def test_a_wall_clock_jump_cannot_block_rotation(ob, tmp_path):
+    clock, mono = Clock(4_000_000_000.0), Clock(500.0)  # booted with the clock far ahead
+    box = ob.SqliteOutbox(tmp_path / "o.db", clock=clock, monotonic=mono)
+    assert box.rotate_outbox_id() is not None
+    clock.t = 1_800_000_000.0  # NTP corrects it
+    mono.t += 3601
+    assert box.rotate_outbox_id() is not None
 
 
 def test_a_failed_rotation_changes_nothing(ob, tmp_path, monkeypatch):
@@ -116,6 +157,7 @@ def test_a_failed_rotation_changes_nothing(ob, tmp_path, monkeypatch):
         box.rotate_outbox_id()
     monkeypatch.undo()
     assert box.outbox_id == before
+    assert box.rotate_outbox_id() is None  # the failed attempt counts: not retried on every ack
     assert box.highest_sent_seq() == 2
     assert all(r["payload"]["outbox_id"] == before for r in box.due(10, sent_before=float("inf")))
 
@@ -241,12 +283,85 @@ def test_a_forged_ack_cannot_lose_readings_or_rotate_repeatedly(mc, monkeypatch,
 def test_an_ack_racing_a_live_send_does_not_rotate(mc, monkeypatch, tmp_path):
     hub = _hub(mc, monkeypatch, tmp_path / "outbox.db")
     _door(hub, "on", "2026-10-02T07:00:00Z")  # seq 1 sent
-    hub._store.append("sensors", hub.preferred_sensors_topic, {"data": {}}, "2026-10-02T07:00:01Z")  # seq 2
     before = hub._store.outbox_id
-    _ack(hub, 2, before)  # the vault answers before seq 2 is marked sent
+    real_publish = hub._client.publish
+
+    def publish_then_ack(topic, payload, qos=0):
+        result = real_publish(topic, payload, qos)
+        _ack(hub, json.loads(payload)["seq"], before)  # the vault answers before mark_sent runs
+        return result
+
+    hub._client.publish = publish_then_ack
+    _door(hub, "off", "2026-10-02T07:00:01Z")  # seq 2
     assert hub._store.outbox_id == before
-    _ack(hub, 1, before)
-    assert hub._store.stats()["backlog"] == 1
+    assert hub._store.stats()["backlog"] == 0  # both confirmed, nothing resent
+    hub.close()
+
+
+def test_a_reading_sent_just_before_a_new_id_is_not_marked_sent_under_it(mc, monkeypatch, tmp_path):
+    hub = _hub(mc, monkeypatch, tmp_path / "outbox.db")
+    real_publish = hub._client.publish
+
+    def publish_then_rotate(topic, payload, qos=0):
+        result = real_publish(topic, payload, qos)
+        hub._store.rotate_outbox_id()  # a restore was detected meanwhile
+        return result
+
+    hub._client.publish = publish_then_rotate
+    _door(hub, "on", "2026-10-02T07:00:00Z")
+    assert hub._store.highest_sent_seq() == 0  # sent under the old id only
+    assert [r["seq"] for r in hub._store.due(10)] == [1]  # so it is due under the new one
+    hub.close()
+
+
+def test_the_new_id_is_started_on_the_worker_thread(mc, monkeypatch, tmp_path):
+    hub = _hub(mc, monkeypatch, tmp_path / "outbox.db")
+    _door(hub, "on", "2026-10-02T07:00:00Z")
+    queued = []
+    hub._submit = lambda fn, *args: queued.append((fn, args)) or True
+    before = hub._store.outbox_id
+    _ack(hub, 50, before)
+    assert hub._store.outbox_id == before  # not on paho's network thread
+    [(fn, args)] = queued
+    assert fn == hub._start_new_outbox
+    fn(*args)
+    assert hub._store.outbox_id != before
+    hub.close()
+
+
+def test_a_recent_backup_past_the_vault_mark_is_caught_before_unsent_rows_go(mc, monkeypatch, tmp_path):
+    """The other restore shape: the restored outbox has already numbered past
+    the vault's high mark, so the vault's ack is not past every numbered seq,
+    but it covers readings this outbox never sent. Those must not be deleted."""
+    db = tmp_path / "outbox.db"
+    lines = []
+    monkeypatch.setattr(mc, "_log", lambda m, file=None: lines.append(m))
+    hub = _hub(mc, monkeypatch, db)
+    for i in range(1, 11):  # seqs 1-10 sent and confirmed
+        _door(hub, "on" if i % 2 else "off", f"2026-10-02T07:{i:02d}:00Z")
+    original_id = hub._store.outbox_id
+    _ack(hub, 10, original_id)
+    hub._connected = False
+    for i in range(11, 16):  # seqs 11-15 queued while offline: in the backup, never sent
+        _door(hub, "on" if i % 2 else "off", f"2026-10-02T08:{i:02d}:00Z")
+    hub._store.close()
+    shutil.copy(db, tmp_path / "backup.db")
+
+    hub = _hub(mc, monkeypatch, db)  # the old timeline goes on: 11-15 are sent and stored
+    assert hub._send_due_readings() == 5
+    _ack(hub, 15, original_id)
+    assert hub._store.stats()["backlog"] == 0 and hub._store.outbox_id == original_id
+    hub._store.close()
+    shutil.copy(tmp_path / "backup.db", db)  # restore
+
+    hub = _hub(mc, monkeypatch, db)
+    _door(hub, "on", "2026-10-02T09:00:00Z")  # seq 16 sent live
+    lines.clear()
+    _ack(hub, 15, original_id)  # the vault's view: 1-15 stored
+    assert hub._store.stats()["backlog"] == 6  # 11-15 never sent from this outbox: kept, and 16
+    assert hub._store.outbox_id != original_id
+    assert len([m for m in lines if "backup is restored" in m]) == 1
+    assert [r["seq"] for r in hub._store.due(10)] == [11, 12, 13, 14, 15, 16]
     hub.close()
 
 
