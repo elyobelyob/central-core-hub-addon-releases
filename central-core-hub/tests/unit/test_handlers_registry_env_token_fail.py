@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -40,7 +41,7 @@ def test_registry_set_env_token_auth_fail(tmp_path, monkeypatch):
     client = DummyClient()
     topic = f"hubs/{client.client_id}/v1/cmd/registry/set"
     # payload without token should fail auth
-    payload = json.dumps({"command_id": "c-reg", "payload": {"entries": []}})
+    payload = json.dumps({"command_id": "c-reg", "timestamp": time.time(), "payload": {"entries": []}})
 
     handlers.handle_message(client, Msg(topic), payload, None, None, None)
 

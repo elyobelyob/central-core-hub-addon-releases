@@ -1,3 +1,4 @@
+import time
 import json
 import importlib.util
 from pathlib import Path
@@ -54,7 +55,7 @@ def test_poll_data_type_parsing(monkeypatch):
     c._client = dummy
     c.vault_topic = ""
 
-    cmd = {"command_id": "cid1", "action": "sensors/poll", "payload": {"sensors": ["temperature"]}}
+    cmd = {"command_id": "cid1", "timestamp": time.time(), "action": "sensors/poll", "payload": {"sensors": ["temperature"]}}
     msg = DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/poll", json.dumps(cmd).encode("utf-8"))
 
     c.on_message(None, None, msg)
@@ -97,7 +98,7 @@ def test_on_message_binary_payload_and_set_write_form_refused(monkeypatch):
     # a payload that cannot be decoded is handled without raising
     c.on_message(None, None, DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/poll", BadPayload()))
 
-    cmd = {"command_id": "cid2", "action": "sensors/set", "payload": {"sensors": [{"entity_id": "sensor.x", "state": "2"}]}}
+    cmd = {"command_id": "cid2", "timestamp": time.time(), "action": "sensors/set", "payload": {"sensors": [{"entity_id": "sensor.x", "state": "2"}]}}
     c.on_message(None, None, DummyMsg(f"hubs/{c.client_id}/v1/cmd/sensors/set", json.dumps(cmd).encode("utf-8")))
 
     resp_topic = c.build_ack_topic(cmd["action"], cmd["command_id"])

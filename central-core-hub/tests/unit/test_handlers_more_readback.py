@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -48,7 +49,7 @@ def test_poll_success_publishes_telemetry_and_vault():
         ]
 
     msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/sensors/poll"})
-    payload = {"command_id": "p2", "payload": {"sensors": ["door"]}}
+    payload = {"command_id": "p2", "timestamp": time.time(), "payload": {"sensors": ["door"]}}
 
     handlers.handle_message(client, msg, json.dumps(payload), fetch_sensors, None, None)
 
@@ -64,7 +65,7 @@ def test_set_list_of_dicts_is_refused_without_posting():
     R = _RecordingRequests()
 
     msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/sensors/set"})
-    payload = {"command_id": "s3", "payload": {"sensors": [{"entity_id": "sensor.a", "state": "1"}]}}
+    payload = {"command_id": "s3", "timestamp": time.time(), "payload": {"sensors": [{"entity_id": "sensor.a", "state": "1"}]}}
     handlers.handle_message(client, msg, json.dumps(payload), None, None, None, requests=R)
 
     assert R.calls == []

@@ -454,11 +454,13 @@ def _accept_command(client, msg, payload_str):
     """Decide whether an inbound command message is acted on at all.
 
     Commands are not signed, so these checks only limit what a retained or
-    replayed message can do: retained messages, repeated command ids, commands
-    older than MAX_COMMAND_AGE_SECONDS (refused with a failed ACK), malformed
-    command ids and oversized payloads are dropped. A command without a
-    readable timestamp is accepted, and one from the "future" too, since a
-    hub clock can run behind.
+    replayed message can do. Dropped: retained messages, oversized payloads,
+    commands without a well-formed `command_id` and repeated command ids.
+    Refused with a failed ACK: commands without a readable `timestamp`
+    (`bad_timestamp`) and commands older than MAX_COMMAND_AGE_SECONDS
+    (`stale_command`). The vault puts both fields on every command, so every
+    action needs both; a command from the "future" is accepted, since a hub
+    clock can run behind.
     """
     topic = getattr(msg, "topic", "") or ""
     prefix = f"hubs/{client.client_id}/v1/cmd/"
@@ -479,26 +481,33 @@ def _accept_command(client, msg, payload_str):
     if not isinstance(cmd, dict):
         cmd = {}
     command_id = cmd.get("command_id")
-    if command_id is not None and (not isinstance(command_id, str) or not _COMMAND_ID_RE.fullmatch(command_id)):
+    if command_id is None:
+        _log(f"Ignoring command on {topic}: no command_id")
+        return False
+    if not isinstance(command_id, str) or not _COMMAND_ID_RE.fullmatch(command_id):
         _log(f"Ignoring command on {topic}: malformed command_id")
         return False
-    if command_id:
-        seen = getattr(client, "_seen_command_ids", None)
-        if seen is None:
-            seen = collections.OrderedDict()
-            try:
-                client._seen_command_ids = seen
-            except Exception:
-                pass
-        if command_id in seen:
-            _log(f"Ignoring repeated command {command_id} on {topic}")
-            return False
-        seen[command_id] = True
-        while len(seen) > SEEN_COMMAND_IDS_MAX:
-            seen.popitem(last=False)
+    seen = getattr(client, "_seen_command_ids", None)
+    if seen is None:
+        seen = collections.OrderedDict()
+        try:
+            client._seen_command_ids = seen
+        except Exception:
+            pass
+    if command_id in seen:
+        _log(f"Ignoring repeated command {command_id} on {topic}")
+        return False
+    seen[command_id] = True
+    while len(seen) > SEEN_COMMAND_IDS_MAX:
+        seen.popitem(last=False)
     age = _command_age_seconds(cmd.get("timestamp"))
-    if age is not None and age > MAX_COMMAND_AGE_SECONDS:
-        _log(f"Refusing stale command {command_id or ''} on {topic} ({int(age)}s old)")
+    if age is None:
+        _log(f"Refusing command {command_id} on {topic}: no readable timestamp")
+        _send_ack(client, action, command_id, {"status": "failed", "result": {"reason": "bad_timestamp"},
+                                               "timestamp": _utc_now_iso()})
+        return False
+    if age > MAX_COMMAND_AGE_SECONDS:
+        _log(f"Refusing stale command {command_id} on {topic} ({int(age)}s old)")
         _send_ack(client, action, command_id, {"status": "failed", "result": {"reason": "stale_command"},
                                                "timestamp": _utc_now_iso()})
         return False

@@ -8,6 +8,7 @@ the hub cannot read Home Assistant's registries it cannot tell which entities
 are on phones, so it sends no sensors at all.
 """
 
+import time
 import importlib
 import json
 import types
@@ -172,14 +173,14 @@ def _telemetry(c, sent):
 
 def test_poll_leaves_out_phones_and_location(hub):
     c, sent, _ = hub
-    _cmd(c, "sensors/poll", {"command_id": "p1", "payload": {"sensors": ["power"]}}, lambda u, t: list(STATES))
+    _cmd(c, "sensors/poll", {"command_id": "p1", "timestamp": time.time(), "payload": {"sensors": ["power"]}}, lambda u, t: list(STATES))
     assert list(_telemetry(c, sent)[-1]["data"]) == ["sensor.plug_power"]
 
 
 def test_poll_sends_nothing_when_phones_cannot_be_told(hub):
     c, sent, _ = hub
     c._ha_ws_listener = FakeListener(answer=False)
-    _cmd(c, "sensors/poll", {"command_id": "p1", "payload": {"sensors": ["power"]}}, lambda u, t: list(STATES))
+    _cmd(c, "sensors/poll", {"command_id": "p1", "timestamp": time.time(), "payload": {"sensors": ["power"]}}, lambda u, t: list(STATES))
     assert _telemetry(c, sent)[-1]["data"] == {}
     assert any("exclude phones" in m for m in c._lines)
 
@@ -187,7 +188,7 @@ def test_poll_sends_nothing_when_phones_cannot_be_told(hub):
 def test_set_refuses_phone_and_location_entities(hub):
     c, sent, _ = hub
     wanted = ["sensor.plug_power", "sensor.pixel_wifi_ssid", "sensor.pixel_geocoded_location"]
-    _cmd(c, "sensors/set", {"command_id": "s1", "payload": {"sensors": wanted}}, lambda u, t: list(STATES))
+    _cmd(c, "sensors/set", {"command_id": "s1", "timestamp": time.time(), "payload": {"sensors": wanted}}, lambda u, t: list(STATES))
     assert c.selected_sensors == ["sensor.plug_power"]
     done = [p for t, p in sent if p.get("status") == "completed"][-1]
     assert sorted(done["result"]["rejected"]) == ["sensor.pixel_geocoded_location", "sensor.pixel_wifi_ssid"]
@@ -198,7 +199,7 @@ def test_set_keeps_the_old_selection_when_phones_cannot_be_told(hub):
     c, sent, _ = hub
     c.selected_sensors = ["sensor.plug_power"]
     c._ha_ws_listener = FakeListener(answer=False)
-    _cmd(c, "sensors/set", {"command_id": "s1", "payload": {"sensors": ["sensor.pixel_wifi_ssid"]}},
+    _cmd(c, "sensors/set", {"command_id": "s1", "timestamp": time.time(), "payload": {"sensors": ["sensor.pixel_wifi_ssid"]}},
          lambda u, t: list(STATES))
     assert c.selected_sensors == ["sensor.plug_power"]
     final = [p for t, p in sent if p.get("status") == "failed"][-1]

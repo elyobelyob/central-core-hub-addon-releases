@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -34,7 +35,7 @@ def test_registry_missing_payload_publishes_failed_ack():
     client = FakeClient()
     msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/registry/set"})
     # payload missing 'payload' key
-    payload = {"command_id": "rm1"}
+    payload = {"command_id": "rm1", "timestamp": time.time()}
 
     handlers.handle_message(client, msg, json.dumps(payload), None, None, None)
 
@@ -73,7 +74,7 @@ def test_registry_set_with_env_token_succeeds(tmp_path, monkeypatch):
     try:
         msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/registry/set"})
         payload_obj = {"token": "envsecret", "entries": []}
-        payload = {"command_id": "rt1", "payload": payload_obj}
+        payload = {"command_id": "rt1", "timestamp": time.time(), "payload": payload_obj}
 
         handlers.handle_message(client, msg, json.dumps(payload), None, None, None)
 

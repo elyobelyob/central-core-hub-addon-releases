@@ -1,3 +1,4 @@
+import time
 import json
 import importlib.util
 import os
@@ -58,7 +59,7 @@ def test_handle_message_poll_invalid_and_missing_entity(monkeypatch):
     handlers.handle_message(
         c,
         msg,
-        '{"command_id": "poll_cmd", "payload": {"sensors": ["temperature"]}}',
+        json.dumps({"command_id": "poll_cmd", "timestamp": time.time(), "payload": {"sensors": ["temperature"]}}),
         fetch_sensors,
         lambda *a, **k: None,
         lambda x: x,
@@ -91,7 +92,7 @@ def test_handle_message_set_no_ha_and_request_exceptions(monkeypatch):
     msg = types.SimpleNamespace(topic=f"hubs/{c.client_id}/v1/cmd/sensors/set")
 
     # payload sets two sensors; with no HA config, results should go to failed
-    payload = json.dumps({"command_id": "x", "payload": {"sensors": {"a": "on", "b": "3"}}})
+    payload = json.dumps({"command_id": "x", "timestamp": time.time(), "payload": {"sensors": {"a": "on", "b": "3"}}})
 
     handlers.handle_message(c, msg, payload, lambda *a, **k: [], lambda *a, **k: None, lambda x: x, None)
 
@@ -204,7 +205,7 @@ def test_handle_message_set_write_form_refused_despite_publish_failures(monkeypa
     c = FakeClient()
     msg = types.SimpleNamespace(topic=f"hubs/{c.client_id}/v1/cmd/sensors/set")
     requests_mock = _RecordingRequests()
-    payload = json.dumps({"command_id": "set_cmd", "payload": {"sensors": {"ent1": "on"}}})
+    payload = json.dumps({"command_id": "set_cmd", "timestamp": time.time(), "payload": {"sensors": {"ent1": "on"}}})
     handlers.handle_message(c, msg, payload, lambda *a, **k: [], lambda *a, **k: None, lambda x: x, requests_mock)
 
     assert requests_mock.calls == []

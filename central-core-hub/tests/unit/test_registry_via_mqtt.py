@@ -1,3 +1,4 @@
+import time
 import importlib.util
 from pathlib import Path
 import json
@@ -69,7 +70,7 @@ def test_registry_set_writes_file_and_reload(tmp_path, monkeypatch):
         }
 
         def send(cid, payload):
-            msg_payload = json.dumps({"command_id": cid, "payload": payload})
+            msg_payload = json.dumps({"command_id": cid, "timestamp": time.time(), "payload": payload})
             handlers.handle_message(
                 c,
                 Msg(topic, msg_payload),

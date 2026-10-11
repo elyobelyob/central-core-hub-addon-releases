@@ -5,6 +5,7 @@ command is refused; with one, the token must match (constant-time compare),
 the document must be well formed, and the token is never written to disk.
 """
 
+import time
 import itertools
 import json
 import types
@@ -44,7 +45,7 @@ _ids = itertools.count(1)
 
 def _send(c, payload):
     msg = types.SimpleNamespace(topic="hubs/hub1/v1/cmd/registry/set", retain=False)
-    body = json.dumps({"command_id": f"r{next(_ids)}", "payload": payload})
+    body = json.dumps({"command_id": f"r{next(_ids)}", "timestamp": time.time(), "payload": payload})
     handlers.handle_message(c, msg, body, lambda *a: [], None, None, None)
 
 

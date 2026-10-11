@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -45,7 +46,7 @@ def test_selected_sensors_persist_replace_failure(tmp_path, monkeypatch):
     try:
         client = DummyClient("unit-persist")
         topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
-        payload = json.dumps({"command_id": "p1", "payload": {"sensors": ["sensor.x"]}})
+        payload = json.dumps({"command_id": "p1", "timestamp": time.time(), "payload": {"sensors": ["sensor.x"]}})
 
         # fetch_sensors returns one matching entity so monitor_telemetry constructed
         def fetch_sensors(url, token):

@@ -1,3 +1,4 @@
+import time
 import json
 import importlib.util
 import pathlib
@@ -63,7 +64,7 @@ def test_set_readback_exception_falls_back():
 
     requests = SimpleNamespace(post=post, get=get)
 
-    payload = json.dumps({"command_id": "c1", "payload": {"sensors": {"sensor.one": "123"}}})
+    payload = json.dumps({"command_id": "c1", "timestamp": time.time(), "payload": {"sensors": {"sensor.one": "123"}}})
     handlers.handle_message(
         client,
         make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/set"),
@@ -93,7 +94,7 @@ def test_set_post_raises_records_failure():
 
     requests = SimpleNamespace(post=post, get=lambda *a, **k: None)
 
-    payload = json.dumps({"command_id": "c2", "payload": {"sensors": {"sensor.two": "on"}}})
+    payload = json.dumps({"command_id": "c2", "timestamp": time.time(), "payload": {"sensors": {"sensor.two": "on"}}})
     handlers.handle_message(
         client,
         make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/set"),
@@ -115,7 +116,7 @@ def test_set_item_without_entity_skipped_and_no_ha_config():
     client.ha_api_url = None
     client.ha_api_token = None
 
-    payload = json.dumps({"command_id": "c3", "payload": {"sensors": [{"state": "on"}]}})
+    payload = json.dumps({"command_id": "c3", "timestamp": time.time(), "payload": {"sensors": [{"state": "on"}]}})
     handlers.handle_message(
         client,
         make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/set"),
@@ -142,7 +143,7 @@ def test_poll_prefers_client_selected_sensors_for_reminder():
             {"entity_id": "sensor.x", "state": "0", "attributes": {}},
         ]
 
-    payload = json.dumps({"command_id": "c4", "payload": {"sensors": ["temperature"]}})
+    payload = json.dumps({"command_id": "c4", "timestamp": time.time(), "payload": {"sensors": ["temperature"]}})
     handlers.handle_message(
         client,
         make_msg(f"hubs/{client.client_id}/v1/cmd/sensors/poll"),

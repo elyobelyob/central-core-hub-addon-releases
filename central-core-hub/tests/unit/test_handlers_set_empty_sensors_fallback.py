@@ -1,3 +1,4 @@
+import time
 import json
 import importlib.util
 from pathlib import Path
@@ -46,7 +47,7 @@ def test_sensors_set_empty_selection_publishes_fallback_telemetry_and_vault_remi
     mqtt_mod, handlers = _load_modules()
     c = DummyClient()
     topic = f"hubs/{c.client_id}/v1/cmd/sensors/set"
-    cmd = {"command_id": "s_empty", "payload": {"sensors": []}}
+    cmd = {"command_id": "s_empty", "timestamp": time.time(), "payload": {"sensors": []}}
     payload = json.dumps(cmd)
     msg = Msg(topic)
 

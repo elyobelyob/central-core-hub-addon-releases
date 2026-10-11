@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -61,7 +62,7 @@ def test_sensors_set_list_reports_current_state_without_readback_calls():
         ]
 
     msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/sensors/set"})
-    payload = {"command_id": "cmd1", "payload": {"sensors": ["sensor.foo"]}}
+    payload = {"command_id": "cmd1", "timestamp": time.time(), "payload": {"sensors": ["sensor.foo"]}}
     handlers.handle_message(client, msg, json.dumps(payload), fetch, None, None, requests=R)
 
     assert R.calls == []
@@ -76,7 +77,7 @@ def test_sensors_set_readback_form_is_refused():
     client = FakeClient()
     R = _RecordingRequests()
     msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/sensors/set"})
-    payload = {"command_id": "cmd1b", "payload": {"sensors": [{"entity_id": "sensor.foo", "state": "on"}]}}
+    payload = {"command_id": "cmd1b", "timestamp": time.time(), "payload": {"sensors": [{"entity_id": "sensor.foo", "state": "on"}]}}
     handlers.handle_message(client, msg, json.dumps(payload), None, None, None, requests=R)
     assert R.calls == []
     assert _secure_final_ack(client.publishes)["result"]["reason"] == "invalid_payload"
@@ -88,7 +89,7 @@ def test_sensors_set_write_form_refused_without_ha_config():
     client.ha_api_token = ""
 
     msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/sensors/set"})
-    payload = {"command_id": "cmd2", "payload": {"sensors": [{"entity_id": "sensor.bar", "state": "off"}]}}
+    payload = {"command_id": "cmd2", "timestamp": time.time(), "payload": {"sensors": [{"entity_id": "sensor.bar", "state": "off"}]}}
     handlers.handle_message(client, msg, json.dumps(payload), None, None, None, requests=None)
 
     comp = _secure_final_ack(client.publishes)
@@ -103,7 +104,7 @@ def test_sensors_set_list_without_ha_config_completes_with_empty_report():
     client.ha_api_token = ""
 
     msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/sensors/set"})
-    payload = {"command_id": "cmd3", "payload": {"sensors": ["sensor.bar"]}}
+    payload = {"command_id": "cmd3", "timestamp": time.time(), "payload": {"sensors": ["sensor.bar"]}}
     handlers.handle_message(client, msg, json.dumps(payload), lambda a, b: None, None, None, requests=None)
 
     comp = _secure_final_ack(client.publishes)

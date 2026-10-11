@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -58,7 +59,7 @@ def test_sensors_set_list_when_ha_fetch_fails_completes_with_empty_report():
     def failing_fetch(url, token):
         raise RuntimeError("HA unreachable")
 
-    payload = json.dumps({"command_id": "c-getfail", "payload": {"sensors": ["sensor.x"]}})
+    payload = json.dumps({"command_id": "c-getfail", "timestamp": time.time(), "payload": {"sensors": ["sensor.x"]}})
     handlers.handle_message(client, Msg(topic), payload, failing_fetch, None, None, requests=req)
 
     assert req.calls == []
@@ -70,7 +71,7 @@ def test_sensors_set_list_when_ha_fetch_fails_completes_with_empty_report():
     assert comp["result"]["data"] == {}
 
     # and the readback form itself is refused
-    payload = json.dumps({"command_id": "c-getfail2", "payload": {"sensors": [{"entity_id": "sensor.x", "state": "on"}]}})
+    payload = json.dumps({"command_id": "c-getfail2", "timestamp": time.time(), "payload": {"sensors": [{"entity_id": "sensor.x", "state": "on"}]}})
     handlers.handle_message(client, Msg(topic), payload, failing_fetch, None, None, requests=req)
     assert _secure_final_ack(client.published)["result"]["reason"] == "invalid_payload"
 

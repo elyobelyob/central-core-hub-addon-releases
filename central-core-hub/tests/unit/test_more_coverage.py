@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import sys
 import types
@@ -210,7 +211,7 @@ def test_sensors_poll_with_requested_subset(monkeypatch):
     c._publish = lambda topic, payload, qos=0: published.append((topic, json.loads(payload)))
 
     # create poll command requesting only door device class
-    cmd = {"command_id": "p1", "payload": {"sensors": ["door"]}}
+    cmd = {"command_id": "p1", "timestamp": time.time(), "payload": {"sensors": ["door"]}}
     msg = type(
         "M",
         (),
@@ -238,7 +239,7 @@ def test_sensors_set_mapping_and_no_ha_config(monkeypatch):
     c._publish = lambda topic, payload, qos=0: published.append((topic, json.loads(payload)))
 
     # mapping-style payload
-    cmd = {"command_id": "smap", "payload": {"sensors": {"sensor.x": "9"}}}
+    cmd = {"command_id": "smap", "timestamp": time.time(), "payload": {"sensors": {"sensor.x": "9"}}}
     msg = type(
         "M",
         (),

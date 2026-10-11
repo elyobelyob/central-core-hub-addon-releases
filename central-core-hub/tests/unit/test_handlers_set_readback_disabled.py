@@ -1,3 +1,4 @@
+import time
 import importlib.util
 import pathlib
 import json
@@ -58,11 +59,11 @@ def test_sensors_set_reports_ha_state_not_a_sent_state():
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
     req = _RecordingRequests()
 
-    payload = json.dumps({"command_id": "c-noget", "payload": {"sensors": [{"entity_id": "sensor.x", "state": "yes"}]}})
+    payload = json.dumps({"command_id": "c-noget", "timestamp": time.time(), "payload": {"sensors": [{"entity_id": "sensor.x", "state": "yes"}]}})
     handlers.handle_message(client, Msg(topic), payload, None, None, None, requests=req)
     assert _secure_final_ack(client.published)["result"]["reason"] == "invalid_payload"
 
-    payload = json.dumps({"command_id": "c-list", "payload": {"sensors": ["sensor.x"]}})
+    payload = json.dumps({"command_id": "c-list", "timestamp": time.time(), "payload": {"sensors": ["sensor.x"]}})
     fetch = lambda url, token: [{"entity_id": "sensor.x", "state": "no", "attributes": {}}]  # noqa: E731
     handlers.handle_message(client, Msg(topic), payload, fetch, None, None, requests=req)
     assert req.calls == []

@@ -1,3 +1,4 @@
+import time
 import json
 import importlib.util
 import pathlib
@@ -42,7 +43,7 @@ class Msg:
 def test_set_write_form_never_posts():
     client = DummyClient()
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
-    payload = json.dumps({"command_id": "t1", "payload": {"sensors": [{"entity_id": "sensor.x", "state": "on"}]}})
+    payload = json.dumps({"command_id": "t1", "timestamp": time.time(), "payload": {"sensors": [{"entity_id": "sensor.x", "state": "on"}]}})
     req = _RecordingRequests()
     handlers.handle_message(client, Msg(topic), payload, None, None, None, requests=req)
     assert req.calls == []
@@ -56,7 +57,7 @@ def test_set_list_with_missing_entity_id_is_refused():
     client.ha_api_token = None
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
     payload = json.dumps(
-        {"command_id": "t2", "payload": {"sensors": [{"state": "on"}, {"entity_id": "sensor.y", "state": "off"}]}}
+        {"command_id": "t2", "timestamp": time.time(), "payload": {"sensors": [{"state": "on"}, {"entity_id": "sensor.y", "state": "off"}]}}
     )
     handlers.handle_message(client, Msg(topic), payload, None, None, None)
     comp = _secure_final_ack(client.published)
@@ -66,7 +67,7 @@ def test_set_list_with_missing_entity_id_is_refused():
 def test_set_mixed_list_of_strings_and_objects_is_refused():
     client = DummyClient()
     topic = f"hubs/{client.client_id}/v1/cmd/sensors/set"
-    payload = json.dumps({"command_id": "t3", "payload": {"sensors": ["sensor.a", {"entity_id": "sensor.y", "state": "off"}]}})
+    payload = json.dumps({"command_id": "t3", "timestamp": time.time(), "payload": {"sensors": ["sensor.a", {"entity_id": "sensor.y", "state": "off"}]}})
     req = _RecordingRequests()
     handlers.handle_message(client, Msg(topic), payload, None, None, None, requests=req)
     assert req.calls == []
