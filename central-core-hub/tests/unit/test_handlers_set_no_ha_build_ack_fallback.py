@@ -47,7 +47,7 @@ class Msg:
         self.payload = b""
 
 
-def test_sensors_set_completion_ack_fallback_when_build_ack_fails():
+def test_sensors_set_sends_no_ack_when_build_ack_fails():
     mqtt_mod, handlers = _load_modules()
     c = DummyClient()
     topic = f"hubs/{c.client_id}/v1/cmd/sensors/set"
@@ -57,14 +57,5 @@ def test_sensors_set_completion_ack_fallback_when_build_ack_fails():
 
     handlers.handle_message(c, msg, payload, None, None, None)
 
-    # Expect completion ACK using fallback topic string and containing no_ha_config
-    expected_topic = f"hubs/{c.client_id}/v1/ack/sensors.set/s1"
-    found = None
-    for p in c.published:
-        if p["topic"] == expected_topic:
-            found = p
-            break
-    assert found is not None, f"expected completion ack on {expected_topic}, got: {c.published}"
-    # Handler may publish an initial 'acknowledged' ACK before the
-    # completion ACK; accept either outcome to avoid flakiness.
-    assert ("no_ha_config" in found["payload"]) or ("acknowledged" in found["payload"])
+    # build_ack_topic failed: nothing is acknowledged on a guessed topic
+    assert not any("/ack/" in str(p["topic"]) for p in c.published), c.published

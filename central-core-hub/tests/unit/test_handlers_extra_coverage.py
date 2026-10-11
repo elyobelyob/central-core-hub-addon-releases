@@ -54,8 +54,8 @@ def test_handle_config_update_ack_and_completion():
     topic = f"hubs/{client.client_id}/v1/cmd/config/update"
     payload = json.dumps({"command_id": "cid1", "timestamp": time.time(), "payload": {"version": "1.2.3"}})
     handlers.handle_message(client, Msg(topic), payload, None, None, None)
-    # two publishes: ack and completion (ack uses fallback string since build_ack_topic raised)
-    assert any("ack" in t for t, _, _ in client.published)
+    # build_ack_topic raised for config/update: no acknowledgement to a guessed topic
+    assert not any("/ack/" in t for t, _, _ in client.published)
 
 
 def test_handle_sensors_poll_filters_and_publish():

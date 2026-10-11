@@ -45,7 +45,25 @@ def test_fallback_templates_when_the_package_is_missing(monkeypatch):
     build = topics.build_topic
     assert build(topics.TELEMETRY_SYSTEM, hub_id="h", version=1) == "hubs/h/v1/telemetry/system"
     assert build(topics.TELEMETRY_SENSORS, hub_id="h", version=1) == "hubs/h/v1/telemetry/sensors"
-    assert build(topics.CMD_GENERIC, hub_id="h", version=1, domain="+", action="+") == "hubs/h/v1/cmd/+/+"
+    assert (
+        topics.build_subscription(topics.CMD_GENERIC, wildcards=("domain", "action"), hub_id="h", version=1)
+        == "hubs/h/v1/cmd/+/+"
+    )
+    # the built-in templates check values like the shared package does
+    for bad in ("+", "#", "a/b", "", "broadcast"):
+        with pytest.raises(ValueError):
+            build(topics.TELEMETRY_SYSTEM, hub_id=bad, version=1)
+    with pytest.raises(ValueError):
+        build(topics.CMD_GENERIC, hub_id="h", version=1, domain="+", action="+")
+    with pytest.raises(ValueError):
+        topics.build_subscription(topics.CMD_GENERIC, wildcards=("domain",), hub_id="h", version=1, action="x/y")
+    with pytest.raises(ValueError):
+        topics.build_subscription(topics.CMD_GENERIC, wildcards=("domain", "action"), hub_id="h", version=1,
+                                  domain="x")
+    with pytest.raises(ValueError):
+        build(topics.ACK_GENERIC, hub_id="h", version=1, command_name="a\u202eb", command_id="c")
+    with pytest.raises(KeyError):
+        build(topics.ACK_GENERIC, hub_id="h", version=1)
     assert (
         build(topics.ACK_GENERIC, hub_id="h", version=1, command_name="a.b", command_id="c")
         == "hubs/h/v1/ack/a.b/c"

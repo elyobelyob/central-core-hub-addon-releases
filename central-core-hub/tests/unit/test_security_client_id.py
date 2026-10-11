@@ -152,9 +152,14 @@ def test_a_newer_shared_package_builds_the_wildcard_subscription_with_build_subs
         assert "+" not in kw.values(), "build_topic must not be given a wildcard"
         return real.build_topic(template, **kw)
 
+    def subscription(template, wildcards=(), **kw):
+        assert tuple(wildcards) == ("domain", "action")
+        assert kw["hub_id"] == "demo-home-001"
+        return real.build_topic(template, domain="+", action="+", **kw)
+
     class Newer:
         build_topic = staticmethod(strict)
-        build_subscription = staticmethod(real.build_topic)
+        build_subscription = staticmethod(subscription)
 
         def __getattr__(self, name):
             return getattr(real, name)
