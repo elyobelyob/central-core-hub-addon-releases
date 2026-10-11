@@ -6,8 +6,9 @@ Store and confirm (central-core-mqtt-shared protocol 1.1):
    SQLite transaction, with the next sequence number (`seq`), the time the
    reading happened (`event_ts`, Home Assistant's `last_changed` in UTC) and
    the time the hub queued it (`queued_at`). Then it is sent at QoS 1.
-2. The vault publishes `hubs/<id>/v1/ack {"upto": N}` once it has committed
-   everything up to N; `ack()` deletes those rows.
+2. The vault publishes `hubs/<id>/v1/ack {"upto": N, "outbox_id": ...}` once it
+   has committed everything up to N; `ack()` deletes those rows, but only for
+   this outbox's id and never past the highest `seq` the hub has sent.
 3. On (re)connect everything still here is resent, oldest first, in batches
    (`due()` / `mark_sent()`); the caller rate-limits.
 
@@ -51,6 +52,10 @@ CREATE TABLE IF NOT EXISTS outbox (
     last_sent REAL
 );
 """
+
+
+class AckRefused(ValueError):
+    """A store acknowledgement that cannot be believed; it deletes nothing."""
 
 
 def utc_iso(value: Any = None) -> str:
@@ -162,19 +167,35 @@ class SqliteOutbox:
         self.enforce_caps(now)
         return seq, stored
 
-    def ack(self, upto: int, outbox_id: Optional[str] = None) -> int:
+    def highest_sent_seq(self) -> int:
+        """The highest `seq` this hub has actually sent (0 if none), counting
+        readings already deleted: the vault cannot have stored a reading that
+        was never sent, so no acknowledgement can reach past this."""
+        with self._lock:
+            return self._highest_sent_locked()
+
+    def _highest_sent_locked(self) -> int:
+        row = self._db.execute("SELECT MAX(seq) FROM outbox WHERE sent_count > 0").fetchone()
+        return max(row[0] or 0, self._meta_int("last_acked_seq", 0))
+
+    def ack(self, upto: int, outbox_id: str) -> int:
         """Delete every reading up to and including `upto`; returns how many.
 
-        An acknowledgement naming another outbox (the vault answering for a
-        database this hub no longer has) is ignored.
+        An acknowledgement is believed only if it names this outbox (`outbox_id`
+        is required) and does not reach past the highest `seq` this hub has
+        sent. Anything else raises `AckRefused` and deletes nothing, so a
+        forged or stale message cannot empty the outbox.
         """
-        try:
-            upto = int(upto)
-        except (TypeError, ValueError):
-            return 0
+        if isinstance(upto, bool) or not isinstance(upto, int) or upto < 0:
+            raise AckRefused("upto must be a non-negative integer")
+        if not isinstance(outbox_id, str) or not outbox_id:
+            raise AckRefused("no outbox_id")
         with self._lock:
-            if outbox_id is not None and str(outbox_id) != self._meta("outbox_id"):
-                return 0
+            if outbox_id != self._meta("outbox_id"):
+                raise AckRefused("it is for another outbox")
+            sent = self._highest_sent_locked()
+            if upto > sent:
+                raise AckRefused(f"upto {upto} is beyond the highest seq sent ({sent})")
             self._db.execute("BEGIN IMMEDIATE")
             try:
                 cur = self._db.execute("DELETE FROM outbox WHERE seq <= ?", (upto,))

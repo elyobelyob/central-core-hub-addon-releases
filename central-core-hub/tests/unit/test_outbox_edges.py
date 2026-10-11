@@ -76,17 +76,18 @@ def test_append_of_unserialisable_payload_stores_nothing_and_keeps_seq(tmp_path)
 def test_failed_ack_leaves_readings_in_place(tmp_path, monkeypatch):
     box = _box(tmp_path)
     box.append("state", "t", {"a": 1}, 0)
+    box.mark_sent([1])
 
     def boom(*_a, **_k):
         raise RuntimeError("disk full")
 
     monkeypatch.setattr(box, "_set_meta", boom)
     with pytest.raises(RuntimeError):
-        box.ack(1)
+        box.ack(1, box.outbox_id)
     monkeypatch.undo()
     assert box.stats()["backlog"] == 1  # delete rolled back with the meta write
     assert box.vault_confirms() is False
-    assert box.ack(1) == 1  # and the outbox still works afterwards
+    assert box.ack(1, box.outbox_id) == 1  # and the outbox still works afterwards
 
 
 def test_failed_cap_enforcement_rolls_back(tmp_path, monkeypatch):
