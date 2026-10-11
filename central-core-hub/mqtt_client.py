@@ -1674,7 +1674,12 @@ class CentralCoreClient:
         return result
 
     def _handle_store_ack(self, payload_bytes):
-        """The vault stored everything up to `upto`: delete it from the outbox."""
+        """The vault stored everything up to `upto`: delete it from the outbox.
+
+        Refused (nothing deleted, one rate-limited log line) unless the message
+        is JSON with an integer `upto`, names this hub's `outbox_id`, and does
+        not reach past the highest seq the hub has sent.
+        """
         store = getattr(self, "_store", None)
         if store is None:
             return 0
@@ -1683,11 +1688,10 @@ class CentralCoreClient:
             upto = ack.get("upto") if isinstance(ack, dict) else None
             if isinstance(upto, bool) or not isinstance(upto, int) or upto < 0:
                 raise ValueError("upto must be a non-negative integer")
-            outbox_id = ack.get("outbox_id")
+            deleted = store.ack(upto, ack.get("outbox_id"))
         except Exception as exc:
             self._log_drop(f"ignored store ack: {type(exc).__name__}: {exc}")
             return 0
-        deleted = store.ack(upto, outbox_id=outbox_id if isinstance(outbox_id, str) else None)
         _log(f"Vault stored readings up to seq {upto}; removed {deleted} from the outbox")
         return deleted
 
@@ -1985,6 +1989,11 @@ class CentralCoreClient:
             _log(f"MQTT <- {msg.topic} len={size} retain={getattr(msg, 'retain', False) is True}")
             _log_debug(f"MQTT <- {msg.topic} payload={_preview(payload)}")
             if msg.topic == getattr(self, "store_ack_topic", None):
+                # The vault never retains a store ack, and a retained one would
+                # be replayed to every new session: refuse it.
+                if getattr(msg, "retain", False) is True:
+                    self._log_drop(f"ignored retained store ack on {msg.topic}")
+                    return
                 self._handle_store_ack(msg.payload)
                 return
             # Handlers may call Home Assistant: run them on the worker.
