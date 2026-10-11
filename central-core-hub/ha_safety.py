@@ -58,12 +58,23 @@ def _is_local_address(ip):
         return False
 
 
+def _pick_address(addresses):
+    """The address to connect to: IPv4 first (Home Assistant always listens on it),
+    then IPv6. Link-local IPv6 with a zone id (fe80::1%eth0) cannot be put in a
+    URL safely, so it is never picked."""
+    v4 = [a for a in addresses if ":" not in a]
+    v6 = [a for a in addresses if ":" in a and "%" not in a]
+    return (v4 or v6 or [None])[0]
+
+
 def _assess(url):
     """(ok, reason, url_to_use) for sending the token to `url`; resolves a host name at most once.
 
     Over plain http/ws to a host *name* (not a fixed local name, not an
     address), the address that was checked replaces the name in `url_to_use`,
-    so the checked address is the one that is used.
+    so the checked address is the one that is used. Call it for every
+    connection: the answer is for this connection only (a DHCP change moves
+    Home Assistant's address, so a pin must never be kept).
     """
     from urllib.parse import urlsplit
 
@@ -72,12 +83,18 @@ def _assess(url):
         host = (parts.hostname or "").lower()
     except ValueError:
         return False, "unparseable URL", url
+    try:
+        port = parts.port  # raises ValueError for a port out of range, e.g. :99999
+    except ValueError:
+        return False, "invalid port", url
     if parts.scheme in ("https", "wss"):
         return (True, "encrypted", url) if host else (False, "no host", url)
     if parts.scheme not in ("http", "ws"):
         return False, f"unsupported scheme {parts.scheme!r}", url
     if not host:
         return False, "no host", url
+    if "%" in host:
+        return False, "IPv6 zone ids are not supported; use another address or https", url
     if host in _LOCAL_HA_HOSTNAMES:
         return True, "local name", url
     import ipaddress
@@ -98,10 +115,12 @@ def _assess(url):
         return False, f"{host} is not this machine ({', '.join(remote)})", url
     if not is_name:
         return True, "local address", url
-    address = addresses[0]
+    address = _pick_address(addresses)
+    if address is None:
+        return False, f"{host} has only link-local IPv6 addresses with a zone id; use another address", url
     shown = f"[{address}]" if ":" in address else address
     userinfo = parts.netloc.rpartition("@")[0]
-    netloc = (userinfo + "@" if userinfo else "") + shown + (f":{parts.port}" if parts.port else "")
+    netloc = (userinfo + "@" if userinfo else "") + shown + (f":{port}" if port else "")
     return True, f"local address ({host} pinned to {address})", parts._replace(netloc=netloc).geturl()
 
 
@@ -112,13 +131,13 @@ def check_token_transport(url):
 
 
 def pin_token_url(url):
-    """(ok, reason, url_to_use): `check_token_transport`, plus the URL to request.
+    """(ok, reason, url_to_use) for ONE connection or request.
 
-    A host name in a plain http/ws URL is resolved once, here, and the checked
-    address replaces it in `url_to_use`. Requests then go to that address and
-    cannot be steered elsewhere by a later DNS or mDNS answer: the check
-    would otherwise hold only for the moment it ran. Every other URL comes
-    back unchanged.
+    A host name in a plain http/ws URL is resolved here, checked, and the checked
+    address replaces it in `url_to_use`, so this connection goes to the address
+    that was checked and cannot be steered elsewhere by a DNS or mDNS answer in
+    between. Call it again for the next connection; never keep the result.
+    Every other URL comes back unchanged.
     """
     return _assess(url)
 
