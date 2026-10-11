@@ -1155,8 +1155,11 @@ class CentralCoreClient:
         self.ha_api_url = options.get("ha_api_url") or ""
         self.ha_api_token = options.get("ha_api_token") or ""
         if self.ha_api_url and self.ha_api_token:
-            ok, why = _ha_safety().check_token_transport(self.ha_api_url)
-            if not ok:
+            # Plain http to a host name is pinned to the address that was checked.
+            ok, why, pinned_url = _ha_safety().pin_token_url(self.ha_api_url)
+            if ok:
+                self.ha_api_url = pinned_url
+            else:
                 _log(
                     f"ERROR: not sending the Home Assistant token over unencrypted {self.ha_api_url!r}: {why}. "
                     "Use http://localhost:8123 (or https://). Home Assistant integration is disabled."
