@@ -1,3 +1,4 @@
+import time
 import json
 import importlib.util
 from pathlib import Path
@@ -44,7 +45,7 @@ def test_registry_write_failure(monkeypatch, tmp_path):
 
     monkeypatch.setattr(pathlib.Path, "replace", raise_replace)
 
-    payload = {"command_id": "c", "payload": {"entries": [], "token": "tok"}}
+    payload = {"command_id": "c", "timestamp": time.time(), "payload": {"entries": [], "token": "tok"}}
     msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/registry/set"})()
 
     handlers.handle_message(client, msg, json.dumps(payload), None, None, None)
@@ -60,7 +61,7 @@ def test_registry_env_token_auth_fail(monkeypatch):
 
     monkeypatch.setenv("REGISTRY_TOKEN", "envtok")
 
-    payload = {"command_id": "c2", "payload": {"entries": []}}
+    payload = {"command_id": "c2", "timestamp": time.time(), "payload": {"entries": []}}
     msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/registry/set"})()
 
     handlers.handle_message(client, msg, json.dumps(payload), None, None, None)
@@ -88,7 +89,7 @@ def test_sensors_set_string_list_persist_exception(monkeypatch, tmp_path):
 
     monkeypatch.setattr(pathlib.Path, "replace", raise_replace)
 
-    payload = {"command_id": "c3", "payload": {"sensors": ["sensor.a"]}}
+    payload = {"command_id": "c3", "timestamp": time.time(), "payload": {"sensors": ["sensor.a"]}}
     msg = type("M", (), {"topic": f"hubs/{client.client_id}/v1/cmd/sensors/set"})()
 
     # Should not raise despite persistence failure
