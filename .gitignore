@@ -24,3 +24,12 @@ central-core-hub/SENSOR_REGISTRY_from_mqtt.json
 dist/
 build/
 *.egg-info/
+
+# Secrets and keys: never commit these
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+# public test certificate fixtures (certificates only, no private keys)
+!central-core-hub/tests/unit/data/*.pem

@@ -85,7 +85,7 @@ def test_no_home_assistant_listener():
 
 
 def test_started_reply_is_delivered_before_the_install_runs():
-    # Live on Irongate, Home Assistant stopped the add-on for the install
+    # On a live hub (Larkspur), Home Assistant stopped the add-on for the install
     # before its "started" reply left the machine.
     events = []
 
