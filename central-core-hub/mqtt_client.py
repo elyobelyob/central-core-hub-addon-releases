@@ -1265,6 +1265,9 @@ class CentralCoreClient:
             _log(f"WARNING: client_id {self.client_id!r} differs from the client certificate CN {cert_cn!r}")
         self.ha_api_url = options.get("ha_api_url") or ""
         self.ha_api_token = options.get("ha_api_token") or ""
+        # What the user set up, kept even if the URL is rejected below, so that
+        # telemetry reports a rejected URL as "not connected", not "not configured".
+        self._ha_configured = bool(self.ha_api_url and self.ha_api_token)
         if self.ha_api_url and self.ha_api_token:
             # Only the URL itself is checked here: whether a host name may receive
             # the token is checked, and the address pinned, at every connection
@@ -2421,7 +2424,7 @@ class CentralCoreClient:
         configured but not connected."""
         listener = getattr(self, "_ha_ws_listener", None)
         if listener is None:
-            if not (getattr(self, "ha_api_url", "") and getattr(self, "ha_api_token", "")):
+            if not getattr(self, "_ha_configured", False):
                 return {"ha_connected": None, "ha_last_event_at": None}
             return {"ha_connected": False, "ha_last_event_at": None}
         try:
