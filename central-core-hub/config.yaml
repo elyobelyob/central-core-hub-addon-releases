@@ -10,8 +10,7 @@ startup: services
 boot: auto
 stage: stable
 timeout: 30
-network:
-  host: true
+host_network: true
 options:
   mqtt_host: ""
   mqtt_port: 1883
