@@ -49,8 +49,17 @@ def test_a_dropped_websocket_is_reported(mc, monkeypatch, tmp_path):
     assert sent[0]["ha_last_event_at"] == "2026-10-11T06:00:00Z"  # when it last heard anything
 
 
-def test_without_home_assistant_the_hub_says_so(mc, monkeypatch, tmp_path):
+def test_without_home_assistant_configured_the_hub_reports_null(mc, monkeypatch, tmp_path):
     c, sent = _client(mc, monkeypatch, tmp_path, None)
+    monkeypatch.setattr(c, "outbox_stats", lambda: None)
+    c.publish_telemetry()
+    assert sent[0]["ha_connected"] is None and sent[0]["ha_last_event_at"] is None
+
+
+def test_configured_but_no_listener_reports_false(mc, monkeypatch, tmp_path):
+    c, sent = _client(mc, monkeypatch, tmp_path, None)
+    monkeypatch.setattr(c, "ha_api_url", "http://ha.example:8123")
+    monkeypatch.setattr(c, "ha_api_token", "t")
     monkeypatch.setattr(c, "outbox_stats", lambda: None)
     c.publish_telemetry()
     assert sent[0]["ha_connected"] is False and sent[0]["ha_last_event_at"] is None

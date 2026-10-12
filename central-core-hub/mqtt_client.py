@@ -2415,19 +2415,22 @@ class CentralCoreClient:
         return None
 
     def _ha_status(self):
-        """{"ha_connected": bool, "ha_last_event_at": UTC ISO or None} from the
-        Home Assistant websocket (False when Home Assistant is not configured)."""
+        """{"ha_connected": bool or None, "ha_last_event_at": UTC ISO or None} from
+        the Home Assistant websocket. Both are None when Home Assistant is not
+        configured (nothing to monitor); ha_connected is False when it is
+        configured but not connected."""
         listener = getattr(self, "_ha_ws_listener", None)
-        connected = False
-        last = None
-        if listener is not None:
-            try:
-                connected = bool(listener.is_connected())
-            except Exception:
-                connected = False
-            last = getattr(listener, "last_event_at", None)
-            if not isinstance(last, str):
-                last = None
+        if listener is None:
+            if not (getattr(self, "ha_api_url", "") and getattr(self, "ha_api_token", "")):
+                return {"ha_connected": None, "ha_last_event_at": None}
+            return {"ha_connected": False, "ha_last_event_at": None}
+        try:
+            connected = bool(listener.is_connected())
+        except Exception:
+            connected = False
+        last = getattr(listener, "last_event_at", None)
+        if not isinstance(last, str):
+            last = None
         return {"ha_connected": connected, "ha_last_event_at": last}
 
     def _ha_base(self):
