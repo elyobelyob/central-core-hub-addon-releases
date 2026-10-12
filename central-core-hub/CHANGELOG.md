@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.4.1] - 2026-10-12
+
+Small fixes. No configuration changes are needed.
+
+- Status telemetry now sends `ha_connected` and `ha_last_event_at` as null when Home Assistant is
+  not set up on this hub, so the vault does not treat a hub that never had Home Assistant as
+  disconnected. `false` still means set up but not connected.
+- `config.yaml` now uses the correct `host_network: true` option (it matches `config.json`).
+
 ## [2.4.0] - 2026-10-11
 
 Security and reliability hardening. No configuration changes are needed.
