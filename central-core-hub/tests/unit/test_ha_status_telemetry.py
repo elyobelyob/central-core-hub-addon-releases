@@ -49,8 +49,16 @@ def test_a_dropped_websocket_is_reported(mc, monkeypatch, tmp_path):
     assert sent[0]["ha_last_event_at"] == "2026-10-11T06:00:00Z"  # when it last heard anything
 
 
-def test_without_home_assistant_the_hub_says_so(mc, monkeypatch, tmp_path):
+def test_without_home_assistant_configured_the_hub_reports_null(mc, monkeypatch, tmp_path):
     c, sent = _client(mc, monkeypatch, tmp_path, None)
+    monkeypatch.setattr(c, "outbox_stats", lambda: None)
+    c.publish_telemetry()
+    assert sent[0]["ha_connected"] is None and sent[0]["ha_last_event_at"] is None
+
+
+def test_configured_but_no_listener_reports_false(mc, monkeypatch, tmp_path):
+    c, sent = _client(mc, monkeypatch, tmp_path, None)
+    monkeypatch.setattr(c, "_ha_configured", True)
     monkeypatch.setattr(c, "outbox_stats", lambda: None)
     c.publish_telemetry()
     assert sent[0]["ha_connected"] is False and sent[0]["ha_last_event_at"] is None
@@ -99,3 +107,17 @@ def test_the_listener_records_when_home_assistant_last_sent_an_event(monkeypatch
     monkeypatch.setattr(ha_client.traceback, "print_exc", lambda *a, **k: None)
     listener._run()
     assert isinstance(listener.last_event_at, str) and listener.last_event_at.endswith("Z")
+
+
+def test_rejected_unsafe_url_reports_false_not_null(mc, monkeypatch, tmp_path):
+    monkeypatch.setattr(mc, "SELECTED_SENSORS_FILE", tmp_path / "sel.json")
+    monkeypatch.setattr(mc, "_log", lambda m, file=None: None)
+    monkeypatch.setattr(
+        mc, "_ha_safety", lambda: types.SimpleNamespace(check_token_url=lambda url: (False, "not allowed"))
+    )
+    c = mc.CentralCoreClient(
+        {"client_id": "demo-home-001", "mqtt_host": "broker",
+         "ha_api_url": "http://ha.example:8123", "ha_api_token": "t"}
+    )
+    assert c.ha_api_url == "" and c.ha_api_token == ""  # rejected and wiped
+    assert c._ha_status() == {"ha_connected": False, "ha_last_event_at": None}

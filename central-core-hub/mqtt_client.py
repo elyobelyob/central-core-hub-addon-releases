@@ -1265,6 +1265,9 @@ class CentralCoreClient:
             _log(f"WARNING: client_id {self.client_id!r} differs from the client certificate CN {cert_cn!r}")
         self.ha_api_url = options.get("ha_api_url") or ""
         self.ha_api_token = options.get("ha_api_token") or ""
+        # What the user set up, kept even if the URL is rejected below, so that
+        # telemetry reports a rejected URL as "not connected", not "not configured".
+        self._ha_configured = bool(self.ha_api_url and self.ha_api_token)
         if self.ha_api_url and self.ha_api_token:
             # Only the URL itself is checked here: whether a host name may receive
             # the token is checked, and the address pinned, at every connection
@@ -2415,19 +2418,22 @@ class CentralCoreClient:
         return None
 
     def _ha_status(self):
-        """{"ha_connected": bool, "ha_last_event_at": UTC ISO or None} from the
-        Home Assistant websocket (False when Home Assistant is not configured)."""
+        """{"ha_connected": bool or None, "ha_last_event_at": UTC ISO or None} from
+        the Home Assistant websocket. Both are None when Home Assistant is not
+        configured (nothing to monitor); ha_connected is False when it is
+        configured but not connected."""
         listener = getattr(self, "_ha_ws_listener", None)
-        connected = False
-        last = None
-        if listener is not None:
-            try:
-                connected = bool(listener.is_connected())
-            except Exception:
-                connected = False
-            last = getattr(listener, "last_event_at", None)
-            if not isinstance(last, str):
-                last = None
+        if listener is None:
+            if not getattr(self, "_ha_configured", False):
+                return {"ha_connected": None, "ha_last_event_at": None}
+            return {"ha_connected": False, "ha_last_event_at": None}
+        try:
+            connected = bool(listener.is_connected())
+        except Exception:
+            connected = False
+        last = getattr(listener, "last_event_at", None)
+        if not isinstance(last, str):
+            last = None
         return {"ha_connected": connected, "ha_last_event_at": last}
 
     def _ha_base(self):
