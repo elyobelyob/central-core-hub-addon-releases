@@ -2421,7 +2421,9 @@ class CentralCoreClient:
         """{"ha_connected": bool or None, "ha_last_event_at": UTC ISO or None,
         "ha_last_message_at": UTC ISO or None, "ha_streaming": bool or None} from the
         Home Assistant websocket. ha_streaming is true only while the state-change
-        subscription is live (ping replies alone keep ha_last_message_at fresh).
+        subscription is live (ping replies alone keep ha_last_message_at fresh); it is
+        None while connected with no sensors selected. A silently dead socket can
+        read true until the OS gives up, so also check ha_last_message_at's age.
         All are None when Home Assistant is not configured (nothing to monitor);
         ha_connected is False when it is configured but not connected. The two
         times keep their last value while disconnected (when it last heard)."""
@@ -2446,6 +2448,9 @@ class CentralCoreClient:
             streaming = bool(listener.is_streaming())
         except Exception:
             streaming = False
+        selected = getattr(listener, "selectors", None)
+        if connected and not streaming and isinstance(selected, (set, list, tuple)) and not selected:
+            streaming = None  # no sensors selected: nothing to subscribe to, so nothing is wrong
         return {"ha_connected": connected, "ha_last_event_at": last, "ha_last_message_at": heard,
                 "ha_streaming": streaming}
 

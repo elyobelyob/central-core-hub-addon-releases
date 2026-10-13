@@ -252,3 +252,19 @@ def test_a_listener_without_is_streaming_reads_as_false(mc, monkeypatch, tmp_pat
     c, sent = _client(mc, monkeypatch, tmp_path, types.SimpleNamespace(is_connected=lambda: True))
     c.publish_telemetry()
     assert sent[0]["ha_streaming"] is False
+
+
+def test_streaming_is_null_while_connected_with_no_sensors_selected(mc, monkeypatch, tmp_path):
+    listener = types.SimpleNamespace(is_connected=lambda: True, is_streaming=lambda: False, selectors=set())
+    c, sent = _client(mc, monkeypatch, tmp_path, listener)
+    c.publish_telemetry()
+    assert sent[0]["ha_streaming"] is None and sent[0]["ha_connected"] is True
+
+
+def test_streaming_is_false_with_sensors_selected_but_no_subscription(mc, monkeypatch, tmp_path):
+    listener = types.SimpleNamespace(
+        is_connected=lambda: True, is_streaming=lambda: False, selectors={"binary_sensor.demo_door"}
+    )
+    c, sent = _client(mc, monkeypatch, tmp_path, listener)
+    c.publish_telemetry()
+    assert sent[0]["ha_streaming"] is False

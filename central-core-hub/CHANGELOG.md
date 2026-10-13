@@ -8,7 +8,8 @@ Small fix. No configuration changes are needed.
   is logged in and the hub's subscription to sensor changes is accepted and working. Until now a
   fresh `ha_last_message_at` only showed the connection was alive, because ping replies keep
   arriving even if the subscription was refused. It is null when Home Assistant is not set up,
-  and false when it is set up but not streaming.
+  false when it is set up but not streaming, and null while no sensors are selected
+  (there is nothing to watch).
 - Uses central-core-mqtt-shared v1.4.0.
 
 ## [2.4.2] - 2026-10-13
