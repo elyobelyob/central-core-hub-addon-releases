@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.4.5] - 2026-10-13
+
+New: the vault can move this hub onto its own MQTT login. No configuration changes are needed, and nothing changes unless the vault sends the new commands. Needs central-core-mqtt-shared 1.5.2.
+
+- Two new commands, `login/key_request` and `login/change`. The vault asks for a one-use key, then sends the new username and password encrypted to it, so the password never crosses the broker in clear text. The key lives in memory only and expires after 10 minutes. The hub writes a short fingerprint of the key to its log so it can be checked against the one the vault shows.
+- The hub only accepts its own logins (`hub-` followed by its id, with an optional `-a` or `-b`), so a forged message cannot move it back to the shared login. It refuses to send a password over a connection that is not encrypted (MQTT TLS off).
+- Before anything is saved, the hub tests the new login on a second connection to the same broker (same TLS, a different client id): it must connect, subscribe to the hub's own topics and publish. If it fails, nothing changes and the hub keeps its current login. A failed or forged message does not use up the key.
+- Only then is the login saved (a private file, `login_override.json`, in the add-on's data folder) and the main connection switched over. The add-on's options in Home Assistant are not rewritten, so that screen keeps showing the old login; the add-on log says which login is in use. If the hub is not connected on the new login within 2 minutes, or the broker refuses it, it goes back to the old login, and if that does not connect either it keeps trying the two in turn, with longer pauses, until one does. If the add-on stops half-way, the next start does the same check. The hub will not take a move while `reset_saved_login` is on.
+- New option `reset_saved_login`: switch it on and restart to throw away the login the vault saved and use the one in the options again (then switch it off).
+- The hub reports the result, `ok` or the reason, with the username in use and a confirmation code the vault can check. The password is never logged, reported or put in an error message.
+- The hub no longer treats a connection the broker refused as connected. Before, a refused login looked connected in the add-on until the next disconnect.
+- Adds the `cryptography` library (50.0.1). See `docs/LOGIN_MOVE.md`.
+
 ## [2.4.4] - 2026-10-13
 
 Small fixes. No configuration changes are needed. Use this release instead of 2.4.3.

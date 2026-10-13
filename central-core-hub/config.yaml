@@ -1,6 +1,6 @@
 name: "Central Core Hub"
 description: "Central Core Hub Add-on"
-version: "2.4.4"
+version: "2.4.5"
 slug: "central-core-hub"
 init: false
 arch:
@@ -40,3 +40,4 @@ schema:
   safe_device_classes:
     - str
   debug_logging: bool?
+  reset_saved_login: bool?

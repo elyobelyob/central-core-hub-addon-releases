@@ -40,7 +40,7 @@ The Home Assistant add-on that runs in each home (`central-core-hub/`). It **onl
 ## Commands
 
 - Tests: `pytest`. Lint and types: `ruff check .` and `pyright` (CI runs all three). A pre-push hook runs the whole CI locally, so pushes take a few minutes.
-- Release: write the `CHANGELOG.md` entry by hand, set the version by editing `central-core-hub/config.json`, `central-core-hub/config.yaml` and `repository.json`, then run `python3 version_manager.py validate`. Never run `version_manager.py bump` or `set`: both wipe the changelog history, merge to `main`, then tag `vX.Y.Z`. The release workflow builds the image.
+- Release: never run `version_manager.py bump` (it wipes the changelog history). Run `python3 version_manager.py set X.Y.Z`, then restore both changelogs with `git checkout HEAD -- CHANGELOG.md central-core-hub/CHANGELOG.md` and write the entry by hand, run `python3 version_manager.py validate`, merge to `main`, then tag `vX.Y.Z`. The release workflow builds the image.
 - After a release, the vault's firmware list needs the new version before hubs can be pushed to it. Never push hub updates without the owner's go-ahead.
 
 ## Rules
@@ -48,4 +48,4 @@ The Home Assistant add-on that runs in each home (`central-core-hub/`). It **onl
 - Commands from MQTT are untrusted: every command needs a well-formed `command_id` (never repeated) and a readable `timestamp` (not older than 10 minutes), retained messages are ignored, and size (64 KB) and type are checked; the queue is bounded. A store acknowledgement must name this hub's `outbox_id`, is never retained, and cannot reach past the highest `seq` the hub sent. The hub id (`client_id`) must be a safe topic level or the add-on refuses to start.
 - Privacy fails closed (`privacy.py`). Phones, people, zones, trackers and anything with coordinates never leave the hub, on every path (poll, set, publishes, inventory).
 - Never change defaults that would disconnect existing hubs (for example MQTT TLS) without a migration plan; see `docs/security/mqtt-tls-and-command-signing.md`.
-- The MQTT protocol comes from `central-core-mqtt-shared`. Both `requirements.txt` and `central-core-hub/requirements.txt` pin the exact commit of the same release tag the vault pins (currently `v1.4.0`; the vault moves to a new tag separately, commit `3f303d5f58eaf146989441d2100310027956b057`); `tests/unit/test_mqtt_shared_pin.py` enforces the match.
+- The MQTT protocol comes from `central-core-mqtt-shared`. Both `requirements.txt` and `central-core-hub/requirements.txt` pin the exact commit of the same release tag the vault pins (currently `v1.5.2`, commit `cdae995aea59d15f8ab6bd36f62561e97820c2d2`; the vault moves to a new tag separately); `tests/unit/test_mqtt_shared_pin.py` enforces the match.

@@ -615,6 +615,14 @@ def handle_message(
             _run_update_command(client, action, command_id, lambda updater, send: updater.check())
             return
 
+        if topic == f"hubs/{client.client_id}/v1/cmd/login/key_request":
+            _handle_login(client, payload_str, "key_request")
+            return
+
+        if topic == f"hubs/{client.client_id}/v1/cmd/login/change":
+            _handle_login(client, payload_str, "change")
+            return
+
         if topic == f"hubs/{client.client_id}/v1/cmd/inventory/get":
             _handle_inventory(client, payload_str)
             return
@@ -821,6 +829,29 @@ def _registry_allows():
         return _mc.registry_predicate()
     except Exception:
         return lambda _eid: False
+
+
+def _handle_login(client, payload_str, which):
+    """cmd/login/key_request and cmd/login/change: move this hub to a new broker login.
+
+    The work is in login_move.LoginMover. The fields of `login/change` are read from the
+    command itself, or from its `payload` object (as other commands carry theirs)."""
+    try:
+        cmd = json.loads(payload_str) if payload_str and payload_str != "<binary>" else {}
+    except Exception:
+        cmd = {}
+    if not isinstance(cmd, dict):
+        cmd = {}
+    command_id = cmd.get("command_id")
+    try:
+        mover = client.login_mover()
+        if which == "key_request":
+            mover.handle_key_request(command_id)
+            return
+        fields = cmd if "request_id" in cmd else cmd.get("payload")
+        mover.handle_change(command_id, fields)
+    except Exception as exc:  # the text of an exception here could hold the login: log the type only
+        _log(f"login/{which} failed: {type(exc).__name__}")
 
 
 def _handle_inventory(client, payload_str):
