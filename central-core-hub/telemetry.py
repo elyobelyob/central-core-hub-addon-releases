@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import platform
 import socket
@@ -35,6 +36,7 @@ def build_telemetry(
     loadavg_fn=None,
     mem_info_fn=None,
     disk_info_fn=None,
+    mem_avail_fn=None,
     version=None,
     telemetry_interval=None,
     home_assistant=None,
@@ -141,10 +143,24 @@ def build_telemetry(
     }
     # Fields of central-core-mqtt-shared SystemTelemetry (cpu and ram are
     # percentages, 0 to 100). An unknown reading is left out, not made up.
-    if isinstance(cpu_percent, (int, float)) and not isinstance(cpu_percent, bool):
-        payload["cpu"] = min(max(float(cpu_percent), 0.0), 100.0)
-    if isinstance(mem_total, (int, float)) and isinstance(mem_free, (int, float)) and mem_total > 0:
-        payload["ram"] = min(max((mem_total - mem_free) * 100.0 / mem_total, 0.0), 100.0)
+    if isinstance(cpu_percent, (int, float)) and not isinstance(cpu_percent, bool) and math.isfinite(cpu_percent):
+        payload["cpu"] = round(min(max(float(cpu_percent), 0.0), 100.0), 1)
+    # "Used" counts memory the kernel can give back from its caches as free
+    # (MemAvailable), otherwise a healthy hub always looks nearly full.
+    mem_avail = None
+    try:
+        if callable(mem_avail_fn):
+            mem_avail = mem_avail_fn()
+        else:
+            import helpers as _h
+
+            mem_avail = _h.mem_available_kb()
+    except Exception:
+        mem_avail = None
+    if not isinstance(mem_avail, (int, float)):
+        mem_avail = mem_free
+    if isinstance(mem_total, (int, float)) and isinstance(mem_avail, (int, float)) and mem_total > 0:
+        payload["ram"] = round(min(max((mem_total - mem_avail) * 100.0 / mem_total, 0.0), 100.0), 1)
     # Optionally attach Home Assistant instance information when provided.
     # This will be a small dict with keys like `installation_method`, `core`,
     # `supervisor`, `operating_system`, and `frontend` when available.

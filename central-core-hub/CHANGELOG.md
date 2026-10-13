@@ -9,9 +9,10 @@ Small fixes. No configuration changes are needed.
   watched sensor changes, so a quiet house looked the same as a dead feed. Now the vault can tell
   them apart. It is null when Home Assistant is not set up or nothing has been heard yet, and it
   keeps its last value while the connection is down.
-- The system telemetry now matches the shared MQTT protocol (v1.3.0): it sends `cpu` and `ram` as
-  percentages (the older `cpu_percent` and memory fields are still sent). A reading that cannot
-  be taken is left out instead of made up.
+- The system telemetry now carries the `cpu` and `ram` fields of the shared MQTT protocol (v1.3.0),
+  as percentages (the older `cpu_percent` and memory fields are still sent). `ram` counts memory
+  the system can give back from its caches as free. A reading that cannot be taken is left out
+  instead of made up.
 - Uses central-core-mqtt-shared v1.3.0.
 
 ## [2.4.1] - 2026-10-12

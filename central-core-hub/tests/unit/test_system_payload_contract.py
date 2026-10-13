@@ -42,6 +42,7 @@ def _built(**kw):
         uptime_fn=lambda: 3600,
         loadavg_fn=lambda: [0.1, 0.2, 0.3],
         mem_info_fn=lambda: (1000, 250),
+        mem_avail_fn=lambda: None,
         disk_info_fn=lambda: (5000, 4000),
         version="2.4.2",
         telemetry_interval=30,
@@ -58,6 +59,17 @@ def test_the_system_payload_has_the_shared_schema_fields(schemas):
     schemas.SystemTelemetry(**data)  # validates; raises on a mismatch
     # the vault still reads the older names
     assert data["cpu_percent"] == 12.5 and data["mem_free_kb"] == 250
+
+
+def test_ram_counts_reclaimable_memory_as_free():
+    data = _built(mem_info_fn=lambda: (1000, 50), mem_avail_fn=lambda: 600)
+    assert data["ram"] == 40.0
+    assert data["mem_free_kb"] == 50  # the older field keeps its meaning
+
+
+def test_a_nan_cpu_is_left_out():
+    data = _built(get_cpu_percent=lambda: float("nan"))
+    assert "cpu" not in data
 
 
 def test_unknown_readings_are_left_out_not_made_up():
@@ -90,6 +102,7 @@ def _client(mc, monkeypatch, tmp_path, listener):
 
     monkeypatch.setattr(helpers, "get_cpu_percent", lambda: 10.0)
     monkeypatch.setattr(helpers, "mem_info_kb", lambda: (1000, 500))
+    monkeypatch.setattr(helpers, "mem_available_kb", lambda: None)
     monkeypatch.setattr(helpers, "uptime_seconds", lambda: 99)
     monkeypatch.setattr(c, "outbox_stats", lambda: None)
     return c, sent
@@ -176,3 +189,18 @@ def test_garbage_does_not_count_as_a_message(monkeypatch):
         "not json",
     ])
     assert listener.last_message_at is None
+
+
+def test_mem_available_is_read_from_proc_meminfo(monkeypatch, tmp_path):
+    import builtins
+
+    import helpers
+
+    f = tmp_path / "meminfo"
+    f.write_text("MemTotal:  1000 kB\nMemFree: 50 kB\nMemAvailable:  600 kB\n")
+    real_open = builtins.open
+    monkeypatch.setattr(builtins, "open", lambda p, *a, **k: real_open(f if p == "/proc/meminfo" else p, *a, **k))
+    assert helpers.mem_available_kb() == 600
+    f.write_text("MemTotal: 1000 kB\n")
+    assert helpers.mem_available_kb() is None
+    monkeypatch.undo()
