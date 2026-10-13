@@ -287,9 +287,13 @@ class HAWebSocketListener:
         """True while a subscription is live and has delivered its snapshot."""
         return self._ws is not None and self._streaming.is_set()
 
-    def _send_command(self, payload):
+    def _send_command(self, payload, subscription=False):
         """Send a command with the next message id. Ids are allocated and sent
-        under one lock because Home Assistant requires them to increase."""
+        under one lock because Home Assistant requires them to increase.
+
+        With `subscription=True` the id is stored as the live subscription id
+        BEFORE the request leaves: the reader thread keeps only events with that
+        id, and Home Assistant's snapshot can arrive before this call returns."""
         ws = self._ws
         if ws is None:
             return None
@@ -299,7 +303,14 @@ class HAWebSocketListener:
                 self._next_request_id += 1
             message = dict(payload)
             message["id"] = req_id
-            ws.send(json.dumps(message))
+            if subscription:
+                self._sub_id = req_id
+            try:
+                ws.send(json.dumps(message))
+            except Exception:
+                if subscription and self._sub_id == req_id:
+                    self._sub_id = None
+                raise
         return req_id
 
     def _subscribe(self):
@@ -315,7 +326,7 @@ class HAWebSocketListener:
             self._states = {k: v for k, v in self._states.items() if k in self.selectors}
             entity_ids = sorted(e for e in self.selectors if is_valid_entity_id(e))
             if entity_ids:
-                self._sub_id = self._send_command({"type": "subscribe_entities", "entity_ids": entity_ids})
+                self._send_command({"type": "subscribe_entities", "entity_ids": entity_ids}, subscription=True)
             self._log(f"HA WS watching {len(entity_ids)} entities")
         except Exception as exc:
             self._log(f"HA WS subscribe failed: {exc}")
