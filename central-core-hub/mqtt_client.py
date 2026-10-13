@@ -479,6 +479,31 @@ WORK_QUEUE_MAX = 100
 _MQTT_ERR_NO_CONN = 4
 
 
+def _connack_code(args, kwargs):
+    """The CONNACK code from on_connect's extra arguments: (flags, reason_code, properties)
+    in paho's current callbacks, a lone rc in older callers. None if there is none."""
+    for name in ("reason_code", "reasonCode", "rc"):
+        if name in kwargs:
+            return kwargs[name]
+    if len(args) >= 2:
+        return args[1]
+    return args[0] if args else None
+
+
+def _connack_failed(rc):
+    """True if a CONNACK return/reason code means the broker refused the connection.
+    None (an older paho that gave no code) counts as success."""
+    if rc is None:
+        return False
+    failure = getattr(rc, "is_failure", None)
+    if failure is not None:
+        return bool(failure)
+    try:
+        return int(rc) != 0
+    except (TypeError, ValueError):
+        return False
+
+
 def _publish_taken(rc):
     """Whether paho took a QoS 1 publish: sent now, or queued until it reconnects."""
     no_conn = getattr(mqtt, "MQTT_ERR_NO_CONN", _MQTT_ERR_NO_CONN) if mqtt is not None else _MQTT_ERR_NO_CONN
@@ -1436,6 +1461,8 @@ class CentralCoreClient:
         self.phones = _sibling("privacy").PhoneGuard(lambda: getattr(self, "_ha_ws_listener", None))
 
         self._connected = False
+        # Serialises first connects and login switches (login_move.py).
+        self._link_lock = threading.RLock()
         self._stop_event = threading.Event()
         # Work that may wait on Home Assistant (command handlers, the
         # on-connect sensor publish) runs here, not on paho's network thread.
@@ -2131,6 +2158,52 @@ class CentralCoreClient:
                 _log("Home Assistant auto-update is off for this add-on: updates come from the vault")
         except Exception as exc:
             _log(f"Could not switch off Home Assistant auto-update: {exc}")
+    def connect_refused(self):
+        """True if the broker refused the main connection since the last switch_login()."""
+        return getattr(self, "_connack_refusals", 0) > 0
+
+    def switch_login(self, username, password):
+        """Reconnect the main connection with a different broker login.
+
+        The old connection is closed first, then paho's network thread is
+        restarted with the new credentials; it retries by itself (with backoff)
+        like after any other disconnect. Called by login_move; never logs the login.
+        Refuses (RuntimeError) when TLS is on but could not be set up, like connect_once."""
+        if getattr(self, "_tls_error", None):
+            raise RuntimeError("MQTT TLS is enabled but not set up; not switching")
+        with self._link_lock:
+            c = self._client
+            try:
+                for step in ("disconnect", "loop_stop"):
+                    try:
+                        getattr(c, step)()
+                    except Exception:
+                        pass
+                # Only now: a late answer from the old connection can no longer arrive.
+                self._connected = False
+                self._connack_refusals = 0
+                self.mqtt_username = username
+                self.mqtt_password = password
+                c.username_pw_set(username or None, password or None)
+                connect = getattr(c, "connect_async", None) or c.connect
+                connect(self.mqtt_host, self.mqtt_port, keepalive=60)
+                if c.loop_start() not in (None, 0):
+                    raise RuntimeError("could not start the MQTT network loop")
+                self._loop_started = True
+            except Exception:
+                # Leave the main loop to make a fresh first connection with these credentials.
+                self._loop_started = False
+                raise
+
+    def login_mover(self):
+        """The LoginMover for this hub (made on first use)."""
+        mover = getattr(self, "_login_mover", None)
+        if mover is None:
+            login_move = _sibling("login_move")
+            mover = login_move.LoginMover(self)
+            self._login_mover = mover
+        return mover
+
     def on_connect(self, client, _userdata, *args, **kwargs):
         """MQTT on_connect callback.
 
@@ -2150,6 +2223,12 @@ class CentralCoreClient:
             rc = kwargs.get("rc", kwargs.get("reasonCode", rc))
             properties = kwargs.get("properties", properties)
 
+            if _connack_failed(_connack_code(args, kwargs)):
+                # The broker refused the login (or the connection): not connected, nothing to subscribe.
+                self._connected = False
+                self._connack_refusals = getattr(self, "_connack_refusals", 0) + 1
+                _log(f"MQTT broker refused the connection rc={_connack_code(args, kwargs)}")
+                return
             _log(f"Connected to MQTT broker with rc={rc}")
             try:
                 # Subscribe to Vault command pattern with QoS=1
@@ -2319,17 +2398,18 @@ class CentralCoreClient:
         if tls_error:
             _log(f"Not connecting: MQTT TLS is enabled but could not be set up ({tls_error})", sys.stderr)
             return False
-        if getattr(self, "_loop_started", False):
-            return True
-        try:
-            _log(f"Connecting to {self.mqtt_host}:{self.mqtt_port} as {self.client_id}")
-            self._client.connect(self.mqtt_host, self.mqtt_port, keepalive=60)
-            self._client.loop_start()
-            self._loop_started = True
-            return True
-        except Exception as exc:
-            _log(f"MQTT connect to {self.mqtt_host}:{self.mqtt_port} failed: {type(exc).__name__}: {exc}")
-            return False
+        with self._link_lock:  # not while login_move.switch_login is changing the connection
+            if getattr(self, "_loop_started", False):
+                return True
+            try:
+                _log(f"Connecting to {self.mqtt_host}:{self.mqtt_port} as {self.client_id}")
+                self._client.connect(self.mqtt_host, self.mqtt_port, keepalive=60)
+                self._client.loop_start()
+                self._loop_started = True
+                return True
+            except Exception as exc:
+                _log(f"MQTT connect to {self.mqtt_host}:{self.mqtt_port} failed: {type(exc).__name__}: {exc}")
+                return False
 
     def wait_for_connected(self, timeout=5):
         """Wait up to `timeout` seconds for the `on_connect` handler to set
@@ -2792,6 +2872,11 @@ class CentralCoreClient:
     def run(self):
         self.start_worker()
         self.start_outbox_sender()
+        try:
+            # A move to a new broker login that died half-way is finished or undone here.
+            self.login_mover().settle_pending_at_start()
+        except Exception as exc:
+            _log(f"Could not check for an unconfirmed login move: {type(exc).__name__}")
         # connect first
         self.connect()
         try:
@@ -2929,6 +3014,13 @@ class CentralCoreClient:
 
 def main():
     options = load_options()
+    # A broker login the vault moved this hub to wins over options.json (login_move.py).
+    try:
+        options, login_source = _sibling("login_move").apply_saved_login(options)
+    except Exception as exc:  # never stop the hub over this; the options login still works
+        login_source = "options"
+        _log(f"Could not read the saved broker login: {type(exc).__name__}")
+    _log(f"MQTT login: {str(options.get('mqtt_username') or '(none)')!r} (from {login_source})")
     # Sanitize options for logging (hide sensitive data)
     safe_options = {
         k: ("[REDACTED]" if "token" in k or "password" in k or "cert" in k else v) for k, v in options.items()

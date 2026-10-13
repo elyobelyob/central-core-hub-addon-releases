@@ -196,3 +196,15 @@ def test_long_runs_of_backslashes_stay_cheap(mc):
     start = _t.perf_counter()
     mc._QUOTED_FIELD_RE.sub(mc._redact_field, nasty)
     assert _t.perf_counter() - start < 0.5
+
+
+@pytest.mark.parametrize("body", [
+    {"username": "hub-demo-home-001", "password": SECRET},
+    {"command_id": "c1", "payload": {"login": {"username": "u", "password": SECRET}}},
+    {"previous": {"username": "u", "mqtt_password": SECRET}, "confirm_key": "ok"},
+])
+def test_a_broker_login_never_reaches_the_log(mc, body):
+    """login_move.py handles passwords; if one is ever put in a payload the preview blanks it."""
+    out = mc._preview(json.dumps(body))
+    assert SECRET not in out and "[REDACTED]" in out
+    assert SECRET not in mc._preview(json.dumps({"inner": json.dumps(body)}))

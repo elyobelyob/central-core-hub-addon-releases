@@ -40,7 +40,7 @@ The Home Assistant add-on that runs in each home (`central-core-hub/`). It **onl
 ## Commands
 
 - Tests: `pytest`. Lint and types: `ruff check .` and `pyright` (CI runs all three). A pre-push hook runs the whole CI locally, so pushes take a few minutes.
-- Release: write the `CHANGELOG.md` entry by hand, set the version by editing `central-core-hub/config.json`, `central-core-hub/config.yaml` and `repository.json`, then run `python3 version_manager.py validate`. Never run `version_manager.py bump` or `set`: both wipe the changelog history, merge to `main`, then tag `vX.Y.Z`. The release workflow builds the image.
+- Release: never run `version_manager.py bump` (it wipes the changelog history). Run `python3 version_manager.py set X.Y.Z`, then restore both changelogs with `git checkout HEAD -- CHANGELOG.md central-core-hub/CHANGELOG.md` and write the entry by hand, run `python3 version_manager.py validate`, merge to `main`, then tag `vX.Y.Z`. The release workflow builds the image.
 - After a release, the vault's firmware list needs the new version before hubs can be pushed to it. Never push hub updates without the owner's go-ahead.
 
 ## Rules
