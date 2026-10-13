@@ -67,12 +67,18 @@ def test_ram_counts_reclaimable_memory_as_free():
     assert data["mem_free_kb"] == 50  # the older field keeps its meaning
 
 
-def test_a_nan_cpu_is_left_out():
+def test_a_nan_cpu_is_left_out(monkeypatch):
+    import telemetry
+
+    monkeypatch.setattr(telemetry, "_get_cpu_percent", lambda: None)
     data = _built(get_cpu_percent=lambda: float("nan"))
     assert "cpu" not in data
 
 
-def test_unknown_readings_are_left_out_not_made_up():
+def test_unknown_readings_are_left_out_not_made_up(monkeypatch):
+    import telemetry
+
+    monkeypatch.setattr(telemetry, "_get_cpu_percent", lambda: None)  # no fallback to the real machine
     data = _built(get_cpu_percent=lambda: None, uptime_fn=lambda: None, mem_info_fn=lambda: (None, None))
     assert "cpu" not in data and "ram" not in data
 
