@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.4.4] - 2026-10-13
+
+Small fixes. No configuration changes are needed. Use this release instead of 2.4.3.
+
+- Fixed a timing bug when the selected sensors change while the hub is connected to Home Assistant:
+  Home Assistant's first reply could arrive before the hub had noted which subscription it belonged
+  to, and was thrown away. The hub then reported `ha_streaming: false` and missed live changes
+  until the next reconnect. The subscription is now noted before the request is sent.
+- Two smaller timing fixes in the same place: a connection that was replaced while a subscription
+  was waiting to be sent can no longer overwrite the new one, and the list of watched states is
+  tidied in place so it cannot trip over a simultaneous update.
+- Test and check tooling only (no change in what runs on the hub): pydantic 2.14.0 and ruff 0.17
+  or newer.
+
 ## [2.4.3] - 2026-10-13
 
 Small fix. No configuration changes are needed.

@@ -71,7 +71,7 @@ def test_subscribe_failure_is_logged_not_raised(monkeypatch):
     lst, logs = _listener()
     _connected(lst)
 
-    def boom(_payload):
+    def boom(_payload, **_kw):
         raise RuntimeError("send failed")
 
     monkeypatch.setattr(lst, "_send_command", boom)
