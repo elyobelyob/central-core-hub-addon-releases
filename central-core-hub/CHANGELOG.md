@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.4.3] - 2026-10-13
+
+Small fix. No configuration changes are needed.
+
+- The system telemetry now also sends `ha_streaming`: true only while the Home Assistant websocket
+  is logged in and the hub's subscription to sensor changes is accepted and working. Until now a
+  fresh `ha_last_message_at` only showed the connection was alive, because ping replies keep
+  arriving even if the subscription was refused. It is null when Home Assistant is not set up,
+  and false when it is set up but not streaming.
+- Uses central-core-mqtt-shared v1.4.0.
+
 ## [2.4.2] - 2026-10-13
 
 Small fixes. No configuration changes are needed.

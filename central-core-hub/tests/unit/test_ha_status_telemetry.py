@@ -120,4 +120,5 @@ def test_rejected_unsafe_url_reports_false_not_null(mc, monkeypatch, tmp_path):
          "ha_api_url": "http://ha.example:8123", "ha_api_token": "t"}
     )
     assert c.ha_api_url == "" and c.ha_api_token == ""  # rejected and wiped
-    assert c._ha_status() == {"ha_connected": False, "ha_last_event_at": None, "ha_last_message_at": None}
+    assert c._ha_status() == {"ha_connected": False, "ha_last_event_at": None, "ha_last_message_at": None,
+                              "ha_streaming": False}
