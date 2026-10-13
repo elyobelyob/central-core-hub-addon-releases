@@ -8,8 +8,11 @@ Small fixes. No configuration changes are needed. Use this release instead of 2.
   Home Assistant's first reply could arrive before the hub had noted which subscription it belonged
   to, and was thrown away. The hub then reported `ha_streaming: false` and missed live changes
   until the next reconnect. The subscription is now noted before the request is sent.
-- Updated pydantic to 2.14.0 and the ruff check to 0.17 or newer (both are tooling and library
-  updates with no change in behaviour).
+- Two smaller timing fixes in the same place: a connection that was replaced while a subscription
+  was waiting to be sent can no longer overwrite the new one, and the list of watched states is
+  tidied in place so it cannot trip over a simultaneous update.
+- Test and check tooling only (no change in what runs on the hub): pydantic 2.14.0 and ruff 0.17
+  or newer.
 
 ## [2.4.3] - 2026-10-13
 

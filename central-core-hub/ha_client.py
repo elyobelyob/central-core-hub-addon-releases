@@ -303,6 +303,10 @@ class HAWebSocketListener:
                 self._next_request_id += 1
             message = dict(payload)
             message["id"] = req_id
+            if subscription and ws is not self._ws:
+                # The socket was replaced while this waited for the lock: the
+                # reconnect has its own subscription; do not overwrite its id.
+                raise ConnectionError("websocket replaced before subscribing")
             if subscription:
                 self._sub_id = req_id
             try:
@@ -323,7 +327,8 @@ class HAWebSocketListener:
         try:
             if old is not None:
                 self._send_command({"type": "unsubscribe_events", "subscription": old})
-            self._states = {k: v for k, v in self._states.items() if k in self.selectors}
+            for stale in [k for k in list(self._states) if k not in self.selectors]:
+                self._states.pop(stale, None)  # in place: the reader thread may be adding entries
             entity_ids = sorted(e for e in self.selectors if is_valid_entity_id(e))
             if entity_ids:
                 self._send_command({"type": "subscribe_entities", "entity_ids": entity_ids}, subscription=True)

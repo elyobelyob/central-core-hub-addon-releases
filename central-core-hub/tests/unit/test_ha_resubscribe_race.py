@@ -77,3 +77,40 @@ def test_a_failed_send_leaves_no_subscription_id():
     listener._ws = Broken()
     listener._subscribe()
     assert listener._sub_id is None and not listener._streaming.is_set()
+
+
+def test_a_socket_replaced_while_waiting_does_not_overwrite_the_live_subscription_id():
+    listener = _listener(["binary_sensor.demo_door"])
+    old_ws, new_ws = WS(listener), WS(listener)
+    listener._ws = new_ws  # the reconnect already happened
+    listener._sub_id = 7  # and subscribed on the new socket
+    # a send that captured the old socket before the reconnect
+    listener._ws, captured = old_ws, listener._ws
+    real_lock = listener._send_order_lock
+
+    class SwapOnEnter:
+        def __enter__(self):
+            real_lock.acquire()
+            listener._ws = captured  # reconnect completes while waiting
+            return self
+
+        def __exit__(self, *a):
+            real_lock.release()
+
+    listener._send_order_lock = SwapOnEnter()
+    try:
+        listener._send_command({"type": "subscribe_entities", "entity_ids": []}, subscription=True)
+    except ConnectionError:
+        pass
+    assert listener._sub_id == 7
+    assert old_ws.seen == []
+
+
+def test_stale_entries_are_pruned_in_place():
+    listener = _listener(["binary_sensor.demo_door"])
+    listener._ws = WS(listener)
+    states = listener._states
+    states["binary_sensor.demo_door"] = {}
+    states["binary_sensor.gone"] = {}
+    listener._subscribe()
+    assert listener._states is states and list(states) == ["binary_sensor.demo_door"]
