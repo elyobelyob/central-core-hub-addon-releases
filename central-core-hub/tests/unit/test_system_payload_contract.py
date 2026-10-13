@@ -119,6 +119,7 @@ def test_the_published_payload_validates_with_the_liveness_fields(mc, monkeypatc
         is_connected=lambda: True,
         last_event_at="2026-10-11T07:00:00Z",
         last_message_at="2026-10-11T08:30:00Z",
+        is_streaming=lambda: True,
     )
     c, sent = _client(mc, monkeypatch, tmp_path, listener)
     c.publish_telemetry()
@@ -126,6 +127,7 @@ def test_the_published_payload_validates_with_the_liveness_fields(mc, monkeypatc
     assert model.ha_connected is True
     assert model.ha_last_message_at == "2026-10-11T08:30:00Z"
     assert model.ha_last_event_at == "2026-10-11T07:00:00Z"
+    assert model.ha_streaming is True
 
 
 def test_a_disconnected_listener_keeps_the_last_message_time(mc, monkeypatch, tmp_path):
@@ -210,3 +212,59 @@ def test_mem_available_is_read_from_proc_meminfo(monkeypatch, tmp_path):
     f.write_text("MemTotal: 1000 kB\n")
     assert helpers.mem_available_kb() is None
     monkeypatch.undo()
+
+
+def test_connected_but_not_streaming_is_false(mc, monkeypatch, tmp_path, schemas):
+    """Ping replies keep ha_last_message_at fresh even when the subscription was refused."""
+    listener = types.SimpleNamespace(
+        is_connected=lambda: True, last_event_at=None, last_message_at="2026-10-11T08:30:00Z",
+        is_streaming=lambda: False,
+    )
+    c, sent = _client(mc, monkeypatch, tmp_path, listener)
+    c.publish_telemetry()
+    assert schemas.SystemTelemetry(**sent[0]).ha_streaming is False
+
+
+def test_streaming_is_null_when_home_assistant_is_not_set_up(mc, monkeypatch, tmp_path):
+    c, sent = _client(mc, monkeypatch, tmp_path, None)
+    c.publish_telemetry()
+    assert sent[0]["ha_streaming"] is None
+
+
+def test_streaming_is_false_when_set_up_but_no_listener(mc, monkeypatch, tmp_path):
+    c, sent = _client(mc, monkeypatch, tmp_path, None)
+    monkeypatch.setattr(c, "_ha_configured", True)
+    c.publish_telemetry()
+    assert sent[0]["ha_streaming"] is False
+
+
+def test_a_broken_is_streaming_reads_as_false(mc, monkeypatch, tmp_path):
+    def boom():
+        raise RuntimeError("no")
+
+    listener = types.SimpleNamespace(is_connected=lambda: True, is_streaming=boom)
+    c, sent = _client(mc, monkeypatch, tmp_path, listener)
+    c.publish_telemetry()
+    assert sent[0]["ha_streaming"] is False
+
+
+def test_a_listener_without_is_streaming_reads_as_false(mc, monkeypatch, tmp_path):
+    c, sent = _client(mc, monkeypatch, tmp_path, types.SimpleNamespace(is_connected=lambda: True))
+    c.publish_telemetry()
+    assert sent[0]["ha_streaming"] is False
+
+
+def test_streaming_is_null_while_connected_with_no_sensors_selected(mc, monkeypatch, tmp_path):
+    listener = types.SimpleNamespace(is_connected=lambda: True, is_streaming=lambda: False, selectors=set())
+    c, sent = _client(mc, monkeypatch, tmp_path, listener)
+    c.publish_telemetry()
+    assert sent[0]["ha_streaming"] is None and sent[0]["ha_connected"] is True
+
+
+def test_streaming_is_false_with_sensors_selected_but_no_subscription(mc, monkeypatch, tmp_path):
+    listener = types.SimpleNamespace(
+        is_connected=lambda: True, is_streaming=lambda: False, selectors={"binary_sensor.demo_door"}
+    )
+    c, sent = _client(mc, monkeypatch, tmp_path, listener)
+    c.publish_telemetry()
+    assert sent[0]["ha_streaming"] is False
