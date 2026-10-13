@@ -2418,15 +2418,16 @@ class CentralCoreClient:
         return None
 
     def _ha_status(self):
-        """{"ha_connected": bool or None, "ha_last_event_at": UTC ISO or None} from
-        the Home Assistant websocket. Both are None when Home Assistant is not
-        configured (nothing to monitor); ha_connected is False when it is
-        configured but not connected."""
+        """{"ha_connected": bool or None, "ha_last_event_at": UTC ISO or None,
+        "ha_last_message_at": UTC ISO or None} from the Home Assistant websocket.
+        All are None when Home Assistant is not configured (nothing to monitor);
+        ha_connected is False when it is configured but not connected. The two
+        times keep their last value while disconnected (when it last heard)."""
         listener = getattr(self, "_ha_ws_listener", None)
         if listener is None:
             if not getattr(self, "_ha_configured", False):
-                return {"ha_connected": None, "ha_last_event_at": None}
-            return {"ha_connected": False, "ha_last_event_at": None}
+                return {"ha_connected": None, "ha_last_event_at": None, "ha_last_message_at": None}
+            return {"ha_connected": False, "ha_last_event_at": None, "ha_last_message_at": None}
         try:
             connected = bool(listener.is_connected())
         except Exception:
@@ -2434,7 +2435,10 @@ class CentralCoreClient:
         last = getattr(listener, "last_event_at", None)
         if not isinstance(last, str):
             last = None
-        return {"ha_connected": connected, "ha_last_event_at": last}
+        heard = getattr(listener, "last_message_at", None)
+        if not isinstance(heard, str):
+            heard = None
+        return {"ha_connected": connected, "ha_last_event_at": last, "ha_last_message_at": heard}
 
     def _ha_base(self):
         """The Home Assistant URL for REST requests: checked and, for plain http to

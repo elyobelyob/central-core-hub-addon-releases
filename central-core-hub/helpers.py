@@ -32,6 +32,19 @@ def mem_info_kb():
         return None, None
 
 
+def mem_available_kb():
+    """MemAvailable (free memory plus what the kernel can give back from its caches), or None."""
+    try:
+        with open("/proc/meminfo", "r") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 2 and parts[0] == "MemAvailable:":
+                    return int(parts[1])
+    except Exception:
+        pass
+    return None
+
+
 def disk_info_kb(path="/"):
     try:
         st = os.statvfs(path)
