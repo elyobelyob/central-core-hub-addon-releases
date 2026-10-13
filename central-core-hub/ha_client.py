@@ -244,6 +244,9 @@ class HAWebSocketListener:
         self._refused_reason = None
         # UTC ISO time of the last event Home Assistant sent (None: none yet).
         self.last_event_at = None
+        # UTC ISO time of the last message of any kind (a ping reply too) that
+        # came back from Home Assistant: it keeps moving in a quiet house.
+        self.last_message_at = None
         self.on_event = on_event
         self.on_ha_version = on_ha_version
         # Called with the list of current states when a subscription starts
@@ -703,6 +706,7 @@ class HAWebSocketListener:
                         msg = json.loads(raw)
                     except Exception:
                         continue
+                    self.last_message_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                     if msg.get("type") == "pong":
                         continue
                     if msg.get("type") == "result":

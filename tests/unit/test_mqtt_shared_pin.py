@@ -1,5 +1,5 @@
 """The hub must ship the same MQTT protocol package it is tested with: the exact
-commit of a release tag (currently v1.1.0, the tag the vault pins). Commits, not
+commit of a release tag (currently v1.3.0, the tag the vault pins). Commits, not
 tags, because a tag can be moved (see test_supply_chain_pins)."""
 import re
 from pathlib import Path
@@ -17,5 +17,5 @@ def _pin(path):
 def test_should_pin_the_same_mqtt_shared_tag_for_tests_and_the_shipped_hub():
     shipped = _pin("central-core-hub/requirements.txt")
     tested = _pin("requirements.txt")
-    assert shipped == tested
+    assert shipped == tested == _pin("requirements-dev.txt")
     assert re.fullmatch(r"[0-9a-f]{40}", shipped), "pin the full commit of a release tag"
