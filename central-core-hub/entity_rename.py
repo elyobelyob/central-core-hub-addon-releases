@@ -20,7 +20,9 @@ class RenameError(Exception):
 
 
 def rename(listener, entity_id, name, allowed, timeout=15.0):
-    text = str(name or "").strip()
+    if not isinstance(name, str):
+        raise RenameError("bad_name")
+    text = name.strip()
     if not text or len(text) > NAME_MAX or _CONTROL.search(text):
         raise RenameError("bad_name")
     if not isinstance(entity_id, str) or not _ENTITY.fullmatch(entity_id):

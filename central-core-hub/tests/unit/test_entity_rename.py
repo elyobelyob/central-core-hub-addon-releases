@@ -72,8 +72,9 @@ def test_home_assistant_errors_map_to_reasons(reply, reason):
 class FakeClient:
     client_id = "demo-home-001"
 
-    def __init__(self, listener):
+    def __init__(self, listener, tracked=("binary_sensor.door_a",)):
         self._ha_ws_listener = listener
+        self._selected_sensors_set = set(tracked)
         self.published = []
 
     def build_ack_topic(self, action, command_id):
@@ -111,3 +112,44 @@ def test_handler_without_a_listener_fails_cleanly(monkeypatch):
     client = FakeClient(None)
     handlers._handle_entity_rename(client, _cmd())
     assert client.published[-1][1]["result"] == {"reason": "ha_unreachable"}
+
+
+def test_handler_refuses_an_untracked_sensor(monkeypatch):
+    monkeypatch.setattr(handlers, "_registry_allows", lambda: (lambda _e: True))
+    listener = FakeListener({"success": True, "result": {}})
+    client = FakeClient(listener, tracked=("binary_sensor.door_b",))
+    handlers._handle_entity_rename(client, _cmd())
+    last = client.published[-1][1]
+    assert last["status"] == "failed" and last["result"] == {"reason": "not_allowed"}
+    assert listener.sent == []
+
+
+def test_handler_refuses_everything_when_nothing_is_tracked(monkeypatch):
+    monkeypatch.setattr(handlers, "_registry_allows", lambda: (lambda _e: True))
+    listener = FakeListener({"success": True, "result": {}})
+    client = FakeClient(listener, tracked=())
+    handlers._handle_entity_rename(client, _cmd())
+    assert client.published[-1][1]["result"] == {"reason": "not_allowed"} and listener.sent == []
+
+
+def test_handler_logs_an_unexpected_error(monkeypatch):
+    monkeypatch.setattr(handlers, "_registry_allows", lambda: (lambda _e: True))
+    logged = []
+    monkeypatch.setattr(handlers, "_log", logged.append)
+
+    class Boom:
+        def request(self, payload, timeout=15.0):
+            raise RuntimeError("kaput")
+
+    client = FakeClient(Boom())
+    handlers._handle_entity_rename(client, _cmd())
+    assert client.published[-1][1]["result"] == {"reason": "failed"}
+    assert any("entity/rename" in m and "RuntimeError" in m for m in logged)
+
+
+@pytest.mark.parametrize("name", [123, ["a"], {"a": 1}, None])
+def test_non_string_names_are_refused(name):
+    listener = FakeListener({"success": True})
+    with pytest.raises(entity_rename.RenameError) as exc:
+        entity_rename.rename(listener, "binary_sensor.door_a", name, allow_all)
+    assert exc.value.reason == "bad_name" and listener.sent == []

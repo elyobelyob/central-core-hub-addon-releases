@@ -923,10 +923,18 @@ def _handle_entity_rename(client, payload_str):
     try:
         if listener is None:
             raise entity_rename.RenameError("ha_unreachable")
-        result = entity_rename.rename(listener, body.get("entity_id"), body.get("name"), _registry_allows())
+        # Only sensors this hub already tracks (its selected sensors) can be renamed.
+        tracked = getattr(client, "_selected_sensors_set", None) or set()
+        registry_ok = _registry_allows()
+
+        def allowed(entity_id):
+            return entity_id in tracked and registry_ok(entity_id)
+
+        result = entity_rename.rename(listener, body.get("entity_id"), body.get("name"), allowed)
         payload = {"status": "completed", "result": result, "timestamp": _utc_now_iso()}
     except entity_rename.RenameError as e:
         payload = {"status": "failed", "result": {"reason": e.reason}, "timestamp": _utc_now_iso()}
-    except Exception:
+    except Exception as e:
+        _log(f"entity/rename failed unexpectedly: {type(e).__name__}")
         payload = {"status": "failed", "result": {"reason": "failed"}, "timestamp": _utc_now_iso()}
     _send_ack(client, action, command_id, payload)
