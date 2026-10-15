@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.5.0] - 2026-10-15
+
+New: the vault can rename a sensor's friendly name in Home Assistant (a staff action). Names only,
+and only for sensors the hub already tracks; ids never change. No configuration changes are needed.
+
 ## [2.4.5] - 2026-10-13
 
 New: the vault can move this hub onto its own MQTT login. No configuration changes are needed, and nothing changes unless the vault sends the new commands. Needs central-core-mqtt-shared 1.5.2.

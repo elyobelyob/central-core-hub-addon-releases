@@ -8,7 +8,7 @@ Today the add-on defaults to `mqtt_tls: false` on port 1883. On that path the MQ
 telemetry and the vault's commands travel in clear text, and anyone who can reach the broker (or sit
 on the path) can read them or publish `hubs/<id>/v1/cmd/...` as the vault. The hub's own checks
 (retained, repeated, stale and oversized commands are refused; `registry/set` needs a token; the hub
-never writes state to Home Assistant) limit the damage but do not prove who sent a command.
+never writes sensor state to Home Assistant; the only change it can make there is a sensor's friendly name (`entity/rename`)) limit the damage but do not prove who sent a command.
 
 Two separate gaps:
 

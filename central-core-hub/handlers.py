@@ -627,6 +627,10 @@ def handle_message(
             _handle_inventory(client, payload_str)
             return
 
+        if topic == f"hubs/{client.client_id}/v1/cmd/entity/rename":
+            _handle_entity_rename(client, payload_str)
+            return
+
         expected_cmd_topic_v1 = f"hubs/{client.client_id}/v1/cmd/sensors/poll"
         if topic == expected_cmd_topic_v1:
             try:
@@ -898,3 +902,39 @@ def _handle_inventory(client, payload_str):
         client._publish(topic, json.dumps(payload), qos=1, persist=False)
     except Exception:
         pass
+
+
+def _handle_entity_rename(client, payload_str):
+    """cmd/entity/rename: rename one sensor in Home Assistant (friendly name only)."""
+    import entity_rename
+
+    try:
+        cmd = json.loads(payload_str) if payload_str and payload_str != "<binary>" else {}
+    except Exception:
+        cmd = {}
+    if not isinstance(cmd, dict):
+        cmd = {}
+    command_id = cmd.get("command_id")
+    action = "entity/rename"
+    _send_ack(client, action, command_id, {"status": "acknowledged", "timestamp": _utc_now_iso()})
+    raw_body = cmd.get("payload")
+    body = raw_body if isinstance(raw_body, dict) else {}
+    listener = getattr(client, "_ha_ws_listener", None)
+    try:
+        if listener is None:
+            raise entity_rename.RenameError("ha_unreachable")
+        # Only sensors this hub already tracks (its selected sensors) can be renamed.
+        tracked = getattr(client, "_selected_sensors_set", None) or set()
+        registry_ok = _registry_allows()
+
+        def allowed(entity_id):
+            return entity_id in tracked and registry_ok(entity_id)
+
+        result = entity_rename.rename(listener, body.get("entity_id"), body.get("name"), allowed)
+        payload = {"status": "completed", "result": result, "timestamp": _utc_now_iso()}
+    except entity_rename.RenameError as e:
+        payload = {"status": "failed", "result": {"reason": e.reason}, "timestamp": _utc_now_iso()}
+    except Exception as e:
+        _log(f"entity/rename failed unexpectedly: {type(e).__name__}")
+        payload = {"status": "failed", "result": {"reason": "failed"}, "timestamp": _utc_now_iso()}
+    _send_ack(client, action, command_id, payload)
