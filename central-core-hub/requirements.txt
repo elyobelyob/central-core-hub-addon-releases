@@ -1,7 +1,7 @@
 # Runtime dependencies of the add-on image. Exact versions, so every hub that
 # builds this release gets the same code; change them deliberately.
 paho-mqtt==2.1.0
-cryptography==50.0.1
+cryptography==50.0.2
 requests==2.34.2
 websocket-client==1.9.2
 PyYAML==6.0.3  # required by mqtt_client.py to parse SENSOR_REGISTRY.yaml
