@@ -1,6 +1,6 @@
 paho-mqtt==2.1.0
 requests==2.34.2
-pydantic==2.14.0
+pydantic==2.14.2
 cryptography==50.0.1
 pytest==9.1.1
 pytest-cov==7.1.0
