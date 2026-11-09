@@ -1,6 +1,6 @@
 # Runtime dependencies of the add-on image. Exact versions, so every hub that
 # builds this release gets the same code; change them deliberately.
-paho-mqtt==2.1.0
+paho-mqtt==2.2.0
 cryptography==50.0.1
 requests==2.34.2
 websocket-client==1.9.2

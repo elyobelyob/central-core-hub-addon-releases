@@ -5,5 +5,5 @@ pytest>=7.0.0
 pytest-cov>=4.0.0
 ruff>=0.17.0
 requests>=2.25.1
-paho-mqtt>=1.6.1
+paho-mqtt>=2.2.0
 PyYAML>=6.0
